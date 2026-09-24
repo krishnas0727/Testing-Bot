@@ -263,6 +263,14 @@ def set_active_chain(chain_id: int) -> Dict[str, Any]:
         SYMBOL = "WETH/USDC"
     else:
         SYMBOL = "WETH/USDT"
+    # Clear dex_engine pair address cache on chain switch (avoids stale cross-chain pair addresses)
+    try:
+        import dex_engine as _de
+        _de._pair_address_cache.clear()
+        _de._token_decimals_cache.clear()
+        _de.TOKEN_CACHE = dict(TOKEN_REGISTRY)
+    except Exception:
+        pass
     return _active_chain_info
 
 # Default trading pair
@@ -343,9 +351,9 @@ MAX_DAILY_LOSS_USDT = float(os.getenv("MAX_DAILY_LOSS_USDT", "10.00"))
 # ============================================================
 
 AUTO_TRADE_COOLDOWN = int(os.getenv("AUTO_TRADE_COOLDOWN", "10"))
-REFRESH_INTERVAL = int(os.getenv("REFRESH_INTERVAL", "2"))
-REQUEST_TIMEOUT_MS = int(os.getenv("REQUEST_TIMEOUT_MS", "15000"))
-MAX_QUOTE_AGE_MS = int(os.getenv("MAX_QUOTE_AGE_MS", "5000"))
+REFRESH_INTERVAL = int(os.getenv("REFRESH_INTERVAL", "1"))   # 1s — real-world bots scan every 0.5–1s
+REQUEST_TIMEOUT_MS = int(os.getenv("REQUEST_TIMEOUT_MS", "10000"))  # 10s timeout (was 15s)
+MAX_QUOTE_AGE_MS = int(os.getenv("MAX_QUOTE_AGE_MS", "3000"))        # Reject quotes older than 3s (was 5s)
 ON_CHAIN_STREAM_ENABLED = os.getenv("ON_CHAIN_STREAM_ENABLED", "true").lower() == "true"
 
 

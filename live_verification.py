@@ -100,13 +100,20 @@ def run_live_verification(
     buy_q = quotes[buy_dex]
     sell_q = quotes[sell_dex]
 
+    buy_spot = buy_q.get("spot_price", buy_q.get("buy_price", 1.0))
+    sell_spot = sell_q.get("spot_price", sell_q.get("sell_price", 1.0))
+
+    gross_return = amount * (sell_spot / buy_spot) if buy_spot > 0 else amount
+    estimated_gas = 0.005
+    net_profit = round(gross_return - amount - estimated_gas, 4)
+
     plan = {
         "buy_dex": buy_dex,
         "sell_dex": sell_dex,
         "amount_in": amount,
-        "gross_return_usdt": amount * (sell_q["sell_price"] / buy_q["buy_price"]) if buy_q["buy_price"] > 0 else amount,
-        "net_profit_usdt": 0.50,
-        "gas_cost_usdt": 0.10,
+        "gross_return_usdt": round(gross_return, 4),
+        "net_profit_usdt": net_profit,
+        "gas_cost_usdt": estimated_gas,
     }
 
     sim = simulate_atomic_arbitrage(plan)

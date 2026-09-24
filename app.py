@@ -23,6 +23,7 @@ from flask import Flask, jsonify, render_template, request
 import config
 from arbitrage import (
     analyze_market,
+    calculate_dynamic_trade_amount,
     daily_loss_limit_reached,
     emergency_stop_active,
     execute_real_trade,
@@ -1193,8 +1194,8 @@ def flashloan_calculate_api():
 
         buy_q = quotes[min_dex]
         sell_q = quotes[max_dex]
-        buy_impact = buy_q.get("price_impact_pct", 0.05)
-        sell_impact = sell_q.get("price_impact_pct", 0.05)
+        buy_impact = buy_q.get("buy_price_impact_pct", buy_q.get("price_impact_pct", 0.05))
+        sell_impact = sell_q.get("sell_price_impact_pct", sell_q.get("price_impact_pct", 0.05))
         total_impact_pct = buy_impact + sell_impact
 
         gross_profit_usd = amount * (spread_pct / 100.0)
