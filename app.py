@@ -965,7 +965,7 @@ def switch_chain_api():
     """Switch active blockchain network on-the-fly (e.g. Base L2, Arbitrum, Polygon, Ethereum)."""
     try:
         req_data = request.get_json(silent=True) or {}
-        chain_id = int(req_data.get("chain_id", 8453))
+        chain_id = int(req_data.get("chain_id", 11155111))
         if chain_id not in config.CHAIN_REGISTRY:
             return jsonify({
                 "success": False,
@@ -1092,10 +1092,10 @@ def all_pairs_api():
             except (ValueError, TypeError):
                 pass
 
-        active_chain_id = getattr(config, "CHAIN_ID", 8453)
+        active_chain_id = getattr(config, "CHAIN_ID", 11155111)
         chain_info = config.CHAIN_REGISTRY.get(active_chain_id, {})
         tokens = chain_info.get("tokens", {})
-        target_pairs = list(chain_info.get("pairs", ["WETH/USDC", "WETH/USDT"]))
+        target_pairs = list(chain_info.get("pairs", ["WETH/USDT", "WETH/USDC"]))
 
         results = []
         best_overall = None

@@ -34,7 +34,7 @@ def create_database():
         CREATE TABLE IF NOT EXISTS trades (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tx_hash TEXT NOT NULL,
-            chain_id INTEGER DEFAULT 1,
+            chain_id INTEGER DEFAULT 11155111,
             buy_dex TEXT NOT NULL,
             sell_dex TEXT NOT NULL,
             token_pair TEXT DEFAULT 'WETH/USDT',
@@ -58,7 +58,7 @@ def create_database():
         CREATE TABLE IF NOT EXISTS portfolio (
             id INTEGER PRIMARY KEY DEFAULT 1,
             wallet_address TEXT DEFAULT '',
-            chain_id INTEGER DEFAULT 1,
+            chain_id INTEGER DEFAULT 11155111,
             eth_balance REAL DEFAULT 0.0,
             weth_balance REAL DEFAULT 0.0,
             usdt_balance REAL DEFAULT 0.0,
@@ -73,7 +73,7 @@ def create_database():
     if cursor.fetchone()[0] == 0:
         cursor.execute("""
             INSERT INTO portfolio (id, wallet_address, chain_id, eth_balance, weth_balance, usdt_balance, usdc_balance, total_equity_usdt)
-            VALUES (1, '', 1, 0.0, 0.0, 0.0, 0.0, 0.0)
+            VALUES (1, '', 11155111, 0.0, 0.0, 0.0, 0.0, 0.0)
         """)
 
     # DEX Settings Table

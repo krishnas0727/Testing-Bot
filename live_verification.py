@@ -105,8 +105,8 @@ def run_live_verification(
         "sell_dex": sell_dex,
         "amount_in": amount,
         "gross_return_usdt": amount * (sell_q["sell_price"] / buy_q["buy_price"]) if buy_q["buy_price"] > 0 else amount,
-        "net_profit_usdt": 0.50,
-        "gas_cost_usdt": 0.10,
+        "net_profit_usdt": amount * (sell_q["sell_price"] / buy_q["buy_price"]) - amount - 0.10 if buy_q["buy_price"] > 0 else 0.0,
+        "gas_cost_usdt": 0.0,
     }
 
     sim = simulate_atomic_arbitrage(plan)

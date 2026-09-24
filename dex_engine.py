@@ -270,11 +270,7 @@ def get_dex_reserves(dex_name: str, base_sym: str = "WETH", quote_sym: str = "US
     quote_info = config.TOKEN_REGISTRY.get(quote_sym, {"decimals": 6, "address": ""})
 
     mode = getattr(config, "TRADING_MODE", "LIVE")
-    # In MOCK mode, use simulated pool state for safe demonstration
-    if mode == "MOCK":
-        onchain_reserves = None
-    else:
-        onchain_reserves = fetch_pair_reserves(pair_addr) if pair_addr else None
+    onchain_reserves = fetch_pair_reserves(pair_addr) if pair_addr else None
 
     onchain_success = False
     if onchain_reserves:
@@ -567,35 +563,7 @@ def execute_atomic_trade(plan: Dict[str, Any], is_manual: bool = False) -> Dict[
 
     # Guard 2: Mode validation
     if mode == "MOCK":
-        sim = simulate_atomic_arbitrage(plan)
-        if not sim.get("success"):
-            return sim
-
-        mock_hash = "0x" + hashlib.sha256(f"mock-{time.time()}-{plan.get('amount_in')}".encode()).hexdigest()
-        trade_record = {
-            "tx_hash": mock_hash,
-            "chain_id": config.CHAIN_ID,
-            "buy_dex": plan["buy_dex"],
-            "sell_dex": plan["sell_dex"],
-            "token_pair": config.SYMBOL,
-            "amount_in": plan["amount_in"],
-            "amount_out": plan.get("gross_return_usdt", plan["amount_in"] + plan["net_profit_usdt"]),
-            "gross_profit": plan.get("gross_profit_usdt", 0.0),
-            "gas_cost_usdt": plan.get("gas_cost_usdt", 0.0),
-            "net_profit": plan.get("net_profit_usdt", 0.0),
-            "gas_used": getattr(config, "ESTIMATED_GAS_UNITS", 250000),
-            "gas_price_gwei": plan.get("gas_price_gwei", get_gas_price()[1]),
-            "mode": "MOCK",
-            "status": "SIMULATED_SUCCESS",
-            "created_at": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
-        }
-        return {
-            "success": True,
-            "status": "MOCK_TRADE_EXECUTED",
-            "message": f"Simulated atomic arbitrage executed successfully (+${plan.get('net_profit_usdt', 0):.2f} USDT).",
-            "trade": trade_record,
-            "tx_hash": mock_hash,
-        }
+        return {"success": False, "status": "MOCK_DISABLED", "message": "Mock trades are disabled."}
 
     # Guard 3: Live / Testnet execution requires armed state
     if not getattr(config, "LIVE_TRADING_ARMED", False):
@@ -604,56 +572,6 @@ def execute_atomic_trade(plan: Dict[str, Any], is_manual: bool = False) -> Dict[
             "status": "NOT_ARMED",
             "message": f"{mode} trading is not armed. Enable LIVE_TRADING_ARMED to submit transactions."
         }
-
-    # If private key and arbitrage contract address are configured, broadcast to RPC
-    if config.PRIVATE_KEY and config.ARBITRAGE_CONTRACT_ADDRESS:
-        try:
-            from eth_account import Account
-            acct = Account.from_key(config.PRIVATE_KEY)
-            nonce = rpc_call("eth_getTransactionCount", [acct.address, "pending"])
-            gas_price, _ = get_gas_price()
-
-            raw_tx = {
-                "to": config.ARBITRAGE_CONTRACT_ADDRESS,
-                "value": 0,
-                "gas": getattr(config, "ESTIMATED_GAS_UNITS", 250000),
-                "gasPrice": gas_price,
-                "nonce": int(nonce, 16) if isinstance(nonce, str) else nonce,
-                "chainId": config.CHAIN_ID,
-                "data": "0x",
-            }
-            signed = acct.sign_transaction(raw_tx)
-            tx_hash = rpc_call("eth_sendRawTransaction", [signed.raw_transaction.hex()])
-
-            return {
-                "success": True,
-                "status": "ON_CHAIN_SUBMITTED",
-                "message": f"Atomic transaction submitted to {config.DEFAULT_CHAIN}: {tx_hash}",
-                "tx_hash": tx_hash,
-                "trade": {
-                    "tx_hash": tx_hash,
-                    "chain_id": config.CHAIN_ID,
-                    "buy_dex": plan["buy_dex"],
-                    "sell_dex": plan["sell_dex"],
-                    "token_pair": config.SYMBOL,
-                    "amount_in": plan["amount_in"],
-                    "amount_out": plan.get("gross_return_usdt", plan["amount_in"] + plan["net_profit_usdt"]),
-                    "gross_profit": plan.get("gross_profit_usdt", 0.0),
-                    "gas_cost_usdt": plan.get("gas_cost_usdt", 0.0),
-                    "net_profit": plan.get("net_profit_usdt", 0.0),
-                    "gas_used": getattr(config, "ESTIMATED_GAS_UNITS", 250000),
-                    "gas_price_gwei": plan.get("gas_price_gwei", get_gas_price()[1]),
-                    "mode": mode,
-                    "status": "CONFIRMED",
-                    "created_at": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
-                }
-            }
-        except Exception as exc:
-            return {
-                "success": False,
-                "status": "EXECUTION_ERROR",
-                "message": f"Blockchain transaction error: {str(exc)}"
-            }
 
     # In LIVE / TESTNET mode, real on-chain execution requires a configured signer.
     # We strictly NEVER generate fake live transaction hashes or pretend real trades executed without money.

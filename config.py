@@ -50,14 +50,14 @@ SUPPORTED_DEXES = [
 # ============================================================
 
 DEFAULT_CHAIN = os.getenv("DEFAULT_CHAIN", "base")
-CHAIN_ID = int(os.getenv("CHAIN_ID", "8453"))
+CHAIN_ID = int(os.getenv("CHAIN_ID", "11155111"))
 
 # Primary and fallback public JSON-RPC endpoints
-RPC_URL = os.getenv("RPC_URL", "https://mainnet.base.org")
+RPC_URL = os.getenv("RPC_URL", "https://ethereum-sepolia-rpc.publicnode.com")
 
 PUBLIC_RPC_FALLBACKS = {
     8453: [
-        "https://mainnet.base.org",
+        "https://ethereum-sepolia-rpc.publicnode.com",
         "https://base.llamarpc.com",
         "https://1rpc.io/base",
         "https://base-rpc.publicnode.com",
@@ -103,9 +103,9 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
         "chain_id": 8453,
         "currency": "ETH",
         "explorer": "https://basescan.org",
-        "rpc_url": "https://mainnet.base.org",
+        "rpc_url": "https://ethereum-sepolia-rpc.publicnode.com",
         "fallbacks": [
-            "https://mainnet.base.org",
+            "https://ethereum-sepolia-rpc.publicnode.com",
             "https://base.llamarpc.com",
             "https://1rpc.io/base",
             "https://base-rpc.publicnode.com",
@@ -292,7 +292,7 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
 # PROTOCOL SMART CONTRACT ADDRESSES (ACTIVE CHAIN)
 # ============================================================
 
-_active_chain_info = CHAIN_REGISTRY.get(CHAIN_ID, CHAIN_REGISTRY[8453])
+_active_chain_info = CHAIN_REGISTRY.get(CHAIN_ID, CHAIN_REGISTRY[11155111])
 
 DEX_ROUTERS: Dict[str, str] = _active_chain_info["routers"]
 DEX_FACTORIES: Dict[str, str] = _active_chain_info["factories"]

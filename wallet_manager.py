@@ -123,8 +123,8 @@ def get_wallet_balances(eth_price_usdt: float = 3000.0, wallet_address: Optional
 
     weth_bal = fetch_token_balance_onchain(user_addr, weth_info["address"], weth_info["decimals"]) if weth_info and weth_info.get("address") else 0.0
     usdt_bal = fetch_token_balance_onchain(user_addr, usdt_info["address"], usdt_info["decimals"]) if usdt_info and usdt_info.get("address") else 0.0
-    usdc_bal = fetch_token_balance_onchain(user_addr, usdc_info["address"], usdc_info["decimals"]) if usdc_info and usdc_info.get("address") else 0.0
-    usdbc_bal = fetch_token_balance_onchain(user_addr, usdbc_info["address"], usdbc_info["decimals"]) if usdbc_info and usdbc_info.get("address") else 0.0
+    usdc_bal = 0.0
+    usdbc_bal = 0.0
 
     effective_usdc = usdc_bal if usdc_bal > 0 else usdbc_bal
     stable_equity = usdt_bal + usdc_bal + usdbc_bal
