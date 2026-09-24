@@ -50,8 +50,11 @@
 ===================================================== -->
 <aside class="sidebar">
     <div class="logo">
-        <div class="logo-icon">DEX</div>
-        <span>DEX Arbitrage Pro</span>
+        <div class="logo-icon">⚡</div>
+        <div style="display:flex; flex-direction:column; gap:2px;">
+            <span style="font-size:13px; font-weight:800; letter-spacing:0.8px; color:#ffffff;">NEXUS ARB</span>
+            <span style="font-size:9px; font-weight:800; color:#00f2fe; letter-spacing:0.6px; text-transform:uppercase;">PRO L2 ATOMIC</span>
+        </div>
     </div>
 
     <nav>
@@ -286,22 +289,34 @@
         <!-- KPI SUMMARY STAT CARDS -->
         <div class="kpi-grid">
             <div class="stat-card">
-                <span class="label">Total Wallet Equity</span>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <span class="label">Total Wallet Equity</span>
+                    <span style="font-size:14px; opacity:0.8;">💼</span>
+                </div>
                 <span class="value" id="kpiBalance">$0.00</span>
                 <span class="sub" id="kpiBalanceSub">Non-Custodial Web3 Wallet</span>
             </div>
             <div class="stat-card">
-                <span class="label">Total Net Profit</span>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <span class="label">Total Net Profit</span>
+                    <span style="font-size:14px; opacity:0.8;">📈</span>
+                </div>
                 <span class="value text-profit" id="kpiProfit">+$0.00</span>
                 <span class="sub" id="kpiProfitSub">After Gas & Protocol Fees</span>
             </div>
             <div class="stat-card">
-                <span class="label">Atomic Trades</span>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <span class="label">Atomic Trades</span>
+                    <span style="font-size:14px; opacity:0.8;">⚡</span>
+                </div>
                 <span class="value" id="kpiTrades">0</span>
                 <span class="sub" id="kpiTradesSub">100% On-Chain Atomic Revert</span>
             </div>
             <div class="stat-card">
-                <span class="label">Engine State</span>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <span class="label">Engine State</span>
+                    <span style="font-size:14px; opacity:0.8;">🛡️</span>
+                </div>
                 <span class="value text-blue" id="kpiStatus" style="font-size:16px;">STANDBY</span>
                 <span class="sub" id="kpiStatusSub" style="white-space:normal; line-height:1.3; font-size:11px;" title="Scanning Liquidity Pools">Scanning Liquidity Pools</span>
             </div>
@@ -440,25 +455,37 @@
                 </div>
             </div>
             <div class="dex-wallet-grid">
-                <div class="dex-wallet-item">
-                    <span class="token-name">USD Coin (USDC)</span>
+                <div class="dex-wallet-item" style="border-left:3px solid #2775ca;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span class="token-name">USD Coin</span>
+                        <span style="font-size:10px; font-weight:800; color:#38bdf8; background:rgba(39,117,202,0.2); padding:2px 6px; border-radius:4px; font-family:var(--font-mono);">USDC</span>
+                    </div>
                     <h3 id="balUSDC">$0.00 USDC</h3>
-                    <small>Base L2 Primary Liquidity</small>
+                    <small style="color:var(--text-muted);">Base L2 Primary Liquidity</small>
                 </div>
-                <div class="dex-wallet-item">
-                    <span class="token-name">Tether (USDT)</span>
+                <div class="dex-wallet-item" style="border-left:3px solid #26a17b;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span class="token-name">Tether USD</span>
+                        <span style="font-size:10px; font-weight:800; color:#00f59b; background:rgba(38,161,123,0.2); padding:2px 6px; border-radius:4px; font-family:var(--font-mono);">USDT</span>
+                    </div>
                     <h3 id="balUSDT">$0.00 USDT</h3>
-                    <small>Active DEX Trading Capital</small>
+                    <small style="color:var(--text-muted);">Active Arbitrage Inventory</small>
                 </div>
-                <div class="dex-wallet-item">
-                    <span class="token-name">Wrapped ETH (WETH)</span>
+                <div class="dex-wallet-item" style="border-left:3px solid #00f2fe;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span class="token-name">Wrapped Ether</span>
+                        <span style="font-size:10px; font-weight:800; color:#00f2fe; background:rgba(0,242,254,0.2); padding:2px 6px; border-radius:4px; font-family:var(--font-mono);">WETH</span>
+                    </div>
                     <h3 id="balWETH">0.0000 WETH</h3>
-                    <small id="balWETHusd">≈ $0.00 USDT</small>
+                    <small id="balWETHusd" style="color:var(--text-muted);">≈ $0.00 USDT</small>
                 </div>
-                <div class="dex-wallet-item">
-                    <span class="token-name">Native ETH (Gas)</span>
+                <div class="dex-wallet-item" style="border-left:3px solid #a855f7;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span class="token-name">Native Gas</span>
+                        <span style="font-size:10px; font-weight:800; color:#c084fc; background:rgba(168,85,247,0.2); padding:2px 6px; border-radius:4px; font-family:var(--font-mono);">ETH</span>
+                    </div>
                     <h3 id="balETH">0.0000 ETH</h3>
-                    <small id="balETHusd">≈ $0.00 USDT</small>
+                    <small id="balETHusd" style="color:var(--text-muted);">≈ $0.00 USDT</small>
                 </div>
             </div>
         </div>

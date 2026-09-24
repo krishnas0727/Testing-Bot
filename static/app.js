@@ -244,21 +244,27 @@ function initChart() {
             labels: [],
             datasets: [
                 {
-                    label: "Uniswap V2 WETH/USDT",
-                    borderColor: "#3b82f6",
-                    backgroundColor: "rgba(59, 130, 246, 0.1)",
-                    borderWidth: 2,
-                    pointRadius: 0,
-                    tension: 0.2,
+                    label: "Uniswap V2 (Base L2)",
+                    borderColor: "#00f2fe",
+                    backgroundColor: "rgba(0, 242, 254, 0.08)",
+                    borderWidth: 2.5,
+                    pointRadius: 1,
+                    pointHoverRadius: 5,
+                    pointHoverBackgroundColor: "#00f2fe",
+                    fill: true,
+                    tension: 0.3,
                     data: [],
                 },
                 {
-                    label: "SushiSwap V2 WETH/USDT",
-                    borderColor: "#06b6d4",
-                    backgroundColor: "rgba(6, 182, 212, 0.1)",
-                    borderWidth: 2,
-                    pointRadius: 0,
-                    tension: 0.2,
+                    label: "SushiSwap V2 (Base L2)",
+                    borderColor: "#00f59b",
+                    backgroundColor: "rgba(0, 245, 155, 0.08)",
+                    borderWidth: 2.5,
+                    pointRadius: 1,
+                    pointHoverRadius: 5,
+                    pointHoverBackgroundColor: "#00f59b",
+                    fill: true,
+                    tension: 0.3,
                     data: [],
                 }
             ]
@@ -267,22 +273,45 @@ function initChart() {
             responsive: true,
             maintainAspectRatio: false,
             animation: false,
+            interaction: {
+                mode: "index",
+                intersect: false,
+            },
             plugins: {
                 legend: {
                     display: true,
-                    labels: { color: "#94a3b8", font: { size: 11 } }
+                    position: "top",
+                    labels: {
+                        color: "#cbd5e1",
+                        font: { family: "'Inter', sans-serif", size: 11, weight: "600" },
+                        boxWidth: 12,
+                        boxHeight: 12,
+                        usePointStyle: true,
+                        pointStyle: "circle"
+                    }
+                },
+                tooltip: {
+                    backgroundColor: "rgba(8, 15, 28, 0.95)",
+                    borderColor: "rgba(56, 189, 248, 0.3)",
+                    borderWidth: 1,
+                    titleColor: "#ffffff",
+                    bodyColor: "#cbd5e1",
+                    bodyFont: { family: "'JetBrains Mono', monospace" },
+                    padding: 10,
+                    displayColors: true,
+                    cornerRadius: 8
                 }
             },
             scales: {
                 x: {
-                    grid: { color: "#1e293b" },
-                    ticks: { color: "#64748b", font: { size: 10 } }
+                    grid: { color: "rgba(56, 189, 248, 0.06)", borderColor: "rgba(56, 189, 248, 0.15)" },
+                    ticks: { color: "#64748b", font: { family: "'JetBrains Mono', monospace", size: 10 } }
                 },
                 y: {
-                    grid: { color: "#1e293b" },
+                    grid: { color: "rgba(56, 189, 248, 0.06)", borderColor: "rgba(56, 189, 248, 0.15)" },
                     ticks: {
-                        color: "#64748b",
-                        font: { size: 10 },
+                        color: "#94a3b8",
+                        font: { family: "'JetBrains Mono', monospace", size: 10 },
                         callback: (v) => "$" + Number(v).toFixed(2)
                     }
                 }
