@@ -4,7 +4,7 @@
 # ============================================================
 
 import os
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 # ============================================================
 # BASE & DATA DIRECTORIES
@@ -101,6 +101,7 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
         "name": "base",
         "label": "Base L2 Mainnet",
         "chain_id": 8453,
+        "is_testnet": False,
         "currency": "ETH",
         "explorer": "https://basescan.org",
         "rpc_url": "https://ethereum-sepolia-rpc.publicnode.com",
@@ -136,6 +137,7 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
         "name": "ethereum",
         "label": "Ethereum Mainnet",
         "chain_id": 1,
+        "is_testnet": False,
         "currency": "ETH",
         "explorer": "https://etherscan.io",
         "rpc_url": "https://ethereum-rpc.publicnode.com",
@@ -170,6 +172,7 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
         "name": "arbitrum",
         "label": "Arbitrum One",
         "chain_id": 42161,
+        "is_testnet": False,
         "currency": "ETH",
         "explorer": "https://arbiscan.io",
         "rpc_url": "https://arbitrum-one-rpc.publicnode.com",
@@ -199,6 +202,7 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
         "name": "polygon",
         "label": "Polygon (PoS)",
         "chain_id": 137,
+        "is_testnet": False,
         "currency": "POL",
         "explorer": "https://polygonscan.com",
         "rpc_url": "https://polygon-bor-rpc.publicnode.com",
@@ -228,6 +232,7 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
         "name": "sepolia",
         "label": "Sepolia Testnet (SepoliaETH)",
         "chain_id": 11155111,
+        "is_testnet": True,
         "currency": "SepoliaETH",
         "explorer": "https://sepolia.etherscan.io",
         "rpc_url": "https://ethereum-sepolia-rpc.publicnode.com",
@@ -258,6 +263,7 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
         "name": "base_sepolia",
         "label": "Base Sepolia Testnet (ETH)",
         "chain_id": 84532,
+        "is_testnet": True,
         "currency": "ETH",
         "explorer": "https://sepolia.basescan.org",
         "rpc_url": "https://sepolia.base.org",
@@ -330,6 +336,13 @@ def set_active_chain(chain_id: int) -> Dict[str, Any]:
         pass
 
     return _active_chain_info
+
+
+def is_chain_testnet(chain_id: Optional[int] = None) -> bool:
+    """Return True if the chain (passed or active) is a testnet."""
+    cid = chain_id if chain_id is not None else CHAIN_ID
+    return bool(CHAIN_REGISTRY.get(cid, {}).get("is_testnet", False))
+
 
 # Default trading pair
 SYMBOL = os.getenv("TRADING_SYMBOL", "WETH/USDC" if CHAIN_ID == 8453 else "WETH/USDT")

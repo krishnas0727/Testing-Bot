@@ -162,18 +162,41 @@ def record_execution_event(
         execution_audit_logs = execution_audit_logs[:MAX_AUDIT_LOGS]
 
 
-def get_engine_status() -> str:
-    """Return truthful engine state for dashboard and API."""
+def get_engine_status(chain_id: Optional[int] = None) -> str:
+    """Return truthful engine state reflecting current environment, mode, and selected chain."""
     if emergency_stop_active():
         return "BLOCKED - EMERGENCY STOP ACTIVE"
     if not getattr(config, "AUTO_TRADE_ENABLED", False):
         return "STANDBY - AUTO TRADE DISABLED"
-    mode = getattr(config, "TRADING_MODE", "MOCK")
-    if mode == "MOCK":
-        return "ACTIVE - SCANNING LIQUIDITY POOLS"
-    if not getattr(config, "LIVE_TRADING_ARMED", False):
-        return f"STANDBY - {mode} TRADING NOT ARMED"
-    return "READY - SCANNING DEX LIQUIDITY POOLS"
+
+    mode = getattr(config, "TRADING_MODE", "MOCK").upper()
+    cid = chain_id if chain_id is not None else getattr(config, "CHAIN_ID", 8453)
+    chain_info = config.CHAIN_REGISTRY.get(cid, {})
+    is_testnet = bool(chain_info.get("is_testnet", False))
+    chain_label = chain_info.get("label", f"Chain {cid}")
+
+    if mode == "TESTNET":
+        if not is_testnet:
+            return f"STANDBY - CHAIN MISMATCH: Testnet mode active but {chain_label} is Mainnet (Switch to Sepolia)"
+        if not getattr(config, "LIVE_TRADING_ARMED", False):
+            return "STANDBY - TESTNET TRADING NOT ARMED"
+        has_signer = bool(getattr(config, "PRIVATE_KEY", "").strip()) or bool(getattr(config, "WALLET_ADDRESS", "").strip())
+        if not has_signer:
+            return "STANDBY - CONNECT WALLET FOR TESTNET EXECUTION"
+        return f"ACTIVE - SCANNING {chain_label.upper()} POOLS"
+
+    if mode == "LIVE":
+        if is_testnet:
+            return f"STANDBY - CHAIN MISMATCH: Live mode active but {chain_label} is Testnet (Switch to Mainnet)"
+        if not getattr(config, "LIVE_TRADING_ARMED", False):
+            return "STANDBY - LIVE TRADING NOT ARMED"
+        has_signer = bool(getattr(config, "PRIVATE_KEY", "").strip()) or bool(getattr(config, "WALLET_ADDRESS", "").strip())
+        if not has_signer:
+            return "STANDBY - CONNECT WALLET FOR LIVE EXECUTION"
+        return f"ACTIVE - SCANNING {chain_label.upper()} POOLS"
+
+    # MOCK mode
+    return f"ACTIVE - SCANNING {chain_label.upper()} POOLS (SIMULATION)"
 
 
 def _acquire_auto_trader_lock() -> bool:
@@ -202,11 +225,16 @@ def start_background_auto_trader():
         while True:
             try:
                 auto_enabled = getattr(config, "AUTO_TRADE_ENABLED", False)
-                mode = getattr(config, "TRADING_MODE", "MOCK")
+                mode = getattr(config, "TRADING_MODE", "MOCK").upper()
                 live_armed = getattr(config, "LIVE_TRADING_ARMED", False)
                 is_armed = (mode == "MOCK") or (mode in ("TESTNET", "LIVE") and live_armed)
 
-                if auto_enabled and is_armed and not emergency_stop_active():
+                active_cid = getattr(config, "CHAIN_ID", 8453)
+                chain_info = config.CHAIN_REGISTRY.get(active_cid, {})
+                is_chain_testnet = bool(chain_info.get("is_testnet", False))
+                chain_compatible = (mode == "MOCK") or (mode == "TESTNET" and is_chain_testnet) or (mode == "LIVE" and not is_chain_testnet)
+
+                if auto_enabled and is_armed and chain_compatible and not emergency_stop_active():
                     market = analyze_market()
 
                     if market and market.get("is_profitable"):
@@ -280,11 +308,11 @@ def start_background_auto_trader():
                             elif best.get("max_price_impact_pct", 0) > config.MAX_PRICE_IMPACT_PCT:
                                 last_execution_status = f"STANDBY: Price impact ({best.get('max_price_impact_pct'):.2f}%) exceeds safety limit"
                             else:
-                                last_execution_status = "ACTIVE - SCANNING LIQUIDITY POOLS"
+                                last_execution_status = f"ACTIVE - SCANNING {chain_info.get('label', 'LIQUIDITY').upper()} POOLS"
                         else:
-                            last_execution_status = "ACTIVE - SCANNING LIQUIDITY POOLS"
+                            last_execution_status = f"ACTIVE - SCANNING {chain_info.get('label', 'LIQUIDITY').upper()} POOLS"
                 else:
-                    last_execution_status = get_engine_status()
+                    last_execution_status = get_engine_status(active_cid)
             except Exception as err:
                 print(f"[DEX Auto-Trader Error]: {err}", flush=True)
                 last_execution_status = "ERROR - CHECK ENGINE LOGS"
@@ -373,6 +401,34 @@ def market_api():
 
         latest_trade = get_latest_trade(mode=mode if mode == "LIVE" else None)
 
+        # Truthfully evaluate engine status for selected chain & live market conditions
+        active_cid = getattr(config, "CHAIN_ID", 8453)
+        base_engine_status = get_engine_status(active_cid)
+
+        if (
+            getattr(config, "AUTO_TRADE_ENABLED", False)
+            and not is_emergency
+            and not base_engine_status.startswith("STANDBY -")
+            and not base_engine_status.startswith("BLOCKED")
+        ):
+            best = market.get("best_route") if market else None
+            if best:
+                net_p = float(best.get("net_profit_usdt", 0.0))
+                if net_p <= 0:
+                    current_exec_status = f"STANDBY: Unprofitable spread (Net: -${abs(net_p):.4f} USDT)"
+                elif not best.get("is_gas_acceptable", True):
+                    current_exec_status = "STANDBY: Gas price exceeds ceiling"
+                elif best.get("max_price_impact_pct", 0) > config.MAX_PRICE_IMPACT_PCT:
+                    current_exec_status = f"STANDBY: Price impact ({best.get('max_price_impact_pct'):.2f}%) exceeds safety limit"
+                else:
+                    current_exec_status = base_engine_status
+            else:
+                current_exec_status = base_engine_status
+        else:
+            current_exec_status = base_engine_status
+
+        last_execution_status = current_exec_status
+
         return jsonify({
             "success": True,
             "data": market,
@@ -392,7 +448,7 @@ def market_api():
             },
             "settings": current_settings(),
             "latest_trade": latest_trade,
-            "execution_status": globals().get("last_execution_status", get_engine_status()),
+            "execution_status": current_exec_status,
             "last_execution_result": globals().get("last_background_trade_result"),
             "last_skip_reason": (
                 globals().get("last_background_trade_result", {}).get("skip_reason", "")
@@ -407,11 +463,19 @@ def market_api():
 @app.route("/api/execution-logs", methods=["GET"])
 def execution_logs_api():
     """Return rolling execution diagnostics and skip events for real-time debugging."""
+    cid_param = request.args.get("chain_id")
+    target_cid = None
+    if cid_param:
+        try:
+            target_cid = int(cid_param)
+        except (ValueError, TypeError):
+            pass
+    active_cid = target_cid or getattr(config, "CHAIN_ID", 8453)
     return jsonify({
         "success": True,
         "logs": execution_audit_logs,
         "total": len(execution_audit_logs),
-        "execution_status": globals().get("last_execution_status", get_engine_status()),
+        "execution_status": globals().get("last_execution_status", get_engine_status(active_cid)),
     })
 
 
@@ -857,6 +921,10 @@ def settings_api():
             val = str(data["trading_mode"]).upper()
             config.TRADING_MODE = val
             save_bot_setting("trading_mode", val)
+            if "live_trading_armed" not in data:
+                armed_val = (val in ("TESTNET", "LIVE"))
+                config.LIVE_TRADING_ARMED = armed_val
+                save_bot_setting("live_trading_armed", armed_val)
 
         if "live_trading_armed" in data:
             val = bool(data["live_trading_armed"])
@@ -951,6 +1019,8 @@ def settings_api():
         if "symbol" in data and data["symbol"]:
             config.SYMBOL = str(data["symbol"]).strip()
 
+        last_execution_status = get_engine_status(config.CHAIN_ID)
+
         return jsonify({
             "success": True,
             "message": "DEX settings updated successfully.",
@@ -975,6 +1045,7 @@ def switch_chain_api():
         chain_info = config.set_active_chain(chain_id)
         save_bot_setting("chain_id", chain_id)
         save_bot_setting("rpc_url", chain_info["rpc_url"])
+        last_execution_status = get_engine_status(chain_id)
 
         return jsonify({
             "success": True,

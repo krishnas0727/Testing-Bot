@@ -81,6 +81,7 @@ const SUPPORTED_CHAINS = {
         name: "Base L2 Mainnet",
         short: "Base L2",
         currency: "ETH",
+        isTestnet: false,
         decimals: 18,
         explorer: "https://basescan.org",
         hex: "0x2105",
@@ -94,6 +95,7 @@ const SUPPORTED_CHAINS = {
         name: "Base Sepolia Testnet",
         short: "Base Sepolia",
         currency: "ETH",
+        isTestnet: true,
         decimals: 18,
         explorer: "https://sepolia.basescan.org",
         hex: "0x14a34",
@@ -107,6 +109,7 @@ const SUPPORTED_CHAINS = {
         name: "Polygon PoS",
         short: "Polygon",
         currency: "POL",
+        isTestnet: false,
         decimals: 18,
         explorer: "https://polygonscan.com",
         hex: "0x89",
@@ -120,6 +123,7 @@ const SUPPORTED_CHAINS = {
         name: "Arbitrum One",
         short: "Arbitrum",
         currency: "ETH",
+        isTestnet: false,
         decimals: 18,
         explorer: "https://arbiscan.io",
         hex: "0xa4b1",
@@ -133,6 +137,7 @@ const SUPPORTED_CHAINS = {
         name: "Ethereum Mainnet",
         short: "Ethereum",
         currency: "ETH",
+        isTestnet: false,
         decimals: 18,
         explorer: "https://etherscan.io",
         hex: "0x1",
@@ -146,6 +151,7 @@ const SUPPORTED_CHAINS = {
         name: "Sepolia Testnet",
         short: "SepoliaETH",
         currency: "SepoliaETH",
+        isTestnet: true,
         decimals: 18,
         explorer: "https://sepolia.etherscan.io",
         hex: "0xaa36a7",
@@ -324,6 +330,12 @@ function invalidateAndResetChainUI(newChainId) {
     setText("balWETHusd", "--");
     setText("balUSDT", "--");
     setText("balUSDC", "--");
+
+    // Invalidate KPI Engine Status immediately
+    setText("kpiStatus", "SWITCHING");
+    setText("kpiStatusSub", `Switching to ${chainInfo.name}...`);
+    const kpiStatusResetEl = document.getElementById("kpiStatus");
+    if (kpiStatusResetEl) kpiStatusResetEl.className = "value text-blue";
 
     // 7. Update all prominent visual badges, labels, and modal pipeline steps
     setText("globalNetworkText", `NETWORK: ${shortUpper}`);
@@ -840,12 +852,6 @@ function updateDashboardUI(payload) {
     const autoToggle = document.getElementById("headerAutoTradeToggle");
     if (autoToggle) autoToggle.checked = Boolean(settings.auto_trade);
 
-    const autoBadge = document.getElementById("headerAutoTradeBadge");
-    if (autoBadge) {
-        autoBadge.innerText = settings.auto_trade ? "ACTIVE" : "STANDBY";
-        autoBadge.className = "badge " + (settings.auto_trade ? "badge-green" : "badge-red");
-    }
-
     if (settings.emergency_stop !== undefined) {
         updateEmergencyStopUI(Boolean(settings.emergency_stop));
     }
@@ -885,25 +891,52 @@ function updateDashboardUI(payload) {
         statusSubtitle = "Connect Web3 wallet for LIVE execution.";
     } else if (engineStatusText.includes("INSUFFICIENT BALANCE")) {
         statusTitle = "INSUFFICIENT BALANCE";
-        statusSubtitle = engineStatusText.replace("INSUFFICIENT BALANCE:", "").trim() || "Wallet funds insufficient for trade notional or gas.";
-    } else if (engineStatusText.startsWith("TRADE SKIPPED:")) {
+        statusSubtitle = engineStatusText.replace(/INSUFFICIENT BALANCE(\s*[-:]\s*|\s*)/i, "").trim() || "Wallet funds insufficient for trade notional or gas.";
+    } else if (/^TRADE SKIPPED/i.test(engineStatusText)) {
         statusTitle = "TRADE SKIPPED";
-        statusSubtitle = engineStatusText.replace("TRADE SKIPPED:", "").trim();
-    } else if (engineStatusText.startsWith("STANDBY:")) {
-        statusTitle = "STANDBY";
-        statusSubtitle = engineStatusText.replace("STANDBY:", "").trim();
-    } else if (engineStatusText.startsWith("TRADE FAILED:")) {
+        statusSubtitle = engineStatusText.replace(/^TRADE SKIPPED(\s*[-:]\s*|\s*)/i, "").trim();
+    } else if (/^TRADE FAILED/i.test(engineStatusText)) {
         statusTitle = "TRADE FAILED";
-        statusSubtitle = engineStatusText.replace("TRADE FAILED:", "").trim();
+        statusSubtitle = engineStatusText.replace(/^TRADE FAILED(\s*[-:]\s*|\s*)/i, "").trim();
+    } else if (/^STANDBY/i.test(engineStatusText)) {
+        statusTitle = "STANDBY";
+        statusSubtitle = engineStatusText.replace(/^STANDBY(\s*[-:]\s*|\s*)/i, "").trim() || "Engine in standby mode";
+    } else if (/^BLOCKED/i.test(engineStatusText)) {
+        statusTitle = "BLOCKED";
+        statusSubtitle = engineStatusText.replace(/^BLOCKED(\s*[-:]\s*|\s*)/i, "").trim() || "Execution blocked";
+    } else if (/^READY/i.test(engineStatusText)) {
+        statusTitle = "READY";
+        statusSubtitle = engineStatusText.replace(/^READY(\s*[-:]\s*|\s*)/i, "").trim() || "Ready for execution";
+    } else if (/^ACTIVE/i.test(engineStatusText)) {
+        statusTitle = "ACTIVE";
+        statusSubtitle = engineStatusText.replace(/^ACTIVE(\s*[-:]\s*|\s*)/i, "").trim() || "Scanning Liquidity Pools";
     } else if (engineStatusText.startsWith("ATOMIC TRADE FILLED")) {
         statusTitle = "ATOMIC TRADE SUCCESSFUL";
         statusSubtitle = "Atomic Arbitrage Executed On-Chain";
     }
 
+    // Header Auto-Trade Badge - never show fake ACTIVE status if engine is in STANDBY/BLOCKED
+    const autoBadge = document.getElementById("headerAutoTradeBadge");
+    if (autoBadge) {
+        if (isEmergency || statusTitle.includes("BLOCKED") || statusTitle.includes("HALTED")) {
+            autoBadge.innerText = "BLOCKED";
+            autoBadge.className = "badge badge-red";
+        } else if (!settings.auto_trade) {
+            autoBadge.innerText = "STANDBY";
+            autoBadge.className = "badge badge-red";
+        } else if (statusTitle.includes("STANDBY") || statusTitle.includes("DISCONNECTED")) {
+            autoBadge.innerText = "STANDBY";
+            autoBadge.className = "badge badge-yellow";
+        } else {
+            autoBadge.innerText = "ACTIVE";
+            autoBadge.className = "badge badge-green";
+        }
+    }
+
     const kpiStatusEl = document.getElementById("kpiStatus");
     if (kpiStatusEl) {
         kpiStatusEl.innerText = statusTitle;
-        if (statusTitle.includes("HALTED") || statusTitle.includes("FAILED") || statusTitle.includes("INSUFFICIENT BALANCE")) {
+        if (statusTitle.includes("HALTED") || statusTitle.includes("FAILED") || statusTitle.includes("INSUFFICIENT BALANCE") || statusTitle.includes("BLOCKED")) {
             kpiStatusEl.className = "value text-loss";
         } else if (statusTitle.includes("SKIPPED") || statusTitle.includes("STANDBY") || statusTitle.includes("DISCONNECTED")) {
             kpiStatusEl.className = "value text-yellow";
@@ -1606,21 +1639,36 @@ async function triggerEmergencyStop() {
 
 async function quickSwitchMode(newMode) {
     try {
+        const isLiveOrTestnet = (newMode === "LIVE" || newMode === "TESTNET");
         const res = await fetch("/api/settings", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 trading_mode: newMode,
-                live_trading_armed: (newMode === "LIVE")
+                live_trading_armed: isLiveOrTestnet
             })
         });
         const json = await res.json();
         if (json.success) {
             const isLive = (newMode === "LIVE");
+            const isTestnet = (newMode === "TESTNET");
             const dashLiveBanner = document.getElementById("dashLiveWarningBanner");
             if (dashLiveBanner) dashLiveBanner.style.display = isLive ? "block" : "none";
             const arbLiveBanner = document.getElementById("arbLiveWarningBanner");
             if (arbLiveBanner) arbLiveBanner.style.display = isLive ? "block" : "none";
+
+            // If switching to TESTNET and currently on a Mainnet chain, align chain to Sepolia
+            if (isTestnet) {
+                const currentChain = SUPPORTED_CHAINS[currentSelectedChainId];
+                if (!currentChain || !currentChain.isTestnet) {
+                    await selectNetwork(11155111);
+                }
+            } else if (isLive) {
+                const currentChain = SUPPORTED_CHAINS[currentSelectedChainId];
+                if (currentChain && currentChain.isTestnet) {
+                    await selectNetwork(8453);
+                }
+            }
 
             showToast(`Trading Mode switched to ${newMode}`, isLive ? "warning" : "info");
             fetchMarketData();
@@ -1709,6 +1757,7 @@ async function saveSettings(event) {
     const payload = {
         chain_id: parseInt(document.getElementById("cfgChainId")?.value || "8453", 10),
         trading_mode: document.getElementById("cfgTradingMode").value,
+        live_trading_armed: (document.getElementById("cfgTradingMode")?.value === "LIVE" || document.getElementById("cfgTradingMode")?.value === "TESTNET"),
         rpc_url: document.getElementById("cfgRpcUrl").value,
         wallet_address: document.getElementById("cfgWalletAddress").value,
         contract_address: document.getElementById("cfgContractAddress").value,
@@ -1733,6 +1782,8 @@ async function saveSettings(event) {
         const json = await res.json();
         if (json.success) {
             showToast("DEX settings saved successfully!", "success");
+            fetchMarketData();
+            if (typeof loadSettings === "function") loadSettings();
         } else {
             showToast("Error: " + json.message, "error");
         }

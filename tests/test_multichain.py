@@ -228,6 +228,104 @@ class MultiChainVerificationTests(unittest.TestCase):
                 self.assertEqual(opp["chain_id"], 137)
                 self.assertEqual(opp["chain_name"], "polygon")
 
+    def test_engine_status_mode_and_chain_controls(self):
+        """Verify engine status responds dynamically and truthfully to chain & mode."""
+        import app as app_module
+
+        # 1. Emergency stop active
+        with patch.object(config, "EMERGENCY_STOP", True):
+            status = app_module.get_engine_status()
+            self.assertEqual(status, "BLOCKED - EMERGENCY STOP ACTIVE")
+
+        # 2. Auto trade disabled
+        with patch.object(config, "EMERGENCY_STOP", False), \
+             patch.object(config, "AUTO_TRADE_ENABLED", False):
+            status = app_module.get_engine_status()
+            self.assertEqual(status, "STANDBY - AUTO TRADE DISABLED")
+
+        # 3. MOCK mode: active scanning on active chain
+        with patch.object(config, "EMERGENCY_STOP", False), \
+             patch.object(config, "AUTO_TRADE_ENABLED", True), \
+             patch.object(config, "TRADING_MODE", "MOCK"):
+            config.set_active_chain(8453)
+            status = app_module.get_engine_status()
+            self.assertIn("ACTIVE", status)
+            self.assertIn("BASE L2 MAINNET", status)
+
+        # 4. TESTNET mode with Mainnet chain (Base 8453) -> Chain Mismatch
+        with patch.object(config, "EMERGENCY_STOP", False), \
+             patch.object(config, "AUTO_TRADE_ENABLED", True), \
+             patch.object(config, "TRADING_MODE", "TESTNET"):
+            config.set_active_chain(8453)
+            status = app_module.get_engine_status()
+            self.assertIn("STANDBY - CHAIN MISMATCH", status)
+            self.assertIn("Mainnet", status)
+
+        # 5. TESTNET mode with Testnet chain (Sepolia 11155111) but NOT ARMED
+        with patch.object(config, "EMERGENCY_STOP", False), \
+             patch.object(config, "AUTO_TRADE_ENABLED", True), \
+             patch.object(config, "TRADING_MODE", "TESTNET"), \
+             patch.object(config, "LIVE_TRADING_ARMED", False):
+            config.set_active_chain(11155111)
+            status = app_module.get_engine_status()
+            self.assertEqual(status, "STANDBY - TESTNET TRADING NOT ARMED")
+
+        # 6. TESTNET mode with Testnet chain, ARMED, but NO SIGNER
+        with patch.object(config, "EMERGENCY_STOP", False), \
+             patch.object(config, "AUTO_TRADE_ENABLED", True), \
+             patch.object(config, "TRADING_MODE", "TESTNET"), \
+             patch.object(config, "LIVE_TRADING_ARMED", True), \
+             patch.object(config, "PRIVATE_KEY", ""), \
+             patch.object(config, "WALLET_ADDRESS", ""):
+            config.set_active_chain(11155111)
+            status = app_module.get_engine_status()
+            self.assertEqual(status, "STANDBY - CONNECT WALLET FOR TESTNET EXECUTION")
+
+        # 7. TESTNET mode with Testnet chain, ARMED, and SIGNER present
+        with patch.object(config, "EMERGENCY_STOP", False), \
+             patch.object(config, "AUTO_TRADE_ENABLED", True), \
+             patch.object(config, "TRADING_MODE", "TESTNET"), \
+             patch.object(config, "LIVE_TRADING_ARMED", True), \
+             patch.object(config, "WALLET_ADDRESS", "0x1bcea3bc88cd89f3a5de9c07a5c7b6f2b4f501b4"):
+            config.set_active_chain(11155111)
+            status = app_module.get_engine_status()
+            self.assertIn("ACTIVE", status)
+            self.assertIn("SEPOLIA TESTNET", status)
+
+        # 8. LIVE mode with Testnet chain (Sepolia 11155111) -> Chain Mismatch
+        with patch.object(config, "EMERGENCY_STOP", False), \
+             patch.object(config, "AUTO_TRADE_ENABLED", True), \
+             patch.object(config, "TRADING_MODE", "LIVE"):
+            config.set_active_chain(11155111)
+            status = app_module.get_engine_status()
+            self.assertIn("STANDBY - CHAIN MISMATCH", status)
+            self.assertIn("Testnet", status)
+
+        # 9. LIVE mode with Mainnet chain, ARMED, and SIGNER present
+        with patch.object(config, "EMERGENCY_STOP", False), \
+             patch.object(config, "AUTO_TRADE_ENABLED", True), \
+             patch.object(config, "TRADING_MODE", "LIVE"), \
+             patch.object(config, "LIVE_TRADING_ARMED", True), \
+             patch.object(config, "WALLET_ADDRESS", "0x1bcea3bc88cd89f3a5de9c07a5c7b6f2b4f501b4"):
+            config.set_active_chain(8453)
+            status = app_module.get_engine_status()
+            self.assertIn("ACTIVE", status)
+            self.assertIn("BASE L2 MAINNET", status)
+
+    def test_settings_api_preserves_armed_state_on_mode_change(self):
+        """Verify switching mode via /api/settings correctly arms TESTNET and LIVE."""
+        # Switch to TESTNET without explicit live_trading_armed
+        res = self.client.post("/api/settings", json={"trading_mode": "TESTNET"})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(config.TRADING_MODE, "TESTNET")
+        self.assertTrue(config.LIVE_TRADING_ARMED)
+
+        # Switch to LIVE
+        res = self.client.post("/api/settings", json={"trading_mode": "LIVE"})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(config.TRADING_MODE, "LIVE")
+        self.assertTrue(config.LIVE_TRADING_ARMED)
+
 
 if __name__ == "__main__":
     unittest.main()
