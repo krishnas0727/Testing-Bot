@@ -39,6 +39,8 @@ let latestMarketData = null;
 let liveChart = null;
 let priceSnapshots = [];
 const MAX_SNAPSHOTS = 30;
+let currentSelectedChainId = parseInt(safeStorage.getItem("userSelectedChainId") || "8453", 10);
+if (isNaN(currentSelectedChainId) || !currentSelectedChainId) currentSelectedChainId = 8453;
 
 // Web Audio API State & Synthesizer
 let terminalAudioCtx = null;
@@ -359,12 +361,11 @@ async function fetchMarketData() {
         const params = new URLSearchParams();
         if (selectedTradeAmount) params.append("amount", selectedTradeAmount);
         if (metamaskAccount) params.append("address", metamaskAccount);
-        if (metamaskChainId) {
-            const cid = parseInt(metamaskChainId, 16);
-            if (!isNaN(cid)) params.append("chain_id", cid);
-        }
+        // Always pass user's explicitly selected network ID
+        params.append("chain_id", currentSelectedChainId);
+
         const qs = params.toString();
-        const url = qs ? `/api/market?${qs}` : "/api/market";
+        const url = `/api/market?${qs}`;
         const res = await fetch(url);
         const json = await res.json();
         const elapsed = Math.round(performance.now() - t0);
@@ -381,9 +382,8 @@ async function fetchMarketData() {
 
         // Periodically refresh client-side Web3 balances via MetaMask
         if (metamaskAccount && typeof fetchClientWalletBalances === "function") {
-            if (!clientWalletBalances.updated || Date.now() - clientWalletBalances.updated > 5000) {
-                const activeCid = metamaskChainId ? parseInt(metamaskChainId, 16) : 8453;
-                fetchClientWalletBalances(metamaskAccount, activeCid);
+            if (!clientWalletBalances.updated || Date.now() - clientWalletBalances.updated > 4000) {
+                fetchClientWalletBalances(metamaskAccount, currentSelectedChainId);
             }
         }
     } catch (err) {
@@ -401,7 +401,7 @@ function updateDashboardUI(payload) {
     const reserves = data.reserves || {};
 
     // 1. Ticker bar
-    const activeChainId = Number(settings.chain_id || payload.chain_id || 8453);
+    const activeChainId = currentSelectedChainId;
     const sym = payload.symbol || settings.symbol || (activeChainId === 8453 ? "WETH/USDC" : "WETH/USDT");
     setText("tickerUniLabel", `Uniswap V2 ${sym}`);
     setText("tickerSushiLabel", `SushiSwap V2 ${sym}`);
@@ -421,13 +421,17 @@ function updateDashboardUI(payload) {
         setText("tickerGasPrice", `${gweiStr} Gwei`);
     }
 
-    // Header Chain Select & Network Cards sync
+    // Synchronize Header Chain Select, Settings Select, and Network Cards strictly with currentSelectedChainId
     const chainSelect = document.getElementById("headerChainSelect");
-    if (chainSelect && chainSelect.value != activeChainId) {
-        chainSelect.value = activeChainId;
+    if (chainSelect && chainSelect.value != currentSelectedChainId) {
+        chainSelect.value = currentSelectedChainId;
+    }
+    const cfgChain = document.getElementById("cfgChainId");
+    if (cfgChain && cfgChain.value != currentSelectedChainId) {
+        cfgChain.value = currentSelectedChainId;
     }
     if (typeof updateNetworkCardsVisual === "function") {
-        updateNetworkCardsVisual(activeChainId);
+        updateNetworkCardsVisual(currentSelectedChainId);
     }
 
     // 2. Mode & Auto-trade badges
@@ -1519,13 +1523,20 @@ async function selectNetwork(chainId, event) {
     const id = Number(chainId);
     if (!SUPPORTED_CHAINS[id]) return;
 
-    // 1. Instantly update visual active state across all cards with ZERO layout shift
+    currentSelectedChainId = id;
+    safeStorage.setItem("userSelectedChainId", id);
+
+    // 1. Instantly update visual active state across all cards
     updateNetworkCardsVisual(id);
 
-    // 2. If MetaMask is connected, prompt network switch without disconnecting
+    // 2. If MetaMask is connected, check & prompt network alignment
     if (metamaskAccount) {
+        updateWalletUIConnected(metamaskAccount, metamaskChainId);
         try {
-            await requestSwitchNetwork(id);
+            const currentMmCid = metamaskChainId ? parseInt(metamaskChainId, 16) : null;
+            if (currentMmCid !== id) {
+                await requestSwitchNetwork(id);
+            }
         } catch (switchErr) {
             console.warn("[MetaMask switch warning]:", switchErr);
         }
@@ -1540,11 +1551,14 @@ async function selectNetwork(chainId, event) {
         });
         const json = await res.json();
         if (json.success) {
-            showToast(`Active network: ${json.chain.label}`, "success");
+            showToast(`Selected Network: ${json.chain.label}`, "success");
             setValue("headerChainSelect", id);
             setValue("cfgChainId", id);
             if (json.chain.rpc_url) setValue("cfgRpcUrl", json.chain.rpc_url);
             fetchMarketData();
+            if (metamaskAccount && typeof fetchClientWalletBalances === "function") {
+                fetchClientWalletBalances(metamaskAccount, id);
+            }
             if (typeof loadSettings === "function") loadSettings();
         } else {
             showToast(json.message || "Failed to switch chain", "error");
@@ -1759,41 +1773,56 @@ async function fetchClientWalletBalances(account, chainIdNum) {
     const provider = getMetaMaskProvider();
     if (!provider || !account) return;
 
+    const targetId = Number(chainIdNum || currentSelectedChainId);
+
+    // Reset balances for the target query to avoid cross-chain state pollution
+    clientWalletBalances = {
+        eth: 0,
+        weth: 0,
+        usdt: 0,
+        usdc: 0,
+        usdbc: 0,
+        updated: Date.now()
+    };
+
     try {
-        // 1. Native ETH balance via eth_getBalance
+        // 1. Native ETH / SepoliaETH / POL balance via eth_getBalance
         const hexBal = await provider.request({
             method: "eth_getBalance",
             params: [account, "latest"]
         });
-        if (hexBal) {
+        if (hexBal && hexBal !== "0x") {
             clientWalletBalances.eth = parseInt(hexBal, 16) / 1e18;
         }
 
         // 2. Token balances via ERC20 balanceOf eth_call
-        const tokens = CLIENT_TOKEN_ADDRESSES[chainIdNum] || CLIENT_TOKEN_ADDRESSES[8453];
-        const cleanAddr = account.toLowerCase().replace("0x", "").padStart(64, "0");
-        const balanceOfData = "0x70a08231" + cleanAddr;
+        const tokens = CLIENT_TOKEN_ADDRESSES[targetId];
+        if (tokens) {
+            const cleanAddr = account.toLowerCase().replace("0x", "").padStart(64, "0");
+            const balanceOfData = "0x70a08231" + cleanAddr;
 
-        for (const [sym, info] of Object.entries(tokens)) {
-            try {
-                const hexRes = await provider.request({
-                    method: "eth_call",
-                    params: [{ to: info.address, data: balanceOfData }, "latest"]
-                });
-                if (hexRes && hexRes !== "0x") {
-                    const rawVal = BigInt(hexRes);
-                    const dec = info.decimals || 18;
-                    const divisor = BigInt(10 ** dec);
-                    const whole = rawVal / divisor;
-                    const rem = rawVal % divisor;
-                    const val = Number(whole) + Number(rem) / (10 ** dec);
-                    if (sym === "USDC") clientWalletBalances.usdc = val;
-                    else if (sym === "USDbC") clientWalletBalances.usdbc = val;
-                    else if (sym === "USDT") clientWalletBalances.usdt = val;
-                    else if (sym === "WETH") clientWalletBalances.weth = val;
+            for (const [sym, info] of Object.entries(tokens)) {
+                if (!info || !info.address) continue;
+                try {
+                    const hexRes = await provider.request({
+                        method: "eth_call",
+                        params: [{ to: info.address, data: balanceOfData }, "latest"]
+                    });
+                    if (hexRes && hexRes !== "0x") {
+                        const rawVal = BigInt(hexRes);
+                        const dec = info.decimals || 18;
+                        const divisor = BigInt(10 ** dec);
+                        const whole = rawVal / divisor;
+                        const rem = rawVal % divisor;
+                        const val = Number(whole) + Number(rem) / (10 ** dec);
+                        if (sym === "USDC") clientWalletBalances.usdc = val;
+                        else if (sym === "USDbC") clientWalletBalances.usdbc = val;
+                        else if (sym === "USDT") clientWalletBalances.usdt = val;
+                        else if (sym === "WETH") clientWalletBalances.weth = val;
+                    }
+                } catch (tokErr) {
+                    console.warn(`[Balance fetch error for ${sym} on chain ${targetId}]:`, tokErr);
                 }
-            } catch (tokErr) {
-                // Ignore individual token query errors
             }
         }
         clientWalletBalances.updated = Date.now();
@@ -1806,16 +1835,18 @@ async function fetchClientWalletBalances(account, chainIdNum) {
 function renderClientWalletBalances() {
     if (!metamaskAccount) return;
     const ethPrice = latestMarketData && latestMarketData.summary && latestMarketData.summary.eth_price_usdt ? Number(latestMarketData.summary.eth_price_usdt) : 3000;
-    
-    setText("balETH", `${Number(clientWalletBalances.eth || 0).toFixed(4)} ETH`);
+    const chainConfig = SUPPORTED_CHAINS[currentSelectedChainId] || { short: "ETH", nativeCurrency: { symbol: "ETH" } };
+    const nativeSym = chainConfig.short || (chainConfig.nativeCurrency ? chainConfig.nativeCurrency.symbol : "ETH");
+
+    setText("balETH", `${Number(clientWalletBalances.eth || 0).toFixed(4)} ${nativeSym}`);
     setText("balETHusd", `≈ $${(Number(clientWalletBalances.eth || 0) * ethPrice).toFixed(2)} USDT`);
     setText("balWETH", `${Number(clientWalletBalances.weth || 0).toFixed(4)} WETH`);
     setText("balWETHusd", `≈ $${(Number(clientWalletBalances.weth || 0) * ethPrice).toFixed(2)} USDT`);
-    setText("balUSDT", `$${Number(clientWalletBalances.usdt || 0).toLocaleString("en-US", { minimumFractionDigits: 2 })} USDT`);
+    setText("balUSDT", `$${Number(clientWalletBalances.usdt || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} USDT`);
 
     const effectiveUsdc = (clientWalletBalances.usdc || 0) + (clientWalletBalances.usdbc || 0);
     const usdcLabel = (clientWalletBalances.usdbc > 0 && (clientWalletBalances.usdc || 0) === 0) ? "USDbC" : "USDC";
-    setText("balUSDC", `$${Number(effectiveUsdc).toLocaleString("en-US", { minimumFractionDigits: 2 })} ${usdcLabel}`);
+    setText("balUSDC", `$${Number(effectiveUsdc).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${usdcLabel}`);
 
     const totalStable = (clientWalletBalances.usdt || 0) + effectiveUsdc;
     const totalEthEquity = ((clientWalletBalances.eth || 0) + (clientWalletBalances.weth || 0)) * ethPrice;
@@ -2078,9 +2109,9 @@ async function initContractInstance() {
 function updateWalletUIConnected(address, chainIdHex) {
     if (!address) return;
     const shortAddr = address.slice(0, 6) + "..." + address.slice(-4);
-    const targetChainId = Number(latestMarketData && latestMarketData.chain_id ? latestMarketData.chain_id : (latestMarketData && latestMarketData.settings && latestMarketData.settings.chain_id ? latestMarketData.settings.chain_id : 8453));
+    const targetChainId = currentSelectedChainId;
     const currentChainId = chainIdHex ? parseInt(chainIdHex, 16) : targetChainId;
-    const isCorrectChain = currentChainId === targetChainId;
+    const isCorrectChain = (currentChainId === targetChainId);
 
     // Header buttons
     const btnConnect = document.getElementById("btnConnectWallet");
@@ -2093,10 +2124,12 @@ function updateWalletUIConnected(address, chainIdHex) {
     if (addrText) addrText.innerText = shortAddr;
 
     // Network status styling
-    const chainInfo = SUPPORTED_CHAINS[currentChainId] || { name: `Chain ${currentChainId}`, short: `Chain ${currentChainId}`, explorer: "https://basescan.org" };
+    const targetChainInfo = SUPPORTED_CHAINS[targetChainId] || { name: `Chain ${targetChainId}`, short: `Chain ${targetChainId}`, explorer: "https://etherscan.io" };
+    const currentChainInfo = SUPPORTED_CHAINS[currentChainId] || { name: `Chain ${currentChainId}`, short: `Chain ${currentChainId}`, explorer: "https://etherscan.io" };
+
     if (dot) {
         dot.className = "network-dot " + (isCorrectChain ? "dot-green" : "dot-red");
-        dot.title = isCorrectChain ? chainInfo.name : "Wrong Network! Click to switch";
+        dot.title = isCorrectChain ? `Connected to ${targetChainInfo.name}` : `Wrong Network! Connected to ${currentChainInfo.name}. Click to switch to ${targetChainInfo.name}`;
     }
 
     // Dropdown details
@@ -2107,30 +2140,35 @@ function updateWalletUIConnected(address, chainIdHex) {
     const btnSwitch = document.getElementById("btnSwitchNetwork");
     const btnExplorer = document.getElementById("btnViewExplorer");
 
-    if (netText) netText.innerText = isCorrectChain ? chainInfo.name : `Wrong Network (${chainInfo.short})`;
+    if (netText) netText.innerText = isCorrectChain ? targetChainInfo.name : `Wrong Network (${currentChainInfo.short})`;
     if (netDot) netDot.className = "network-dot " + (isCorrectChain ? "dot-green" : "dot-red");
     if (netBadge) {
         netBadge.className = "network-name-badge " + (isCorrectChain ? "" : "wrong-network");
     }
     if (btnSwitch) {
         btnSwitch.style.display = isCorrectChain ? "none" : "flex";
-        const targetChainInfo = SUPPORTED_CHAINS[targetChainId] || { short: "Configured Chain" };
+        btnSwitch.onclick = (e) => requestSwitchNetwork(targetChainId, e);
         btnSwitch.innerHTML = `<span>🔄</span> <span>Switch to ${targetChainInfo.short}</span>`;
     }
     if (btnExplorer) {
-        btnExplorer.href = `${chainInfo.explorer}/address/${address}`;
+        btnExplorer.href = `${currentChainInfo.explorer}/address/${address}`;
     }
 
     // Synchronize network cards visual state
     if (typeof updateNetworkCardsVisual === "function") {
-        updateNetworkCardsVisual(currentChainId);
+        updateNetworkCardsVisual(targetChainId);
     }
 
     // Portfolio panel badge & connect button
     const portBadge = document.getElementById("walletAddressBadge");
     if (portBadge) {
-        portBadge.innerText = `${shortAddr} (Connected)`;
-        portBadge.className = "badge badge-green";
+        if (isCorrectChain) {
+            portBadge.innerText = `${shortAddr} (${targetChainInfo.short})`;
+            portBadge.className = "badge badge-green";
+        } else {
+            portBadge.innerText = `${shortAddr} (Wrong Network: ${currentChainInfo.short})`;
+            portBadge.className = "badge badge-red";
+        }
     }
     const portConnectBtn = document.getElementById("btnPortfolioConnect");
     if (portConnectBtn) {
@@ -2354,14 +2392,33 @@ function selectSlippagePreset(val, event) {
 }
 
 async function executeMetaMaskOnChainTrade() {
-    const provider = getMetaMaskProvider();
-    if (!provider) {
+    // Guard 1: Emergency Stop Check
+    if (latestMarketData && latestMarketData.summary && latestMarketData.summary.emergency_stop) {
+        showToast("Emergency Stop is ACTIVE! All trading and blockchain transactions are blocked.", "error");
+        renderExecutionResult({
+            success: false,
+            status: "BLOCKED_EMERGENCY_STOP",
+            message: "Emergency Stop is active; execution blocked."
+        });
+        return;
+    }
+
+    // Guard 2: Wallet Connection Check
+    if (!metamaskAccount) {
+        showToast("Please connect your MetaMask wallet first.", "warning");
         showMetaMaskModal();
         return;
     }
-    if (!metamaskAccount) {
-        showToast("Please connect your MetaMask wallet first!", "warning");
-        connectMetaMask();
+
+    // Guard 3: Network Synchronization Check
+    const targetChainId = currentSelectedChainId;
+    const currentChainId = metamaskChainId ? parseInt(metamaskChainId, 16) : null;
+    const targetChainInfo = SUPPORTED_CHAINS[targetChainId] || { name: `Chain ${targetChainId}`, short: `Chain ${targetChainId}` };
+
+    if (currentChainId !== targetChainId) {
+        const currentChainInfo = SUPPORTED_CHAINS[currentChainId] || { short: `Chain ${currentChainId}` };
+        showToast(`MetaMask is on ${currentChainInfo.short}. Please switch to ${targetChainInfo.short} before executing trade.`, "error");
+        await requestSwitchNetwork(targetChainId);
         return;
     }
 
@@ -2371,100 +2428,106 @@ async function executeMetaMaskOnChainTrade() {
     }
 
     const route = latestMarketData.data.best_route;
-    const targetChainId = Number(latestMarketData.chain_id || 8453);
-    const currentChainId = metamaskChainId ? parseInt(metamaskChainId, 16) : null;
-
-    if (currentChainId !== targetChainId) {
-        showToast("Switching network to Base L2...", "info");
-        await requestSwitchNetwork(targetChainId);
-        return;
-    }
 
     // Step 1: Wallet & Gas Check
-    showExecModal("MetaMask Direct On-Chain Execution", "Checking wallet balances and preparing Base L2 transaction...", 1);
+    showExecModal("MetaMask Direct On-Chain Execution", `Checking wallet balances on ${targetChainInfo.name}...`, 1);
 
     try {
         if (!metamaskSigner) {
             await initEthersProviderAndSigner();
         }
 
-        // Check native ETH gas balance
-        const ethBalance = await metamaskProvider.getBalance(metamaskAccount);
-        const ethVal = parseFloat(ethers.formatEther(ethBalance));
-        if (ethVal < 0.0001) {
+        // Native gas coin balance check (ETH / SepoliaETH / POL >= 0.0001)
+        const nativeSym = targetChainInfo.short || "ETH";
+        const nativeBal = Number(clientWalletBalances.eth || 0);
+        if (nativeBal < 0.0001) {
             renderExecutionResult({
                 success: false,
                 status: "INSUFFICIENT_GAS",
-                message: `Your connected wallet has ${ethVal.toFixed(6)} ETH. You need at least 0.0001 ETH for Base L2 network fees.`
+                message: `Your connected wallet has ${nativeBal.toFixed(6)} ${nativeSym}. You need at least 0.0001 ${nativeSym} for network gas fees.`
             });
             return;
         }
 
-        const tokens = CLIENT_TOKEN_ADDRESSES[targetChainId] || CLIENT_TOKEN_ADDRESSES[8453];
-        const routers = CLIENT_ROUTER_ADDRESSES[targetChainId] || CLIENT_ROUTER_ADDRESSES[8453];
+        const tokens = CLIENT_TOKEN_ADDRESSES[targetChainId];
+        const routers = CLIENT_ROUTER_ADDRESSES[targetChainId];
 
         if (!tokens || !routers) {
             renderExecutionResult({
                 success: false,
                 status: "CONFIGURATION_ERROR",
-                message: "No token or router contracts registered for this network."
+                message: `No token or router contracts registered for ${targetChainInfo.name}.`
             });
             return;
         }
 
-        // Quote token: auto-select token with positive balance: Native USDC > Bridged USDbC > USDT
+        // Select quote token based on chain & available wallet balance
         let tokenInMeta = null;
         let availStable = 0;
-        let tokenSymbol = "USDC";
+        let tokenSymbol = "USDT";
 
-        if ((clientWalletBalances.usdc || 0) > 0 && tokens.USDC) {
-            tokenInMeta = tokens.USDC;
-            availStable = clientWalletBalances.usdc;
-            tokenSymbol = "USDC";
-        } else if ((clientWalletBalances.usdbc || 0) > 0 && tokens.USDbC) {
-            tokenInMeta = tokens.USDbC;
-            availStable = clientWalletBalances.usdbc;
-            tokenSymbol = "USDbC";
-        } else if ((clientWalletBalances.usdt || 0) > 0 && tokens.USDT) {
-            tokenInMeta = tokens.USDT;
-            availStable = clientWalletBalances.usdt;
-            tokenSymbol = "USDT";
-        } else {
-            // Default fallback if balance is 0
-            tokenInMeta = tokens.USDC || tokens.USDbC || tokens.USDT;
-            availStable = 0;
-            tokenSymbol = tokenInMeta === tokens.USDT ? "USDT" : (tokenInMeta === tokens.USDbC ? "USDbC" : "USDC");
+        if (targetChainId === 11155111 || targetChainId === 1 || targetChainId === 42161 || targetChainId === 137) {
+            if ((clientWalletBalances.usdt || 0) > 0 && tokens.USDT) {
+                tokenInMeta = tokens.USDT;
+                availStable = clientWalletBalances.usdt;
+                tokenSymbol = "USDT";
+            } else if ((clientWalletBalances.usdc || 0) > 0 && tokens.USDC) {
+                tokenInMeta = tokens.USDC;
+                availStable = clientWalletBalances.usdc;
+                tokenSymbol = "USDC";
+            } else {
+                tokenInMeta = tokens.USDT || tokens.USDC;
+                availStable = (clientWalletBalances.usdt || 0) + (clientWalletBalances.usdc || 0);
+                tokenSymbol = tokens.USDT ? "USDT" : "USDC";
+            }
+        } else { // Base L2 (8453)
+            if ((clientWalletBalances.usdc || 0) > 0 && tokens.USDC) {
+                tokenInMeta = tokens.USDC;
+                availStable = clientWalletBalances.usdc;
+                tokenSymbol = "USDC";
+            } else if ((clientWalletBalances.usdbc || 0) > 0 && tokens.USDbC) {
+                tokenInMeta = tokens.USDbC;
+                availStable = clientWalletBalances.usdbc;
+                tokenSymbol = "USDbC";
+            } else if ((clientWalletBalances.usdt || 0) > 0 && tokens.USDT) {
+                tokenInMeta = tokens.USDT;
+                availStable = clientWalletBalances.usdt;
+                tokenSymbol = "USDT";
+            } else {
+                tokenInMeta = tokens.USDC || tokens.USDbC || tokens.USDT;
+                availStable = 0;
+                tokenSymbol = "USDC";
+            }
         }
 
         const tokenOutMeta = tokens.WETH;
-
         if (!tokenInMeta || !tokenOutMeta) {
             renderExecutionResult({
                 success: false,
                 status: "CONFIGURATION_ERROR",
-                message: "Target tokens (USDC/USDbC/WETH) are not defined for the selected blockchain."
+                message: `Target trading pair tokens are not defined for ${targetChainInfo.name}.`
             });
             return;
         }
 
-        // Dynamic trade amount sizing
+        // Dynamic trade amount calculation based on safe balance
         let tradeAmt = selectedTradeAmount || 0.10;
         if (availStable > 0 && tradeAmt > availStable) {
             tradeAmt = Math.max(0.0001, Math.floor(availStable * 0.95 * 10000) / 10000);
         }
 
-        if (availStable <= 0) {
+        if (availStable <= 0 || tradeAmt <= 0) {
             renderExecutionResult({
                 success: false,
                 status: "INSUFFICIENT_BALANCE",
-                message: `Connected wallet ${metamaskAccount.slice(0, 6)}...${metamaskAccount.slice(-4)} has $0.0000 ${tokenSymbol} on Base L2. Fund your wallet with at least $0.05 ${tokenSymbol} to execute on-chain swaps.`
+                message: `Connected wallet ${metamaskAccount.slice(0, 6)}...${metamaskAccount.slice(-4)} has $${availStable.toFixed(4)} ${tokenSymbol} on ${targetChainInfo.name}. Fund your wallet to execute on-chain swaps.`
             });
             return;
         }
 
         const parsedAmountIn = ethers.parseUnits(tradeAmt.toString(), tokenInMeta.decimals);
         const routerName = route.buy_dex || "Uniswap_V2";
-        const routerAddress = routers[routerName] || routers.Uniswap_V2 || "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24";
+        const routerAddress = routers[routerName] || Object.values(routers)[0];
 
         // Step 2: Verify and request ERC-20 token approval
         showExecModal("Verifying Token Allowance", `Checking ${tokenSymbol} allowance for ${routerName}...`, 2);
@@ -2478,9 +2541,10 @@ async function executeMetaMaskOnChainTrade() {
             showExecModal("Confirming Approval", `Approval submitted (${approveTx.hash.slice(0, 10)}...). Waiting for block confirmation...`, 2);
             await approveTx.wait(1);
             showToast("Token approval confirmed on-chain!", "success");
+            await fetchClientWalletBalances(metamaskAccount, targetChainId);
         }
 
-        // Step 3: Query DEX Router for expected output & calculate slippage guard
+        // Step 3: Query DEX Router for expected output & submit swap
         showExecModal("Executing DEX Swap", `Submitting trade of $${tradeAmt.toFixed(4)} ${tokenSymbol} on ${routerName}... Confirm in MetaMask.`, 3);
         showToast("Please confirm Swap transaction in MetaMask...", "info");
 
@@ -2494,7 +2558,7 @@ async function executeMetaMaskOnChainTrade() {
             if (amountsOut && amountsOut.length > 1) {
                 const expectedOut = amountsOut[1];
                 const slippageInput = parseFloat(document.getElementById("cfgSlippage")?.value || "0.5");
-                const slippageBps = BigInt(Math.max(10, Math.min(500, Math.round(slippageInput * 100)))); // 0.10% to 5.00%
+                const slippageBps = BigInt(Math.max(10, Math.min(500, Math.round(slippageInput * 100))));
                 amountOutMin = (expectedOut * (10000n - slippageBps)) / 10000n;
             }
         } catch (slipErr) {
@@ -2511,25 +2575,34 @@ async function executeMetaMaskOnChainTrade() {
             { gasLimit: 280000 }
         );
 
-        // Step 4: Base L2 Mining
-        showExecModal("Mining Transaction", `Swap broadcasted! Hash: ${txResponse.hash.slice(0, 10)}... Waiting for Base L2 block receipt (~2s)...`, 4);
+        // Step 4: Block Mining Receipt
+        showExecModal("Mining Transaction", `Swap broadcasted! Hash: ${txResponse.hash.slice(0, 10)}... Waiting for block receipt...`, 4);
         showToast(`Transaction Broadcasted: ${txResponse.hash.slice(0, 10)}...`, "info");
         const receipt = await txResponse.wait(1);
 
+        if (receipt && receipt.status !== 1 && receipt.status !== "0x1") {
+            renderExecutionResult({
+                success: false,
+                status: "TRANSACTION_REVERTED",
+                message: `Transaction ${txResponse.hash.slice(0, 10)}... reverted on-chain. Capital was preserved, but gas was consumed.`
+            });
+            return;
+        }
+
         // Step 5: Verify and record live trade on backend
-        showExecModal("Verifying On-Chain Receipt", "Verifying block receipt & updating live KPIs with Base L2 RPC...", 5);
+        showExecModal("Verifying On-Chain Receipt", "Verifying block receipt & updating live audit log...", 5);
         const confirmRes = await fetch("/api/trade/confirm-live", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 tx_hash: txResponse.hash,
                 chain_id: targetChainId,
-                buy_dex: route.buy_dex,
-                sell_dex: route.sell_dex,
-                token_pair: latestMarketData.symbol || "WETH/USDC",
+                buy_dex: route.buy_dex || "Uniswap_V2",
+                sell_dex: route.sell_dex || "SushiSwap_V2",
+                token_pair: `${tokenSymbol}/WETH`,
                 amount_in: tradeAmt,
-                expected_profit: route.net_profit_usdt,
-                gross_profit: route.gross_profit_usdt || route.net_profit_usdt
+                expected_profit: route.net_profit_usdt || 0.0,
+                gross_profit: route.gross_profit_usdt || 0.0
             })
         });
         const confirmData = await confirmRes.json();
@@ -2547,13 +2620,13 @@ async function executeMetaMaskOnChainTrade() {
             renderExecutionResult({
                 success: true,
                 status: "ON_CHAIN_MINED",
-                message: `Transaction mined on Base L2! Hash: ${txResponse.hash}`,
+                message: `Transaction mined on ${targetChainInfo.name}! Hash: ${txResponse.hash}`,
                 tx_hash: txResponse.hash,
                 trade: {
-                    buy_dex: route.buy_dex,
-                    sell_dex: route.sell_dex,
+                    buy_dex: route.buy_dex || "Uniswap_V2",
+                    sell_dex: route.sell_dex || "SushiSwap_V2",
                     amount_in: tradeAmt,
-                    net_profit: route.net_profit_usdt,
+                    net_profit: route.net_profit_usdt || 0.0,
                     mode: "LIVE"
                 }
             });

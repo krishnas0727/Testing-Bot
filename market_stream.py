@@ -43,13 +43,17 @@ class OnChainDEXStream:
     def _poll_loop(self):
         while self._running:
             try:
+                symbol = getattr(config, "SYMBOL", "WETH/USDT")
+                parts = symbol.split("/")
+                base_sym = parts[0] if len(parts) > 0 else "WETH"
+                quote_sym = parts[1] if len(parts) > 1 else "USDT"
+
                 for dex_name in config.SUPPORTED_DEXES:
-                    res = get_dex_reserves(dex_name, "WETH", "USDT")
+                    res = get_dex_reserves(dex_name, base_sym, quote_sym)
                     base_res = res["base_reserve"]
                     quote_res = res["quote_reserve"]
                     spot = res["spot_price"]
 
-                    # Model 1-unit trade for instant BBO quote
                     weth_for_100_usdt = calculate_amount_out(100.0, quote_res, base_res, config.DEX_PROTOCOL_FEE_PCT)
                     ask = 100.0 / weth_for_100_usdt if weth_for_100_usdt > 0 else spot
                     bid = calculate_amount_out(1.0, base_res, quote_res, config.DEX_PROTOCOL_FEE_PCT)

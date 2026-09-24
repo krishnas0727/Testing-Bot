@@ -442,6 +442,13 @@ def prices_api():
 def manual_trade_api():
     global last_execution_status, last_background_trade_result
     try:
+        if emergency_stop_active():
+            return jsonify({
+                "success": False,
+                "status": "BLOCKED_EMERGENCY_STOP",
+                "message": "Emergency Stop is active; trading is blocked."
+            }), 400
+
         req_data = request.get_json(silent=True) or {}
         custom_amount = req_data.get("trade_amount")
 
@@ -634,11 +641,12 @@ def confirm_live_trade_api():
             tx_hash=tx_hash
         )
 
+        chain_label = config.CHAIN_REGISTRY.get(chain_id, {}).get("label", "Blockchain")
         return jsonify({
             "success": True,
             "trade_id": trade_id,
             "trade": trade_data,
-            "message": f"Real on-chain trade verified on Base L2! Gas: ${gas_cost_usdt:.4f} USDT, Net PnL: +${verified_net_profit:.4f} USDT."
+            "message": f"Real on-chain trade verified on {chain_label}! Gas: ${gas_cost_usdt:.4f} USDT, Net PnL: +${verified_net_profit:.4f} USDT."
         })
     except Exception as exc:
         return jsonify({"success": False, "message": f"Receipt confirmation error: {str(exc)}"}), 500
