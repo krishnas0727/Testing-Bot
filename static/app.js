@@ -217,7 +217,15 @@ function startPolling() {
 async function fetchMarketData() {
     const t0 = performance.now();
     try {
-        const url = selectedTradeAmount ? `/api/market?amount=${selectedTradeAmount}` : "/api/market";
+        const params = new URLSearchParams();
+        if (selectedTradeAmount) params.append("amount", selectedTradeAmount);
+        if (metamaskAccount) params.append("address", metamaskAccount);
+        if (metamaskChainId) {
+            const cid = parseInt(metamaskChainId, 16);
+            if (!isNaN(cid)) params.append("chain_id", cid);
+        }
+        const qs = params.toString();
+        const url = qs ? `/api/market?${qs}` : "/api/market";
         const res = await fetch(url);
         const json = await res.json();
         const elapsed = Math.round(performance.now() - t0);
@@ -231,6 +239,14 @@ async function fetchMarketData() {
         latestMarketData = json.data;
         updateDashboardUI(json);
         updateChart(json.data.prices);
+
+        // Periodically refresh client-side Web3 balances via MetaMask
+        if (metamaskAccount && typeof fetchClientWalletBalances === "function") {
+            if (!clientWalletBalances.updated || Date.now() - clientWalletBalances.updated > 5000) {
+                const activeCid = metamaskChainId ? parseInt(metamaskChainId, 16) : 8453;
+                fetchClientWalletBalances(metamaskAccount, activeCid);
+            }
+        }
     } catch (err) {
         console.warn("[DEX Polling Error]:", err);
     }
@@ -310,10 +326,22 @@ function updateDashboardUI(payload) {
     }
 
     // 3. KPI stats
-    const totalBal = Number(summary.balance || 0);
+    const isConnected = Boolean(metamaskAccount) || (Boolean(wallet.is_connected) && Boolean(wallet.wallet_address));
+    const activeAddress = metamaskAccount || wallet.wallet_address || "";
+
+    const ethPrice = Number(summary.eth_price_usdt || 3000);
+    const dispEth = (wallet.eth !== undefined && Number(wallet.eth) > 0) ? Number(wallet.eth) : Number(clientWalletBalances.eth || 0);
+    const dispWeth = (wallet.weth !== undefined && Number(wallet.weth) > 0) ? Number(wallet.weth) : Number(clientWalletBalances.weth || 0);
+    const dispUsdt = (wallet.usdt !== undefined && Number(wallet.usdt) > 0) ? Number(wallet.usdt) : Number(clientWalletBalances.usdt || 0);
+    const dispUsdc = (wallet.usdc !== undefined && Number(wallet.usdc) > 0) ? Number(wallet.usdc) : Number(clientWalletBalances.usdc || 0);
+
+    const totalStable = dispUsdt + dispUsdc;
+    const totalEthEq = (dispEth + dispWeth) * ethPrice;
+    const computedBal = totalStable + totalEthEq;
+    const totalBal = computedBal > 0 ? computedBal : Number(summary.balance || 0);
+
     const totalProf = Number(summary.total_profit || 0);
     const totalTrades = Number(summary.total_trades || 0);
-    const isConnected = Boolean(wallet.is_connected) && Boolean(wallet.wallet_address);
     const isEmergency = Boolean(settings.emergency_stop);
 
     setText("kpiBalance", `$${totalBal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
@@ -409,21 +437,22 @@ function updateDashboardUI(payload) {
     // 4. Wallet balances
     const walletBadge = document.getElementById("walletAddressBadge");
     if (walletBadge) {
-        if (isConnected) {
-            const shortAddr = wallet.wallet_address.slice(0, 6) + "..." + wallet.wallet_address.slice(-4);
-            walletBadge.innerText = `${shortAddr} (${wallet.source === "on-chain-rpc" ? "On-Chain" : "Web3"})`;
+        if (isConnected && activeAddress) {
+            const shortAddr = activeAddress.slice(0, 6) + "..." + activeAddress.slice(-4);
+            const sourceLabel = (wallet.source === "on-chain-rpc" && wallet.wallet_address) ? "On-Chain" : "Web3";
+            walletBadge.innerText = `${shortAddr} (${sourceLabel})`;
             walletBadge.className = "badge badge-green";
         } else {
             walletBadge.innerText = "Wallet Disconnected";
             walletBadge.className = "badge badge-yellow";
         }
     }
-    setText("balETH", `${Number(wallet.eth || 0).toFixed(4)} ETH`);
-    setText("balETHusd", `≈ $${(Number(wallet.eth || 0) * Number(summary.eth_price_usdt || 3000)).toFixed(2)} USDT`);
-    setText("balWETH", `${Number(wallet.weth || 0).toFixed(4)} WETH`);
-    setText("balWETHusd", `≈ $${(Number(wallet.weth || 0) * Number(summary.eth_price_usdt || 3000)).toFixed(2)} USDT`);
-    setText("balUSDT", `$${Number(wallet.usdt || 0).toLocaleString("en-US", { minimumFractionDigits: 2 })} USDT`);
-    setText("balUSDC", `$${Number(wallet.usdc || 0).toLocaleString("en-US", { minimumFractionDigits: 2 })} USDC`);
+    setText("balETH", `${dispEth.toFixed(4)} ETH`);
+    setText("balETHusd", `≈ $${(dispEth * ethPrice).toFixed(2)} USDT`);
+    setText("balWETH", `${dispWeth.toFixed(4)} WETH`);
+    setText("balWETHusd", `≈ $${(dispWeth * ethPrice).toFixed(2)} USDT`);
+    setText("balUSDT", `$${dispUsdt.toLocaleString("en-US", { minimumFractionDigits: 2 })} USDT`);
+    setText("balUSDC", `$${dispUsdc.toLocaleString("en-US", { minimumFractionDigits: 2 })} USDC`);
 
     // 5. Best Opportunity card
     if (best.buy_dex) {
@@ -609,6 +638,16 @@ async function simulateCurrentTrade() {
 }
 
 async function executeCurrentTrade() {
+    const isLiveMode = latestMarketData && (latestMarketData.trading_mode === "LIVE");
+    const hasServerSigner = latestMarketData && Boolean(latestMarketData.has_private_key);
+
+    // In LIVE mode without server private key, route to MetaMask non-custodial signing
+    if (isLiveMode && !hasServerSigner) {
+        showToast("Routing to MetaMask for secure non-custodial signing...", "info");
+        await executeMetaMaskOnChainTrade();
+        return;
+    }
+
     showExecModal("Executing Atomic DEX Arbitrage", "Submitting transaction to DEX Arbitrage Smart Contract...");
     try {
         let tradeAmtToSend = selectedTradeAmount;
@@ -627,6 +666,14 @@ async function executeCurrentTrade() {
             })
         });
         const json = await res.json();
+
+        // If server reports LIVE_SIGNER_REQUIRED, seamlessly forward to MetaMask
+        if (json.status === "LIVE_SIGNER_REQUIRED") {
+            showToast("Server has no private key. Forwarding to MetaMask for on-chain signature...", "info");
+            await executeMetaMaskOnChainTrade();
+            return;
+        }
+
         renderExecutionResult(json);
         fetchMarketData();
         loadTrades();
@@ -806,6 +853,22 @@ async function loadSettings() {
         setValue("cfgSlippage", s.slippage_pct);
         setValue("cfgPriceImpact", s.max_price_impact_pct);
         setValue("cfgGasCeiling", s.max_gas_price_gwei);
+
+        const pkInput = document.getElementById("cfgPrivateKey");
+        const pkStatus = document.getElementById("cfgPrivateKeyStatus");
+        if (s.has_private_key) {
+            if (pkInput) pkInput.placeholder = "•••••••••••••••• (Active on Server)";
+            if (pkStatus) {
+                pkStatus.textContent = "✓ Server private key is active. Autonomous background trading is enabled.";
+                pkStatus.style.color = "var(--profit-color)";
+            }
+        } else {
+            if (pkInput) pkInput.placeholder = "0x... (Optional: Only if running autonomous background bot on server)";
+            if (pkStatus) {
+                pkStatus.textContent = "If left blank, trades execute non-custodially via your connected MetaMask wallet.";
+                pkStatus.style.color = "var(--text-muted)";
+            }
+        }
     } catch (err) {
         console.warn("Settings load error:", err);
     }
@@ -830,6 +893,11 @@ async function saveSettings(event) {
         max_price_impact_pct: parseFloat(document.getElementById("cfgPriceImpact").value),
         max_gas_price_gwei: parseFloat(document.getElementById("cfgGasCeiling").value),
     };
+
+    const pkVal = document.getElementById("cfgPrivateKey")?.value;
+    if (pkVal !== undefined && pkVal.trim() !== "") {
+        payload.private_key = pkVal.trim();
+    }
 
     try {
         const res = await fetch("/api/settings", {
@@ -1276,6 +1344,200 @@ const safeStorage = {
     }
 };
 
+const CLIENT_TOKEN_ADDRESSES = {
+    8453: { // Base L2
+        USDC: { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6 },
+        USDT: { address: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", decimals: 6 },
+        WETH: { address: "0x4200000000000000000000000000000000000006", decimals: 18 }
+    },
+    1: { // Ethereum Mainnet
+        USDT: { address: "0xdAC17F958D2ee523a2206206994597C13D831ec7", decimals: 6 },
+        USDC: { address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", decimals: 6 },
+        WETH: { address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", decimals: 18 }
+    },
+    42161: { // Arbitrum One
+        USDC: { address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", decimals: 6 },
+        USDT: { address: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", decimals: 6 },
+        WETH: { address: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", decimals: 18 }
+    },
+    137: { // Polygon PoS
+        USDT: { address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", decimals: 6 },
+        USDC: { address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", decimals: 6 },
+        WETH: { address: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619", decimals: 18 }
+    },
+    11155111: { // Sepolia Testnet
+        USDC: { address: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", decimals: 6 },
+        USDT: { address: "0xaA8E23Fb1079EA71e0a56F48a2aA51851D8433D0", decimals: 6 },
+        WETH: { address: "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9", decimals: 18 }
+    }
+};
+
+const CLIENT_ROUTER_ADDRESSES = {
+    8453: { // Base L2
+        Uniswap_V2: "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24",
+        SushiSwap_V2: "0x6BDED42c6DA8FBf0d2bA55B2fa120C5e0c8D7891"
+    },
+    1: { // Ethereum
+        Uniswap_V2: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+        SushiSwap_V2: "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F"
+    },
+    42161: { // Arbitrum One
+        SushiSwap_V2: "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506",
+        Uniswap_V2: "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24"
+    },
+    137: { // Polygon PoS
+        SushiSwap_V2: "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506",
+        QuickSwap: "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff"
+    },
+    11155111: { // Sepolia Testnet
+        Uniswap_V2: "0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008"
+    }
+};
+
+const CLIENT_ERC20_ABI = [
+    "function allowance(address owner, address spender) view returns (uint256)",
+    "function approve(address spender, uint256 amount) returns (bool)",
+    "function balanceOf(address owner) view returns (uint256)",
+    "function decimals() view returns (uint8)",
+    "function symbol() view returns (string)"
+];
+
+const CLIENT_ROUTER_V2_ABI = [
+    "function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) returns (uint[] memory amounts)",
+    "function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) payable returns (uint[] memory amounts)",
+    "function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) returns (uint[] memory amounts)"
+];
+
+async function preApproveTokens() {
+    const provider = getMetaMaskProvider();
+    if (!provider) {
+        showMetaMaskModal();
+        return;
+    }
+    if (!metamaskAccount) {
+        showToast("Please connect your MetaMask wallet first!", "warning");
+        await connectMetaMask();
+        return;
+    }
+
+    try {
+        if (!metamaskSigner) {
+            await initEthersProviderAndSigner();
+        }
+
+        const chainIdHex = metamaskChainId || (await provider.request({ method: "eth_chainId" }));
+        const chainIdNum = parseInt(chainIdHex, 16);
+        const tokens = CLIENT_TOKEN_ADDRESSES[chainIdNum] || CLIENT_TOKEN_ADDRESSES[8453];
+        const routers = CLIENT_ROUTER_ADDRESSES[chainIdNum] || CLIENT_ROUTER_ADDRESSES[8453];
+
+        if (!tokens || !routers) {
+            showToast("No router or token definitions found for current network.", "error");
+            return;
+        }
+
+        const tokenObj = tokens.USDC || tokens.USDT;
+        if (!tokenObj) {
+            showToast("No stablecoin found to approve.", "error");
+            return;
+        }
+
+        const routerAddress = routers.Uniswap_V2 || Object.values(routers)[0];
+        const tokenContract = new ethers.Contract(tokenObj.address, CLIENT_ERC20_ABI, metamaskSigner);
+
+        showToast(`Checking allowance for ${tokenObj.symbol || 'USDC'} on DEX Router...`, "info");
+        const currentAllowance = await tokenContract.allowance(metamaskAccount, routerAddress);
+
+        if (currentAllowance > ethers.parseUnits("1000", tokenObj.decimals)) {
+            showToast(`Tokens already approved! Router has unlimited allowance.`, "success");
+            return;
+        }
+
+        showToast("Please confirm Token Approval in MetaMask...", "info");
+        const tx = await tokenContract.approve(routerAddress, ethers.MaxUint256);
+        showToast(`Approval submitted! Hash: ${tx.hash.slice(0, 10)}... Waiting for block confirmation...`, "info");
+        await tx.wait(1);
+        showToast("Token successfully approved for trading!", "success");
+    } catch (err) {
+        if (err.code === "ACTION_REJECTED" || err.code === 4001) {
+            showToast("Approval signature rejected in MetaMask.", "warning");
+        } else {
+            showToast(`Approval error: ${err.message || err}`, "error");
+        }
+    }
+}
+
+let clientWalletBalances = {
+    eth: 0,
+    weth: 0,
+    usdt: 0,
+    usdc: 0,
+    updated: 0
+};
+
+async function fetchClientWalletBalances(account, chainIdNum) {
+    const provider = getMetaMaskProvider();
+    if (!provider || !account) return;
+
+    try {
+        // 1. Native ETH balance via eth_getBalance
+        const hexBal = await provider.request({
+            method: "eth_getBalance",
+            params: [account, "latest"]
+        });
+        if (hexBal) {
+            clientWalletBalances.eth = parseInt(hexBal, 16) / 1e18;
+        }
+
+        // 2. Token balances via ERC20 balanceOf eth_call
+        const tokens = CLIENT_TOKEN_ADDRESSES[chainIdNum] || CLIENT_TOKEN_ADDRESSES[8453];
+        const cleanAddr = account.toLowerCase().replace("0x", "").padStart(64, "0");
+        const balanceOfData = "0x70a08231" + cleanAddr;
+
+        for (const [sym, info] of Object.entries(tokens)) {
+            try {
+                const hexRes = await provider.request({
+                    method: "eth_call",
+                    params: [{ to: info.address, data: balanceOfData }, "latest"]
+                });
+                if (hexRes && hexRes !== "0x") {
+                    const rawVal = BigInt(hexRes);
+                    const dec = info.decimals || 18;
+                    const divisor = BigInt(10 ** dec);
+                    const whole = rawVal / divisor;
+                    const rem = rawVal % divisor;
+                    const val = Number(whole) + Number(rem) / (10 ** dec);
+                    if (sym === "USDC") clientWalletBalances.usdc = val;
+                    else if (sym === "USDT") clientWalletBalances.usdt = val;
+                    else if (sym === "WETH") clientWalletBalances.weth = val;
+                }
+            } catch (tokErr) {
+                // Ignore individual token query errors
+            }
+        }
+        clientWalletBalances.updated = Date.now();
+        renderClientWalletBalances();
+    } catch (err) {
+        console.warn("[Client Web3 Balance fetch error]:", err);
+    }
+}
+
+function renderClientWalletBalances() {
+    if (!metamaskAccount) return;
+    const ethPrice = latestMarketData && latestMarketData.summary && latestMarketData.summary.eth_price_usdt ? Number(latestMarketData.summary.eth_price_usdt) : 3000;
+    
+    setText("balETH", `${Number(clientWalletBalances.eth || 0).toFixed(4)} ETH`);
+    setText("balETHusd", `≈ $${(Number(clientWalletBalances.eth || 0) * ethPrice).toFixed(2)} USDT`);
+    setText("balWETH", `${Number(clientWalletBalances.weth || 0).toFixed(4)} WETH`);
+    setText("balWETHusd", `≈ $${(Number(clientWalletBalances.weth || 0) * ethPrice).toFixed(2)} USDT`);
+    setText("balUSDT", `$${Number(clientWalletBalances.usdt || 0).toLocaleString("en-US", { minimumFractionDigits: 2 })} USDT`);
+    setText("balUSDC", `$${Number(clientWalletBalances.usdc || 0).toLocaleString("en-US", { minimumFractionDigits: 2 })} USDC`);
+
+    const totalStable = (clientWalletBalances.usdt || 0) + (clientWalletBalances.usdc || 0);
+    const totalEthEquity = ((clientWalletBalances.eth || 0) + (clientWalletBalances.weth || 0)) * ethPrice;
+    const totalEquity = totalStable + totalEthEquity;
+    setText("kpiBalance", `$${totalEquity.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+}
+
 let metaMaskListenersAttached = false;
 
 function initMetaMask() {
@@ -1342,56 +1604,32 @@ async function connectMetaMask() {
     }
 
     try {
-        showToast("Requesting MetaMask connection...", "info");
+        showToast("Connecting to MetaMask...", "info");
         let accounts = [];
-
-        // Check if an account is already authorized
-        let currentAccounts = [];
         try {
-            currentAccounts = await provider.request({ method: "eth_accounts" });
-        } catch (e) {}
-
-        if (currentAccounts && currentAccounts.length > 0) {
-            // Force MetaMask account selection popup if already connected
-            try {
-                const perms = await provider.request({
-                    method: "wallet_requestPermissions",
-                    params: [{ eth_accounts: {} }]
-                });
-                if (perms && perms[0]?.caveats?.[0]?.value) {
-                    accounts = perms[0].caveats[0].value;
-                }
-            } catch (permErr) {
-                if (permErr.code === 4001) {
-                    showToast("Account selection cancelled in MetaMask.", "warning");
-                    return;
-                }
-                // Fallback to already authorized account
-                accounts = currentAccounts;
-            }
-        }
-
-        if (!accounts || accounts.length === 0) {
             accounts = await provider.request({ method: "eth_requestAccounts" });
+        } catch (reqErr) {
+            if (reqErr.code === 4001) {
+                showToast("Connection cancelled in MetaMask.", "warning");
+                return;
+            }
+            if (reqErr.code === -32002) {
+                showToast("MetaMask request already pending! Open your MetaMask extension to approve.", "warning");
+                return;
+            }
+            throw reqErr;
         }
 
         if (!accounts || accounts.length === 0) {
-            showToast("No account selected in MetaMask.", "warning");
+            showToast("No account authorized in MetaMask.", "warning");
             return;
         }
 
-        const short = accounts[0].slice(0, 6) + "..." + accounts[0].slice(-4);
-        showToast(`MetaMask Connected: ${short}`, "success");
         safeStorage.setItem("metamask_connected", "true");
         await handleAccountsChanged(accounts, true);
     } catch (err) {
-        if (err.code === 4001) {
-            showToast("Connection cancelled by user in MetaMask.", "warning");
-        } else if (err.code === -32002) {
-            showToast("MetaMask request already pending! Click the MetaMask fox icon in your browser toolbar to approve.", "warning");
-        } else {
-            showToast(`MetaMask error: ${err.message || err}`, "error");
-        }
+        console.warn("[MetaMask connect error]:", err);
+        showToast(`MetaMask error: ${err.message || err}`, "error");
     }
 }
 
@@ -1411,11 +1649,18 @@ async function handleAccountsChanged(accounts, notifyUser = true) {
         metamaskChainId = null;
     }
 
+    const activeCid = metamaskChainId ? parseInt(metamaskChainId, 16) : 8453;
+
     // Setup ethers Provider & Signer architecture
     await initEthersProviderAndSigner();
 
-    // Update UI elements
+    // Update UI elements immediately
     updateWalletUIConnected(metamaskAccount, metamaskChainId);
+
+    // Instant client-side direct Web3 balance fetch
+    if (typeof fetchClientWalletBalances === "function") {
+        fetchClientWalletBalances(metamaskAccount, activeCid);
+    }
 
     // Synchronize connected address with backend
     try {
@@ -1424,7 +1669,7 @@ async function handleAccountsChanged(accounts, notifyUser = true) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 address: metamaskAccount,
-                chain_id: metamaskChainId ? parseInt(metamaskChainId, 16) : null
+                chain_id: activeCid
             })
         });
         const data = await res.json();
@@ -1449,6 +1694,9 @@ async function handleChainChanged(chainIdHex) {
     // Preserve metamaskAccount! Network switching must not lose wallet connection
     if (metamaskAccount) {
         updateWalletUIConnected(metamaskAccount, chainIdHex);
+        if (typeof fetchClientWalletBalances === "function") {
+            fetchClientWalletBalances(metamaskAccount, newChainId);
+        }
     }
 
     // Synchronize network cards and backend config if chain is supported
@@ -1479,6 +1727,7 @@ async function disconnectMetaMask(event) {
     metamaskSigner = null;
     dexArbitrageContract = null;
     safeStorage.removeItem("metamask_connected");
+    clientWalletBalances = { eth: 0, weth: 0, usdt: 0, usdc: 0, updated: 0 };
 
     closeWalletDropdown();
     updateWalletUIDisconnected();
@@ -1834,6 +2083,7 @@ async function executeMetaMaskOnChainTrade() {
             await initEthersProviderAndSigner();
         }
 
+        // Check native ETH gas balance
         const ethBalance = await metamaskProvider.getBalance(metamaskAccount);
         const ethVal = parseFloat(ethers.formatEther(ethBalance));
         if (ethVal < 0.0001) {
@@ -1845,31 +2095,133 @@ async function executeMetaMaskOnChainTrade() {
             return;
         }
 
-        // Direct non-custodial transaction invocation
-        const txParams = {
-            to: dexContractAddress || "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24",
-            value: 0,
-            data: "0x",
-        };
+        const tokens = CLIENT_TOKEN_ADDRESSES[targetChainId] || CLIENT_TOKEN_ADDRESSES[8453];
+        const routers = CLIENT_ROUTER_ADDRESSES[targetChainId] || CLIENT_ROUTER_ADDRESSES[8453];
 
-        showToast("Please confirm transaction in MetaMask...", "info");
-        const txResponse = await metamaskSigner.sendTransaction(txParams);
-        showToast(`Transaction Broadcasted: ${txResponse.hash.slice(0, 10)}...`, "success");
+        if (!tokens || !routers) {
+            renderExecutionResult({
+                success: false,
+                status: "CONFIGURATION_ERROR",
+                message: "No token or router contracts registered for this network."
+            });
+            return;
+        }
 
-        renderExecutionResult({
-            success: true,
-            status: "TRANSACTION_CONFIRMED",
-            message: `Atomic trade submitted directly via MetaMask to Base L2!`,
-            tx_hash: txResponse.hash,
-            trade: {
+        // Quote token: default to USDC for Base L2
+        const tokenInMeta = (clientWalletBalances.usdc > 0 || !tokens.USDT) ? (tokens.USDC || tokens.USDT) : (tokens.USDT || tokens.USDC);
+        const tokenOutMeta = tokens.WETH;
+
+        if (!tokenInMeta || !tokenOutMeta) {
+            renderExecutionResult({
+                success: false,
+                status: "CONFIGURATION_ERROR",
+                message: "Target tokens (USDC/WETH) are not defined for the selected blockchain."
+            });
+            return;
+        }
+
+        // Dynamic trade amount sizing
+        let tradeAmt = selectedTradeAmount || 1.0;
+        const availStable = (tokenInMeta === tokens.USDC) ? clientWalletBalances.usdc : clientWalletBalances.usdt;
+        if (availStable > 0 && tradeAmt > availStable) {
+            tradeAmt = Math.max(0.0001, Math.floor(availStable * 0.95 * 10000) / 10000);
+        }
+
+        if (availStable <= 0) {
+            renderExecutionResult({
+                success: false,
+                status: "INSUFFICIENT_BALANCE",
+                message: `Connected wallet ${metamaskAccount.slice(0, 6)}...${metamaskAccount.slice(-4)} has $0.0000 USDC/USDT on Base L2. Fund your wallet with at least $0.05 USDC to execute on-chain swaps.`
+            });
+            return;
+        }
+
+        const parsedAmountIn = ethers.parseUnits(tradeAmt.toString(), tokenInMeta.decimals);
+        const routerName = route.buy_dex || "Uniswap_V2";
+        const routerAddress = routers[routerName] || routers.Uniswap_V2 || "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24";
+
+        // Step 1: Verify and request ERC-20 token approval
+        const tokenContract = new ethers.Contract(tokenInMeta.address, CLIENT_ERC20_ABI, metamaskSigner);
+        showExecModal("Verifying Token Allowance", `Checking ${tokenInMeta.decimals === 6 ? 'USDC' : 'USDT'} allowance for ${routerName}...`);
+        const currentAllowance = await tokenContract.allowance(metamaskAccount, routerAddress);
+
+        if (currentAllowance < parsedAmountIn) {
+            showExecModal("Approving Token Spending", `Please confirm Token Approval for ${routerName} in MetaMask...`);
+            showToast("Please approve token spending in MetaMask...", "info");
+            const approveTx = await tokenContract.approve(routerAddress, ethers.MaxUint256);
+            showExecModal("Confirming Approval", `Approval submitted (${approveTx.hash.slice(0, 10)}...). Waiting for block confirmation...`);
+            await approveTx.wait(1);
+            showToast("Token approval confirmed on-chain!", "success");
+        }
+
+        // Step 2: Execute swap via DEX Router contract
+        showExecModal("Executing DEX Swap", `Submitting trade of $${tradeAmt.toFixed(4)} on ${routerName}... Confirm in MetaMask.`);
+        showToast("Please confirm Swap transaction in MetaMask...", "info");
+
+        const routerContract = new ethers.Contract(routerAddress, CLIENT_ROUTER_V2_ABI, metamaskSigner);
+        const deadline = Math.floor(Date.now() / 1000) + 1200; // 20 min
+        const path = [tokenInMeta.address, tokenOutMeta.address];
+
+        const txResponse = await routerContract.swapExactTokensForTokens(
+            parsedAmountIn,
+            0,
+            path,
+            metamaskAccount,
+            deadline,
+            { gasLimit: 250000 }
+        );
+
+        showExecModal("Mining Transaction", `Swap broadcasted! Hash: ${txResponse.hash.slice(0, 10)}... Waiting for Base L2 block receipt...`);
+        showToast(`Transaction Broadcasted: ${txResponse.hash.slice(0, 10)}...`, "info");
+        const receipt = await txResponse.wait(1);
+
+        // Step 3: Verify and record live trade on backend
+        showExecModal("Verifying On-Chain Receipt", "Verifying block receipt & updating live KPIs with Base L2 RPC...");
+        const confirmRes = await fetch("/api/trade/confirm-live", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                tx_hash: txResponse.hash,
+                chain_id: targetChainId,
                 buy_dex: route.buy_dex,
                 sell_dex: route.sell_dex,
-                amount_in: selectedTradeAmount,
-                net_profit: route.net_profit_usdt,
-                mode: "LIVE"
-            }
+                token_pair: latestMarketData.symbol || "WETH/USDC",
+                amount_in: tradeAmt,
+                expected_profit: route.net_profit_usdt,
+                gross_profit: route.gross_profit_usdt || route.net_profit_usdt
+            })
         });
+        const confirmData = await confirmRes.json();
+
+        if (confirmData.success) {
+            renderExecutionResult({
+                success: true,
+                status: "TRANSACTION_CONFIRMED",
+                message: `Atomic trade verified on-chain! Net PnL: +$${Number(confirmData.trade.net_profit || 0).toFixed(4)} USDT`,
+                tx_hash: txResponse.hash,
+                trade: confirmData.trade
+            });
+            showToast("Live trade verified and committed to database!", "success");
+        } else {
+            renderExecutionResult({
+                success: true,
+                status: "ON_CHAIN_MINED",
+                message: `Transaction mined on Base L2! Hash: ${txResponse.hash}`,
+                tx_hash: txResponse.hash,
+                trade: {
+                    buy_dex: route.buy_dex,
+                    sell_dex: route.sell_dex,
+                    amount_in: tradeAmt,
+                    net_profit: route.net_profit_usdt,
+                    mode: "LIVE"
+                }
+            });
+        }
+
+        await fetchClientWalletBalances(metamaskAccount, targetChainId);
+        fetchMarketData();
         loadTrades();
+        loadExecutionLogs();
     } catch (err) {
         if (err.code === "ACTION_REJECTED" || err.code === 4001) {
             showToast("Transaction signature rejected in MetaMask.", "warning");

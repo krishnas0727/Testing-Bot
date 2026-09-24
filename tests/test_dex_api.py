@@ -4,12 +4,15 @@ from unittest.mock import patch
 
 from app import app
 import config
+import database
 
 
 class DEXApiTests(unittest.TestCase):
     def setUp(self):
         self.client = app.test_client()
         self.client.testing = True
+        config.WALLET_ADDRESS = ""
+        database.save_bot_setting("wallet_address", "")
 
     def test_health_check(self):
         res = self.client.get("/api/health")
@@ -92,6 +95,7 @@ class DEXApiTests(unittest.TestCase):
         # 1. Disconnected wallet test
         orig_wallet = config.WALLET_ADDRESS
         config.WALLET_ADDRESS = ""
+        database.save_bot_setting("wallet_address", "")
         try:
             res = self.client.get("/api/market")
             if res.status_code == 200:
@@ -101,6 +105,7 @@ class DEXApiTests(unittest.TestCase):
                 self.assertEqual(summary["total_trades"], 0)
         finally:
             config.WALLET_ADDRESS = orig_wallet
+            database.save_bot_setting("wallet_address", orig_wallet)
 
         # 2. Emergency stop active test
         self.client.post("/api/emergency-stop", json={"active": True})
@@ -156,6 +161,10 @@ class DEXApiTests(unittest.TestCase):
         self.assertTrue(data["wallet"]["is_connected"])
         self.assertEqual(config.WALLET_ADDRESS, "0x71C8BF422005A3Db0782F434914f6b15Ac5c0c6E")
 
+        # Verify persistence in SQLite bot_settings
+        saved_settings = database.load_all_bot_settings()
+        self.assertEqual(saved_settings.get("wallet_address"), "0x71C8BF422005A3Db0782F434914f6b15Ac5c0c6E")
+
         # Test disconnect
         res_dc = self.client.post("/api/wallet/disconnect", json={})
         self.assertEqual(res_dc.status_code, 200)
@@ -163,6 +172,16 @@ class DEXApiTests(unittest.TestCase):
         self.assertTrue(dc_data["success"])
         self.assertFalse(dc_data["wallet"]["is_connected"])
         self.assertEqual(config.WALLET_ADDRESS, "")
+        saved_settings_dc = database.load_all_bot_settings()
+        self.assertEqual(saved_settings_dc.get("wallet_address"), "")
+
+        # Test /api/market synchronizes address query param across workers
+        res_market = self.client.get("/api/market?address=0x71C8BF422005A3Db0782F434914f6b15Ac5c0c6E")
+        self.assertEqual(res_market.status_code, 200)
+        market_data = res_market.get_json()
+        self.assertTrue(market_data["success"])
+        self.assertEqual(market_data["wallet"]["wallet_address"], "0x71C8BF422005A3Db0782F434914f6b15Ac5c0c6E")
+        self.assertTrue(market_data["wallet"]["is_connected"])
 
         # Test invalid format rejection
         res_bad = self.client.post("/api/wallet/connect", json={"address": "invalid_address"})
@@ -273,6 +292,82 @@ class DEXApiTests(unittest.TestCase):
         self.assertIn("execution_status", data)
         self.assertIsInstance(data["logs"], list)
 
+    def test_confirm_live_trade_api_invalid_hash(self):
+        """Verify /api/trade/confirm-live validates transaction hash format."""
+        res = self.client.post("/api/trade/confirm-live", json={"tx_hash": "invalid"})
+        self.assertEqual(res.status_code, 400)
+        data = res.get_json()
+        self.assertFalse(data["success"])
+
+    def test_confirm_live_trade_api_pending(self):
+        """Verify /api/trade/confirm-live handles pending transactions gracefully."""
+        from unittest.mock import patch
+        valid_hash = "0x" + "a" * 64
+        with patch("dex_engine.rpc_call", return_value=None):
+            res = self.client.post("/api/trade/confirm-live", json={"tx_hash": valid_hash})
+            self.assertEqual(res.status_code, 202)
+            data = res.get_json()
+            self.assertTrue(data.get("pending"))
+
+    def test_confirm_live_trade_api_reverted(self):
+        """Verify /api/trade/confirm-live rejects reverted transactions."""
+        from unittest.mock import patch
+        valid_hash = "0x" + "b" * 64
+        mock_receipt = {"status": "0x0", "gasUsed": "0x5208"}
+        with patch("dex_engine.rpc_call", return_value=mock_receipt):
+            res = self.client.post("/api/trade/confirm-live", json={"tx_hash": valid_hash})
+            self.assertEqual(res.status_code, 400)
+            data = res.get_json()
+            self.assertEqual(data.get("status"), "REVERTED")
+
+    def test_confirm_live_trade_api_success(self):
+        """Verify /api/trade/confirm-live commits confirmed on-chain transactions."""
+        from unittest.mock import patch
+        valid_hash = "0x" + "c" * 64
+        mock_receipt = {
+            "status": "0x1",
+            "gasUsed": "0x249f0", # 150,000 gas
+            "effectiveGasPrice": "0x3b9aca00", # 1 Gwei
+        }
+        with patch("dex_engine.rpc_call", return_value=mock_receipt):
+            res = self.client.post("/api/trade/confirm-live", json={
+                "tx_hash": valid_hash,
+                "chain_id": 8453,
+                "buy_dex": "Uniswap_V2",
+                "sell_dex": "SushiSwap_V2",
+                "token_pair": "WETH/USDC",
+                "amount_in": 10.0,
+                "expected_profit": 0.05,
+                "gross_profit": 0.06
+            })
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+            self.assertTrue(data["success"])
+            self.assertEqual(data["trade"]["tx_hash"], valid_hash)
+            self.assertEqual(data["trade"]["mode"], "LIVE")
+            self.assertEqual(data["trade"]["status"], "CONFIRMED")
+            self.assertGreater(data["trade"]["gas_used"], 0)
+
+    def test_settings_private_key_handling(self):
+        """Verify saving and clearing private_key in /api/settings."""
+        test_pk = "0x" + "1" * 64
+        try:
+            res = self.client.post("/api/settings", json={"private_key": test_pk})
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+            self.assertTrue(data["settings"]["has_private_key"])
+            self.assertEqual(config.PRIVATE_KEY, test_pk)
+
+            # Clear private key
+            res_clear = self.client.post("/api/settings", json={"private_key": ""})
+            self.assertEqual(res_clear.status_code, 200)
+            data_clear = res_clear.get_json()
+            self.assertFalse(data_clear["settings"]["has_private_key"])
+            self.assertEqual(config.PRIVATE_KEY, "")
+        finally:
+            config.PRIVATE_KEY = ""
+
 
 if __name__ == "__main__":
     unittest.main()
+

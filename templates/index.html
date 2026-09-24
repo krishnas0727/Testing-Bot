@@ -307,6 +307,9 @@
                     <button id="btnPortfolioConnect" class="btn btn-secondary" style="width:96px; min-width:96px; max-width:96px; justify-content:center; padding:4px 10px; font-size:11px; display:inline-flex; align-items:center; gap:4px; box-sizing:border-box;" onclick="connectMetaMask()">
                         🦊 Connect
                     </button>
+                    <button id="btnPreApproveTokens" class="btn btn-secondary" style="justify-content:center; padding:4px 10px; font-size:11px; display:inline-flex; align-items:center; gap:4px; box-sizing:border-box;" onclick="preApproveTokens()" title="Pre-approve tokens on Uniswap/SushiSwap routers for 1-click execution">
+                        🔓 Approve Tokens
+                    </button>
                 </div>
             </div>
 
@@ -425,6 +428,11 @@
             </div>
             <div class="dex-wallet-grid">
                 <div class="dex-wallet-item">
+                    <span class="token-name">USD Coin (USDC)</span>
+                    <h3 id="balUSDC">$0.00 USDC</h3>
+                    <small>Base L2 Primary Liquidity</small>
+                </div>
+                <div class="dex-wallet-item">
                     <span class="token-name">Tether (USDT)</span>
                     <h3 id="balUSDT">$0.00 USDT</h3>
                     <small>Active DEX Trading Capital</small>
@@ -438,11 +446,6 @@
                     <span class="token-name">Native ETH (Gas)</span>
                     <h3 id="balETH">0.0000 ETH</h3>
                     <small id="balETHusd">≈ $0.00 USDT</small>
-                </div>
-                <div class="dex-wallet-item">
-                    <span class="token-name">Smart Contract Security</span>
-                    <h3 style="color:var(--profit-color);">Atomic Revert</h3>
-                    <small>DexArbitrage.sol (100% On-Chain)</small>
                 </div>
             </div>
         </div>
@@ -913,6 +916,12 @@
                         <div class="form-group">
                             <label>Non-Custodial Wallet Address</label>
                             <input type="text" id="cfgWalletAddress" class="form-control" placeholder="0x... (Leave empty in MOCK mode)">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Server Autonomous Execution Private Key (Optional)</label>
+                            <input type="password" id="cfgPrivateKey" class="form-control" placeholder="0x... (Optional: Only if running autonomous background bot on server)">
+                            <small id="cfgPrivateKeyStatus" style="color:var(--text-muted); font-size:11px;">If left blank, trades execute non-custodially via your connected MetaMask wallet.</small>
                         </div>
 
                         <div class="form-group">

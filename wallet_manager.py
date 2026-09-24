@@ -29,6 +29,15 @@ def get_wallet_address() -> str:
     addr = getattr(config, "WALLET_ADDRESS", "").strip()
     if addr:
         return addr
+    try:
+        from database import load_all_bot_settings
+        saved = load_all_bot_settings()
+        saved_addr = (saved.get("wallet_address") or "").strip()
+        if saved_addr and saved_addr.startswith("0x") and len(saved_addr) == 42:
+            config.WALLET_ADDRESS = saved_addr
+            return saved_addr
+    except Exception:
+        pass
     mode = getattr(config, "TRADING_MODE", "LIVE")
     if mode == "MOCK":
         return MOCK_WALLET_BALANCES["address"]
@@ -79,14 +88,17 @@ def check_token_allowance(owner: str, spender: str, token_sym: str = "WETH") -> 
         return 0.0
 
 
-def get_wallet_balances(eth_price_usdt: float = 3000.0) -> Dict[str, Any]:
+def get_wallet_balances(eth_price_usdt: float = 3000.0, wallet_address: Optional[str] = None) -> Dict[str, Any]:
     """Retrieve complete wallet balance report.
     
     In LIVE mode, strictly queries real on-chain balances. If wallet is not
     configured, returns zero balances and disconnected state.
     """
     mode = getattr(config, "TRADING_MODE", "LIVE")
-    user_addr = getattr(config, "WALLET_ADDRESS", "").strip()
+    if wallet_address is not None:
+        user_addr = wallet_address.strip()
+    else:
+        user_addr = getattr(config, "WALLET_ADDRESS", "").strip()
 
     if not user_addr:
         if mode == "MOCK":
