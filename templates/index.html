@@ -531,70 +531,75 @@
                     </div>
 
                     <div class="opp-box">
-                        <!-- INTERACTIVE MULTI-HOP ARBITRAGE ROUTE FLOW DIAGRAM -->
+                        <!-- INTERACTIVE MULTI-HOP ARBITRAGE ROUTE FLOW DIAGRAM (2-LEG RESPONSIVE PIPELINE) -->
                         <div class="interactive-route-flow" id="interactiveRouteFlow">
-                            <!-- Node 1: Input Asset -->
-                            <div class="route-node route-node-token">
-                                <div class="node-icon">🪙</div>
-                                <div class="node-content">
-                                    <span class="node-tag">INPUT ASSET</span>
-                                    <span class="node-title" id="flowInputToken">USDT / USDC</span>
-                                    <span class="node-sub" id="flowInputAmount">$0.10 USDT</span>
+                            <!-- LEG 1: BUY SWAP -->
+                            <div class="route-leg-container">
+                                <!-- Node 1: Input Asset -->
+                                <div class="route-node route-node-token">
+                                    <div class="node-icon">🪙</div>
+                                    <div class="node-content">
+                                        <span class="node-tag">INPUT ASSET</span>
+                                        <span class="node-title" id="flowInputToken">USDT / USDC</span>
+                                        <span class="node-sub" id="flowInputAmount">$0.10 USDT</span>
+                                    </div>
+                                </div>
+
+                                <!-- Flow Connector 1 -->
+                                <div class="route-connector">
+                                    <div class="connector-line">
+                                        <span class="pulse-particle"></span>
+                                    </div>
+                                    <span class="connector-arrow">▶</span>
+                                </div>
+
+                                <!-- Node 2: Buy DEX -->
+                                <div class="route-node route-node-dex buy-dex-glow">
+                                    <span class="node-badge-top">STEP 1: BUY</span>
+                                    <div class="node-content">
+                                        <span class="node-title" id="oppBuyDex" style="color:var(--accent-blue);">Uniswap V2</span>
+                                        <span class="node-price" id="oppBuyPrice">$0.00</span>
+                                        <span class="node-sub">Pool Depth: Liquid</span>
+                                    </div>
                                 </div>
                             </div>
 
-                            <!-- Flow Connector 1 -->
-                            <div class="route-connector">
-                                <div class="connector-line">
-                                    <span class="pulse-particle"></span>
-                                </div>
-                                <span class="connector-arrow">▶</span>
+                            <!-- INTER-LEG BRIDGE DIVIDER -->
+                            <div class="route-bridge-divider">
+                                <span class="route-bridge-line"></span>
+                                <span class="connector-bridge" id="flowBridgeAsset">WETH BRIDGE</span>
+                                <span class="route-bridge-arrow">▼</span>
+                                <span class="route-bridge-line"></span>
                             </div>
 
-                            <!-- Node 2: Buy DEX -->
-                            <div class="route-node route-node-dex buy-dex-glow">
-                                <span class="node-badge-top">STEP 1: BUY</span>
-                                <div class="node-content">
-                                    <span class="node-title" id="oppBuyDex" style="color:var(--accent-blue);">Uniswap V2</span>
-                                    <span class="node-price" id="oppBuyPrice">$0.00</span>
-                                    <span class="node-sub">Pool Depth: Liquid</span>
+                            <!-- LEG 2: SELL SWAP -->
+                            <div class="route-leg-container">
+                                <!-- Node 3: Sell DEX -->
+                                <div class="route-node route-node-dex sell-dex-glow">
+                                    <span class="node-badge-top">STEP 2: SELL</span>
+                                    <div class="node-content">
+                                        <span class="node-title" id="oppSellDex" style="color:var(--profit-color);">SushiSwap V2</span>
+                                        <span class="node-price" id="oppSellPrice">$0.00</span>
+                                        <span class="node-sub" id="flowImpactSub">Impact &lt; 0.05%</span>
+                                    </div>
                                 </div>
-                            </div>
 
-                            <!-- Flow Connector 2 (Bridge) -->
-                            <div class="route-connector">
-                                <div class="connector-line">
-                                    <span class="pulse-particle reverse"></span>
+                                <!-- Flow Connector 2 -->
+                                <div class="route-connector">
+                                    <div class="connector-line">
+                                        <span class="pulse-particle reverse"></span>
+                                    </div>
+                                    <span class="connector-arrow">▶</span>
                                 </div>
-                                <span class="connector-bridge" id="flowBridgeAsset">WETH</span>
-                                <span class="connector-arrow">▶</span>
-                            </div>
 
-                            <!-- Node 3: Sell DEX -->
-                            <div class="route-node route-node-dex sell-dex-glow">
-                                <span class="node-badge-top">STEP 2: SELL</span>
-                                <div class="node-content">
-                                    <span class="node-title" id="oppSellDex" style="color:var(--profit-color);">SushiSwap V2</span>
-                                    <span class="node-price" id="oppSellPrice">$0.00</span>
-                                    <span class="node-sub" id="flowImpactSub">Impact &lt; 0.05%</span>
-                                </div>
-                            </div>
-
-                            <!-- Flow Connector 3 -->
-                            <div class="route-connector">
-                                <div class="connector-line">
-                                    <span class="pulse-particle"></span>
-                                </div>
-                                <span class="connector-arrow">▶</span>
-                            </div>
-
-                            <!-- Node 4: Output Asset & Alpha -->
-                            <div class="route-node route-node-token profit-glow">
-                                <div class="node-icon">💰</div>
-                                <div class="node-content">
-                                    <span class="node-tag">OUTPUT ASSET</span>
-                                    <span class="node-title" id="flowOutputToken">USDT / USDC</span>
-                                    <span class="node-sub text-profit" id="flowOutputProfit">+$0.00 (+0.00%)</span>
+                                <!-- Node 4: Output Asset & Alpha -->
+                                <div class="route-node route-node-token profit-glow">
+                                    <div class="node-icon">💰</div>
+                                    <div class="node-content">
+                                        <span class="node-tag">OUTPUT ASSET</span>
+                                        <span class="node-title" id="flowOutputToken">USDT / USDC</span>
+                                        <span class="node-sub text-profit" id="flowOutputProfit">+$0.00 (+0.00%)</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -621,17 +626,17 @@
                 </div>
 
                 <!-- QUICK EXECUTION SIZING PRESETS -->
-                <div style="margin-top:14px; padding:10px 14px; background:rgba(15,23,42,0.7); border-radius:6px; border:1px solid rgba(56,189,248,0.2);">
+                <div style="margin-top:12px; padding:10px 14px; background:rgba(15,23,42,0.7); border-radius:6px; border:1px solid rgba(56,189,248,0.2);">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                         <span style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Quick Execution Sizing</span>
                         <span id="dashSizingLabel" style="font-size:11px; font-family:var(--font-mono); color:var(--accent-cyan); font-weight:600;">$0.10 USDT</span>
                     </div>
-                    <div class="size-btn-group" style="margin:0; gap:6px;">
-                        <button type="button" class="size-btn" onclick="selectTradeSize(0.05)" style="padding:4px 8px; font-size:11px;">$0.05</button>
-                        <button type="button" class="size-btn active" onclick="selectTradeSize(0.10)" style="padding:4px 8px; font-size:11px;">$0.10</button>
-                        <button type="button" class="size-btn" onclick="selectTradeSize(1)" style="padding:4px 8px; font-size:11px;">$1</button>
-                        <button type="button" class="size-btn size-pct-pill" onclick="selectSizingPercentage(50)" style="padding:4px 8px; font-size:11px;">50%</button>
-                        <button type="button" class="size-btn btn-max-safe" onclick="selectMaxSafeSize()" style="padding:4px 8px; font-size:11px;">⚡ Max Safe</button>
+                    <div class="size-btn-group" style="margin:0; display:grid; grid-template-columns:repeat(5, 1fr); gap:6px;">
+                        <button type="button" class="size-btn" onclick="selectTradeSize(0.05)" style="padding:5px 2px; font-size:11px; text-align:center;">$0.05</button>
+                        <button type="button" class="size-btn active" onclick="selectTradeSize(0.10)" style="padding:5px 2px; font-size:11px; text-align:center;">$0.10</button>
+                        <button type="button" class="size-btn" onclick="selectTradeSize(1)" style="padding:5px 2px; font-size:11px; text-align:center;">$1</button>
+                        <button type="button" class="size-btn size-pct-pill" onclick="selectSizingPercentage(50)" style="padding:5px 2px; font-size:11px; text-align:center;">50%</button>
+                        <button type="button" class="size-btn btn-max-safe" onclick="selectMaxSafeSize()" style="padding:5px 2px; font-size:11px; text-align:center;">⚡ Max</button>
                     </div>
                 </div>
 
@@ -641,18 +646,19 @@
                         <span style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Slippage Tolerance</span>
                         <span id="dashSlippageLabel" style="font-size:11px; font-family:var(--font-mono); color:var(--accent-mint); font-weight:600;">0.5% (Safe)</span>
                     </div>
-                    <div class="size-btn-group" style="margin:0; gap:6px;">
-                        <button type="button" class="size-btn slippage-btn" onclick="selectSlippagePreset(0.1, event)" style="padding:4px 8px; font-size:11px;">0.1%</button>
-                        <button type="button" class="size-btn slippage-btn active" onclick="selectSlippagePreset(0.5, event)" style="padding:4px 8px; font-size:11px;">0.5%</button>
-                        <button type="button" class="size-btn slippage-btn" onclick="selectSlippagePreset(1.0, event)" style="padding:4px 8px; font-size:11px;">1.0%</button>
-                        <button type="button" class="size-btn slippage-btn" onclick="selectSlippagePreset(2.0, event)" style="padding:4px 8px; font-size:11px;">2.0%</button>
+                    <div class="size-btn-group" style="margin:0; display:grid; grid-template-columns:repeat(4, 1fr); gap:6px;">
+                        <button type="button" class="size-btn slippage-btn" onclick="selectSlippagePreset(0.1, event)" style="padding:5px 4px; font-size:11px; text-align:center;">0.1%</button>
+                        <button type="button" class="size-btn slippage-btn active" onclick="selectSlippagePreset(0.5, event)" style="padding:5px 4px; font-size:11px; text-align:center;">0.5%</button>
+                        <button type="button" class="size-btn slippage-btn" onclick="selectSlippagePreset(1.0, event)" style="padding:5px 4px; font-size:11px; text-align:center;">1.0%</button>
+                        <button type="button" class="size-btn slippage-btn" onclick="selectSlippagePreset(2.0, event)" style="padding:5px 4px; font-size:11px; text-align:center;">2.0%</button>
                     </div>
                 </div>
 
-                <div style="margin-top:20px; display:flex; flex-wrap:wrap; gap:10px;">
-                    <button class="btn btn-secondary" style="flex:1; min-width:110px;" onclick="simulateCurrentTrade()">🔬 Simulate</button>
-                    <button class="btn btn-primary" style="flex:1; min-width:130px;" onclick="executeCurrentTrade()">⚡ Execute Atomic</button>
-                    <button id="btnMetaMaskDirect" class="btn" style="flex:1.2; min-width:150px; background:#f97316; color:#fff; font-weight:700; border:none; display:inline-flex; align-items:center; justify-content:center; gap:6px; cursor:pointer;" onclick="executeMetaMaskOnChainTrade()">🦊 MetaMask Swap</button>
+                <!-- 1-ROW RESPONSIVE ACTION BUTTONS -->
+                <div class="action-btn-group" style="margin-top:16px; display:grid; grid-template-columns:1fr 1fr 1.3fr; gap:8px;">
+                    <button class="btn btn-secondary" style="width:100%; padding:9px 4px; font-size:12px; justify-content:center;" onclick="simulateCurrentTrade()">🔬 Simulate</button>
+                    <button class="btn btn-primary" style="width:100%; padding:9px 4px; font-size:12px; justify-content:center;" onclick="executeCurrentTrade()">⚡ Atomic</button>
+                    <button id="btnMetaMaskDirect" class="btn" style="width:100%; padding:9px 4px; font-size:12px; background:#f97316; color:#fff; font-weight:700; border:none; display:inline-flex; align-items:center; justify-content:center; gap:4px; cursor:pointer;" onclick="executeMetaMaskOnChainTrade()">🦊 MetaMask</button>
                 </div>
 
                 <!-- LIVE EXECUTION DIAGNOSTICS STRIP -->
