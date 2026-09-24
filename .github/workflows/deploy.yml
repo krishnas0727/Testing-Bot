@@ -1,7 +1,10 @@
-name: Deploy CryptoBot to AWS ECR
+name: CI & Deployment Pipeline
 
 on:
   push:
+    branches:
+      - main
+  pull_request:
     branches:
       - main
 
@@ -10,10 +13,33 @@ env:
   ECR_REPOSITORY: cryptobot
 
 jobs:
+  test:
+    name: Run Unit Tests & Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Full Test Suite
+        run: |
+          python -m unittest discover tests
+
   build-and-push:
     name: Build & Push Docker Image to ECR
+    needs: test
     runs-on: ubuntu-latest
-
+    # Only run AWS ECR deployment if AWS secrets are configured in GitHub repository
+    if: ${{ secrets.AWS_ACCESS_KEY_ID != '' && secrets.AWS_SECRET_ACCESS_KEY != '' }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
