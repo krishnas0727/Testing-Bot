@@ -1,6 +1,8 @@
-// =====================================================// 100% DECENTRALIZED ARBITRAGE TERMINAL JAVASCRIPT
+// ============================================================
+// 100% DECENTRALIZED ARBITRAGE TERMINAL JAVASCRIPT
 // Uniswap V2 & SushiSwap V2 Web3 Engine Interface
-// =====================================================
+// ============================================================
+
 // Suppress noisy internal browser extension EventEmitter & Tracking Prevention notices
 (function() {
     const filterTerms = [
@@ -31,27 +33,42 @@
     };
 })();
 
-// Safe localStorage wrapper — prevents "safeStorage before initialization" errors
-// in browsers with strict privacy settings or MetaMask sandboxing
-const safeStorage = (function() {
-    try {
-        localStorage.setItem("__test__", "1");
-        localStorage.removeItem("__test__");
-        return {
-            getItem: (k) => { try { return localStorage.getItem(k); } catch(e) { return null; } },
-            setItem: (k, v) => { try { localStorage.setItem(k, v); } catch(e) {} },
-            removeItem: (k) => { try { localStorage.removeItem(k); } catch(e) {} }
-        };
-    } catch(e) {
-        // Fallback in-memory store for private/incognito/MetaMask sandboxed contexts
-        const mem = {};
-        return {
-            getItem: (k) => mem[k] !== undefined ? mem[k] : null,
-            setItem: (k, v) => { mem[k] = String(v); },
-            removeItem: (k) => { delete mem[k]; }
-        };
+// Safe Storage wrapper resilient to browser Tracking Prevention & strict cookie policies
+const safeStorage = {
+    _memory: {},
+    getItem(key) {
+        try {
+            if (typeof window !== "undefined" && window.localStorage) {
+                return window.localStorage.getItem(key);
+            }
+        } catch (e) {
+            // Storage access blocked by browser Tracking Prevention
+        }
+        return this._memory[key] || null;
+    },
+    setItem(key, value) {
+        try {
+            if (typeof window !== "undefined" && window.localStorage) {
+                window.localStorage.setItem(key, value);
+                return;
+            }
+        } catch (e) {
+            // Storage access blocked by browser Tracking Prevention
+        }
+        this._memory[key] = String(value);
+    },
+    removeItem(key) {
+        try {
+            if (typeof window !== "undefined" && window.localStorage) {
+                window.localStorage.removeItem(key);
+                return;
+            }
+        } catch (e) {
+            // Storage access blocked by browser Tracking Prevention
+        }
+        delete this._memory[key];
     }
-})();
+};
 
 let currentTab = "dashboard";
 let selectedTradeAmount = 5;
@@ -62,10 +79,9 @@ const MAX_SNAPSHOTS = 30;
 let currentSelectedChainId = parseInt(safeStorage.getItem("userSelectedChainId") || "8453", 10);
 if (isNaN(currentSelectedChainId) || !currentSelectedChainId) currentSelectedChainId = 8453;
 
-
 // Web Audio API State & Synthesizer
 let terminalAudioCtx = null;
-let terminalSoundEnabled = localStorage.getItem("terminalSoundEnabled") !== "false";
+let terminalSoundEnabled = safeStorage.getItem("terminalSoundEnabled") !== "false";
 let lastChimedRoute = "";
 let lastChimeTime = 0;
 
@@ -90,7 +106,7 @@ function initTerminalAudio() {
 
 function toggleTerminalAudio() {
     terminalSoundEnabled = !terminalSoundEnabled;
-    localStorage.setItem("terminalSoundEnabled", terminalSoundEnabled ? "true" : "false");
+    safeStorage.setItem("terminalSoundEnabled", terminalSoundEnabled ? "true" : "false");
     updateAudioButtonUI();
     if (terminalSoundEnabled) {
         playTerminalSound("test");
@@ -172,8 +188,10 @@ function playTerminalSound(type) {
     }
 }
 
-// =====================================================// INITIALIZATION
-// =====================================================
+// ============================================================
+// INITIALIZATION
+// ============================================================
+
 document.addEventListener("DOMContentLoaded", () => {
     initChart();
     initTerminalAudio();
@@ -251,8 +269,10 @@ function startClock() {
     setInterval(updateTime, 1000);
 }
 
-// =====================================================// CHART.JS INITIALIZATION
-// =====================================================
+// ============================================================
+// CHART.JS INITIALIZATION
+// ============================================================
+
 function initChart() {
     const ctx = document.getElementById("liveChart");
     if (!ctx) return;
@@ -363,8 +383,10 @@ function updateChart(prices) {
     liveChart.update("none");
 }
 
-// =====================================================// MARKET DATA POLLING & UI UPDATE
-// =====================================================
+// ============================================================
+// MARKET DATA POLLING & UI UPDATE
+// ============================================================
+
 function startPolling() {
     fetchMarketData();
     setInterval(fetchMarketData, 1000);
@@ -391,7 +413,18 @@ async function fetchMarketData() {
         }
         if (!json.success || !json.data) return;
 
-        latestMarketData = json.data;
+        latestMarketData = {
+            ...json.data,
+            data: json.data,
+            market: json.data,
+            wallet: json.wallet || {},
+            summary: json.summary || {},
+            settings: json.settings || {},
+            trading_mode: json.summary?.trading_mode || json.settings?.trading_mode || "MOCK",
+            has_private_key: Boolean(json.settings?.has_private_key),
+            chain_id: json.wallet?.chain_id || json.settings?.chain_id || currentSelectedChainId,
+            best_route: json.data?.best_route || null
+        };
         updateDashboardUI(json);
         updateChart(json.data.prices);
 
@@ -469,6 +502,12 @@ function updateDashboardUI(payload) {
         modeBadge.innerText = `${settings.trading_mode} ${settings.trading_mode === "MOCK" ? "(SAFE)" : ""}`;
         modeBadge.className = "badge " + (settings.trading_mode === "LIVE" ? "badge-red" : "badge-green");
     }
+
+    const isLiveModeActive = (settings.trading_mode === "LIVE");
+    const dashLiveBanner = document.getElementById("dashLiveWarningBanner");
+    if (dashLiveBanner) dashLiveBanner.style.display = isLiveModeActive ? "block" : "none";
+    const arbLiveBanner = document.getElementById("arbLiveWarningBanner");
+    if (arbLiveBanner) arbLiveBanner.style.display = isLiveModeActive ? "block" : "none";
 
     const autoToggle = document.getElementById("headerAutoTradeToggle");
     if (autoToggle) autoToggle.checked = Boolean(settings.auto_trade);
@@ -715,8 +754,10 @@ function setText(id, text) {
     if (el) el.innerText = text;
 }
 
-// =====================================================// SIMULATION & ATOMIC EXECUTION ACTIONS
-// =====================================================
+// ============================================================
+// SIMULATION & ATOMIC EXECUTION ACTIONS
+// ============================================================
+
 function updateExecutionPlanForAmount(amount) {
     if (!amount || amount <= 0) return;
     setText("arbAmountIn", `$${Number(amount).toFixed(2)} USDT`);
@@ -825,6 +866,7 @@ function selectSizingPercentage(pct) {
     showToast(`Set trade size to ${pct}%: $${selectedTradeAmount.toFixed(4)} USDT`, "success");
 }
 
+let customAmountDebounceTimer = null;
 function onCustomAmountChange() {
     const inp = document.getElementById("customTradeInput");
     if (inp) {
@@ -835,7 +877,10 @@ function onCustomAmountChange() {
             btn.classList.toggle("active", Math.abs(btnVal - val) < 0.0001);
         });
         updateExecutionPlanForAmount(selectedTradeAmount);
-        fetchMarketData();
+        if (customAmountDebounceTimer) clearTimeout(customAmountDebounceTimer);
+        customAmountDebounceTimer = setTimeout(() => {
+            fetchMarketData();
+        }, 300);
     }
 }
 
@@ -868,7 +913,7 @@ async function simulateCurrentTrade() {
 }
 
 async function executeCurrentTrade() {
-    const isLiveMode = latestMarketData && (latestMarketData.trading_mode === "LIVE");
+    const isLiveMode = latestMarketData && (latestMarketData.trading_mode === "LIVE" || (latestMarketData.settings && latestMarketData.settings.trading_mode === "LIVE"));
     const hasServerSigner = latestMarketData && Boolean(latestMarketData.has_private_key);
 
     // In LIVE mode without server private key, route to MetaMask non-custodial signing
@@ -876,6 +921,39 @@ async function executeCurrentTrade() {
         showToast("Routing to MetaMask for secure non-custodial signing...", "info");
         await executeMetaMaskOnChainTrade();
         return;
+    }
+
+    // In LIVE mode with server private key, prompt explicit confirmation modal before broadcast
+    if (isLiveMode && hasServerSigner) {
+        const targetChainId = currentSelectedChainId || 8453;
+        const targetChainInfo = SUPPORTED_CHAINS[targetChainId] || { name: `Chain ${targetChainId}`, short: "ETH" };
+        const tradeAmt = selectedTradeAmount || 0.10;
+        const ethPrice = Number(latestMarketData?.summary?.eth_price_usdt || 3000);
+        const gasPriceGwei = Number(latestMarketData?.gas_price_gwei || 0.01);
+        const estGasUnits = 250000;
+        const estGasNative = (estGasUnits * gasPriceGwei * 1e-9);
+        const estGasUsd = estGasNative * ethPrice;
+        const nativeSym = targetChainInfo.short || "ETH";
+        const gasStr = `~${estGasNative.toFixed(6)} ${nativeSym} (~$${estGasUsd < 0.01 ? '<0.01' : estGasUsd.toFixed(3)} USDT)`;
+        const slippageVal = parseFloat(document.getElementById("cfgSlippage")?.value || "0.5");
+        const priceImpactVal = parseFloat(latestMarketData?.best_route?.price_impact_pct || 0.05);
+
+        try {
+            await new Promise((resolve, reject) => {
+                showLiveTradeConfirmModal({
+                    networkName: `${targetChainInfo.name} (Chain ID ${targetChainId})`,
+                    inputStr: `${tradeAmt.toFixed(4)} USDT`,
+                    outputStr: `~${(tradeAmt / (ethPrice || 3000)).toFixed(6)} WETH`,
+                    gasStr: gasStr,
+                    slippageStr: `${slippageVal.toFixed(1)}%`,
+                    priceImpactStr: `${priceImpactVal < 0.01 ? '< 0.01' : priceImpactVal.toFixed(2)}%`,
+                    recipientStr: "Autonomous Server Wallet (Smart Router Contract)"
+                }, () => resolve(), () => reject(new Error("LIVE_CONFIRMATION_CANCELLED")));
+            });
+        } catch (confirmErr) {
+            showToast("Live trade execution cancelled.", "info");
+            return;
+        }
     }
 
     showExecModal("Executing Atomic DEX Arbitrage", "Submitting transaction to DEX Arbitrage Smart Contract...");
@@ -1033,8 +1111,76 @@ function closeExecModal() {
     if (modal) modal.style.display = "none";
 }
 
-// =====================================================// AUTO TRADE & EMERGENCY STOP
-// =====================================================
+// ============================================================
+// EXPLICIT LIVE-MODE WARNING & PRE-EXECUTION CONFIRMATION
+// ============================================================
+
+let pendingLiveConfirmResolve = null;
+let pendingLiveConfirmReject = null;
+
+function showLiveTradeConfirmModal(params, onProceed, onCancel) {
+    pendingLiveConfirmResolve = onProceed;
+    pendingLiveConfirmReject = onCancel;
+
+    setText("liveConfirmNetwork", params.networkName || "--");
+    setText("liveConfirmInput", params.inputStr || "--");
+    setText("liveConfirmOutput", params.outputStr || "--");
+    setText("liveConfirmGas", params.gasStr || "--");
+    setText("liveConfirmSlippage", params.slippageStr || "0.5%");
+    setText("liveConfirmImpact", params.priceImpactStr || "< 0.10%");
+    setText("liveConfirmRecipient", params.recipientStr || "--");
+
+    const chk = document.getElementById("liveConfirmCheckbox");
+    if (chk) chk.checked = false;
+
+    const btn = document.getElementById("btnLiveConfirmSubmit");
+    if (btn) {
+        btn.style.opacity = "0.5";
+        btn.style.pointerEvents = "none";
+    }
+
+    const overlay = document.getElementById("liveTradeConfirmModalOverlay");
+    if (overlay) overlay.style.display = "flex";
+}
+
+function closeLiveConfirmModal() {
+    const overlay = document.getElementById("liveTradeConfirmModalOverlay");
+    if (overlay) overlay.style.display = "none";
+    if (typeof pendingLiveConfirmReject === "function") {
+        const rejectFn = pendingLiveConfirmReject;
+        pendingLiveConfirmReject = null;
+        pendingLiveConfirmResolve = null;
+        rejectFn();
+    }
+}
+
+function onLiveCheckboxToggle(checkbox) {
+    const btn = document.getElementById("btnLiveConfirmSubmit");
+    if (!btn) return;
+    if (checkbox && checkbox.checked) {
+        btn.style.opacity = "1";
+        btn.style.pointerEvents = "auto";
+    } else {
+        btn.style.opacity = "0.5";
+        btn.style.pointerEvents = "none";
+    }
+}
+
+function onLiveConfirmProceed() {
+    const overlay = document.getElementById("liveTradeConfirmModalOverlay");
+    if (overlay) overlay.style.display = "none";
+    if (typeof pendingLiveConfirmResolve === "function") {
+        const resolveFn = pendingLiveConfirmResolve;
+        pendingLiveConfirmResolve = null;
+        pendingLiveConfirmReject = null;
+        resolveFn();
+    }
+}
+
+// ============================================================
+// AUTO TRADE & EMERGENCY STOP
+// ============================================================
+
 async function quickToggleAutoTrade(enabled) {
     try {
         const res = await fetch("/api/settings", {
@@ -1086,7 +1232,13 @@ async function quickSwitchMode(newMode) {
         });
         const json = await res.json();
         if (json.success) {
-            showToast(`Trading Mode switched to ${newMode}`, newMode === "LIVE" ? "success" : "info");
+            const isLive = (newMode === "LIVE");
+            const dashLiveBanner = document.getElementById("dashLiveWarningBanner");
+            if (dashLiveBanner) dashLiveBanner.style.display = isLive ? "block" : "none";
+            const arbLiveBanner = document.getElementById("arbLiveWarningBanner");
+            if (arbLiveBanner) arbLiveBanner.style.display = isLive ? "block" : "none";
+
+            showToast(`Trading Mode switched to ${newMode}`, isLive ? "warning" : "info");
             fetchMarketData();
             if (typeof loadSettings === "function") loadSettings();
         } else {
@@ -1120,8 +1272,10 @@ function updateEmergencyStopUI(isActive) {
     }
 }
 
-// =====================================================// SETTINGS
-// =====================================================
+// ============================================================
+// SETTINGS
+// ============================================================
+
 async function loadSettings() {
     try {
         const res = await fetch("/api/settings");
@@ -1231,8 +1385,10 @@ async function testRpcEndpoint() {
     }
 }
 
-// =====================================================// TRADES AUDIT LOG
-// =====================================================
+// ============================================================
+// TRADES AUDIT LOG
+// ============================================================
+
 let currentTradeFilter = "LIVE";
 
 function setTradeFilter(mode) {
@@ -1358,8 +1514,10 @@ async function clearTradeHistory() {
     }
 }
 
-// =====================================================// TOAST NOTIFICATIONS
-// =====================================================
+// ============================================================
+// TOAST NOTIFICATIONS
+// ============================================================
+
 function showToast(message, type = "info") {
     const container = document.getElementById("toastContainer");
     if (!container) return;
@@ -1411,8 +1569,10 @@ function showToast(message, type = "info") {
     }, 4500);
 }
 
-// =====================================================// METAMASK WEB3 WALLET INTEGRATION (EIP-1193 & ETHERS.JS)
-// =====================================================
+// ============================================================
+// METAMASK WEB3 WALLET INTEGRATION (EIP-1193 & ETHERS.JS)
+// ============================================================
+
 let metamaskAccount = null;
 let metamaskChainId = null;
 let metamaskProvider = null;
@@ -1597,43 +1757,6 @@ function getMetaMaskProvider() {
     }
     return window.ethereum;
 }
-
-// Safe Storage wrapper resilient to browser Tracking Prevention & strict cookie policies
-const safeStorage = {
-    _memory: {},
-    getItem(key) {
-        try {
-            if (typeof window !== "undefined" && window.localStorage) {
-                return window.localStorage.getItem(key);
-            }
-        } catch (e) {
-            // Storage access blocked by browser Tracking Prevention
-        }
-        return this._memory[key] || null;
-    },
-    setItem(key, value) {
-        try {
-            if (typeof window !== "undefined" && window.localStorage) {
-                window.localStorage.setItem(key, value);
-                return;
-            }
-        } catch (e) {
-            // Storage access blocked by browser Tracking Prevention
-        }
-        this._memory[key] = String(value);
-    },
-    removeItem(key) {
-        try {
-            if (typeof window !== "undefined" && window.localStorage) {
-                window.localStorage.removeItem(key);
-                return;
-            }
-        } catch (e) {
-            // Storage access blocked by browser Tracking Prevention
-        }
-        delete this._memory[key];
-    }
-};
 
 const CLIENT_TOKEN_ADDRESSES = {
     8453: { // Base L2
@@ -2291,8 +2414,10 @@ function closeMetaMaskModal() {
 
 
 
-// =====================================================// ADVANCED FEATURE 2: MULTI-PAIR OPPORTUNITY SCANNER
-// =====================================================
+// ============================================================
+// ADVANCED FEATURE 2: MULTI-PAIR OPPORTUNITY SCANNER
+// ============================================================
+
 async function fetchMultiPairData() {
     const grid = document.getElementById("multiPairGrid");
     if (!grid) return;
@@ -2373,8 +2498,10 @@ async function quickSwitchPair(pair) {
     }
 }
 
-// =====================================================// ADVANCED FEATURE 3: 1-CLICK DIRECT METAMASK ON-CHAIN SWAP
-// =====================================================
+// ============================================================
+// ADVANCED FEATURE 3: 1-CLICK DIRECT METAMASK ON-CHAIN SWAP
+// ============================================================
+
 function selectSlippagePreset(val, event) {
     if (event) event.stopPropagation();
     document.querySelectorAll(".slippage-btn").forEach(b => b.classList.remove("active"));
@@ -2417,12 +2544,13 @@ async function executeMetaMaskOnChainTrade() {
         return;
     }
 
-    if (!latestMarketData || !latestMarketData.data || !latestMarketData.data.best_route) {
+    const bestRoute = latestMarketData?.best_route || latestMarketData?.data?.best_route;
+    if (!latestMarketData || !bestRoute) {
         showToast("Scanning DEX liquidity... Please wait for a route quote.", "warning");
         return;
     }
 
-    const route = latestMarketData.data.best_route;
+    const route = bestRoute;
 
     // Step 1: Wallet & Gas Check
     showExecModal("MetaMask Direct On-Chain Execution", `Checking wallet balances on ${targetChainInfo.name}...`, 1);
@@ -2523,6 +2651,48 @@ async function executeMetaMaskOnChainTrade() {
         const parsedAmountIn = ethers.parseUnits(tradeAmt.toString(), tokenInMeta.decimals);
         const routerName = route.buy_dex || "Uniswap_V2";
         const routerAddress = routers[routerName] || Object.values(routers)[0];
+
+        // Close initial check modal before presenting explicit review
+        closeExecModal();
+
+        // Calculate trade preview metrics for live confirmation review
+        const ethPrice = Number(latestMarketData?.summary?.eth_price_usdt || 3000);
+        const gasPriceGwei = Number(latestMarketData?.gas_price_gwei || 0.01);
+        const estGasUnits = 250000;
+        const estGasNative = (estGasUnits * gasPriceGwei * 1e-9);
+        const estGasUsd = estGasNative * ethPrice;
+        const gasStr = `~${estGasNative.toFixed(6)} ${nativeSym} (~$${estGasUsd < 0.01 ? '<0.01' : estGasUsd.toFixed(3)} USDT)`;
+
+        let estOutStr = "--";
+        const buyPrice = Number(route.buy_price || 0);
+        if (buyPrice > 0) {
+            const estUnits = tradeAmt / buyPrice;
+            estOutStr = `~${estUnits.toFixed(6)} WETH`;
+        } else {
+            const estUnits = tradeAmt / (ethPrice || 3000);
+            estOutStr = `~${estUnits.toFixed(6)} WETH`;
+        }
+
+        const slippageVal = parseFloat(document.getElementById("cfgSlippage")?.value || "0.5");
+        const priceImpactVal = parseFloat(route.price_impact_pct || 0.05);
+
+        // Explicit Live-Mode Warning: Require explicit user confirmation before initiating wallet transaction
+        try {
+            await new Promise((resolve, reject) => {
+                showLiveTradeConfirmModal({
+                    networkName: `${targetChainInfo.name} (Chain ID ${targetChainId})`,
+                    inputStr: `${tradeAmt.toFixed(4)} ${tokenSymbol}`,
+                    outputStr: estOutStr,
+                    gasStr: gasStr,
+                    slippageStr: `${slippageVal.toFixed(1)}%`,
+                    priceImpactStr: `${priceImpactVal < 0.01 ? '< 0.01' : priceImpactVal.toFixed(2)}%`,
+                    recipientStr: `${metamaskAccount} (Your Connected Wallet)`
+                }, () => resolve(), () => reject(new Error("LIVE_CONFIRMATION_CANCELLED")));
+            });
+        } catch (confirmErr) {
+            showToast("Live trade review cancelled by user.", "info");
+            return;
+        }
 
         // Step 2: Verify and request ERC-20 token approval
         showExecModal("Verifying Token Allowance", `Checking ${tokenSymbol} allowance for ${routerName}...`, 2);
@@ -2632,6 +2802,9 @@ async function executeMetaMaskOnChainTrade() {
         loadTrades();
         loadExecutionLogs();
     } catch (err) {
+        if (err && err.message === "LIVE_CONFIRMATION_CANCELLED") {
+            return;
+        }
         if (err.code === "ACTION_REJECTED" || err.code === 4001) {
             showToast("Transaction signature rejected in MetaMask.", "warning");
             closeExecModal();
@@ -2646,8 +2819,10 @@ async function executeMetaMaskOnChainTrade() {
 }
 
 
-// =====================================================// ADVANCED FEATURE 5: AUDIT LOG CSV & JSON EXPORT
-// =====================================================
+// ============================================================
+// ADVANCED FEATURE 5: AUDIT LOG CSV & JSON EXPORT
+// ============================================================
+
 function exportTradeHistory(format = "csv") {
     showToast(`Preparing ${format.toUpperCase()} export...`, "info");
     const currentFilter = document.querySelector("#tab-trades .btn[style*='background:#dc2626']") ? "LIVE" : "ALL";

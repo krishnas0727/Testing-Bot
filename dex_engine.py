@@ -54,14 +54,9 @@ KNOWN_PAIRS = {
     }
 }
 
-# Token decimals & addresses cache
+# Token decimals & addresses
+TOKEN_CACHE: Dict[str, Dict[str, Any]] = dict(config.TOKEN_REGISTRY)
 _token_decimals_cache: Dict[str, int] = {}
-
-# Pair address cache — avoids repeated factory getPair() calls (major latency cut)
-_pair_address_cache: Dict[str, str] = {}
-
-# Mutable token registry mirror — kept in sync with config on chain switch
-TOKEN_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 def get_token_decimals(token_addr: str, fallback_decimals: int = 18) -> int:
@@ -173,7 +168,7 @@ def get_gas_price() -> Tuple[int, float]:
     """Fetch current live on-chain gas price in Wei and Gwei from Web3 RPC with low-latency cache."""
     global _last_known_gas_wei, _last_gas_fetch_time, _cached_gas_price
     now = time.time()
-    if now - _last_gas_fetch_time < 8.0:  # Cache for 8s — gas price is stable short-term
+    if now - _last_gas_fetch_time < 2.0:
         return _cached_gas_price
 
     try:
@@ -209,23 +204,13 @@ def eth_call(to_address: str, calldata: str, block: str = "latest") -> str:
 # ============================================================
 
 def get_pair_address(dex_name: str, token_a_sym: str, token_b_sym: str) -> Optional[str]:
-    """Resolve pair contract address from known registry or Factory contract.
-    
-    Caches result in-memory after first lookup — eliminates repeated factory
-    getPair() RPC calls every poll cycle (major latency reduction).
-    """
-    global _pair_address_cache
-    cache_key = f"{dex_name}:{token_a_sym}:{token_b_sym}:{config.CHAIN_ID}"
-    if cache_key in _pair_address_cache:
-        return _pair_address_cache[cache_key]
-
+    """Resolve pair contract address from known registry or Factory contract."""
     # Check precomputed cache for Ethereum mainnet only
     if getattr(config, "CHAIN_ID", 8453) == 1:
         pair = KNOWN_PAIRS.get(dex_name, {}).get((token_a_sym, token_b_sym))
         if not pair:
             pair = KNOWN_PAIRS.get(dex_name, {}).get((token_b_sym, token_a_sym))
         if pair:
-            _pair_address_cache[cache_key] = pair
             return pair
 
     factory = config.DEX_FACTORIES.get(dex_name)
@@ -240,7 +225,6 @@ def get_pair_address(dex_name: str, token_a_sym: str, token_b_sym: str) -> Optio
         result = eth_call(factory, calldata)
         addr = decode_address(result)
         if addr != "0x0000000000000000000000000000000000000000":
-            _pair_address_cache[cache_key] = addr
             return addr
     except Exception:
         pass

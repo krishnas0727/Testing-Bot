@@ -12,9 +12,7 @@ from typing import Dict, Any, List, Optional
 
 from config import DATABASE_NAME, BACKUP_JSON_PATH
 
-_db_dir = os.path.dirname(DATABASE_NAME)
-if _db_dir:
-    os.makedirs(_db_dir, exist_ok=True)
+os.makedirs(os.path.dirname(DATABASE_NAME), exist_ok=True)
 
 
 def get_connection():
