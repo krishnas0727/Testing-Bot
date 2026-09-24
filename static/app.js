@@ -1084,7 +1084,32 @@ function renderExecutionResult(json) {
                 </div>
             </div>
         ` : ""}
+        ${isInsufficient ? `
+            <div style="margin-top:14px; text-align:center;">
+                <button class="btn btn-primary" style="width:100%; padding:10px; font-weight:700; justify-content:center; background:linear-gradient(135deg, #00f2fe 0%, #4facfe 100%); color:#000; font-size:13px;" onclick="switchToMockAndExecute()">
+                    ⚡ Switch to MOCK Mode & Execute Trade Now
+                </button>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:6px;">Executes risk-free trade simulation with real DEX pool math & zero real funds required.</div>
+            </div>
+        ` : ""}
     `;
+}
+
+async function switchToMockAndExecute() {
+    closeExecModal();
+    showToast("Switching to MOCK simulation mode...", "info");
+    try {
+        await fetch("/api/settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ trading_mode: "MOCK" })
+        });
+        if (latestMarketData) latestMarketData.trading_mode = "MOCK";
+        showToast("Switched to MOCK mode! Executing trade now...", "success");
+        setTimeout(() => executeCurrentTrade(), 400);
+    } catch (e) {
+        showToast("Error switching mode: " + e, "error");
+    }
 }
 
 function showExecModal(title, msg, stepNumber = 0) {
@@ -2513,6 +2538,40 @@ function selectSlippagePreset(val, event) {
     showToast(`Slippage tolerance set to ${val}%`, "info");
 }
 
+async function executeMockPipelineTrade(route, targetChainInfo) {
+    const tradeAmt = selectedTradeAmount || 5.0;
+    const chainName = targetChainInfo?.name || "Base L2";
+    showExecModal("Simulation Pipeline: 1/5", `Verifying simulated wallet balance on ${chainName}...`, 1);
+    await new Promise(r => setTimeout(r, 450));
+
+    showExecModal("Simulation Pipeline: 2/5", `Approving DEX Router allowance for ${route.buy_dex || "Uniswap_V2"}...`, 2);
+    await new Promise(r => setTimeout(r, 500));
+
+    showExecModal("Simulation Pipeline: 3/5", `Executing DEX Swap: ${route.buy_dex || "Uniswap_V2"} ➔ ${route.sell_dex || "SushiSwap_V2"}...`, 3);
+    await new Promise(r => setTimeout(r, 550));
+
+    showExecModal("Simulation Pipeline: 4/5", `Mining transaction receipt on ${chainName}...`, 4);
+    await new Promise(r => setTimeout(r, 450));
+
+    try {
+        const res = await fetch("/api/trade", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                trade_amount: tradeAmt,
+                wallet_address: metamaskAccount || "0x9cb6b2c1205a16ba947b783ed99569234decfcc0"
+            })
+        });
+        const json = await res.json();
+        renderExecutionResult(json);
+        fetchMarketData();
+        loadTrades();
+        loadExecutionLogs();
+    } catch (err) {
+        showToast("Execution error: " + err, "error");
+    }
+}
+
 async function executeMetaMaskOnChainTrade() {
     // Guard 1: Emergency Stop Check
     if (latestMarketData && latestMarketData.summary && latestMarketData.summary.emergency_stop) {
@@ -2551,6 +2610,12 @@ async function executeMetaMaskOnChainTrade() {
     }
 
     const route = bestRoute;
+
+    const isMock = latestMarketData && (latestMarketData.trading_mode === "MOCK" || (latestMarketData.settings && latestMarketData.settings.trading_mode === "MOCK"));
+    if (isMock) {
+        await executeMockPipelineTrade(route, targetChainInfo);
+        return;
+    }
 
     // Step 1: Wallet & Gas Check
     showExecModal("MetaMask Direct On-Chain Execution", `Checking wallet balances on ${targetChainInfo.name}...`, 1);
@@ -2805,16 +2870,39 @@ async function executeMetaMaskOnChainTrade() {
         if (err && err.message === "LIVE_CONFIRMATION_CANCELLED") {
             return;
         }
-        if (err.code === "ACTION_REJECTED" || err.code === 4001) {
-            showToast("Transaction signature rejected in MetaMask.", "warning");
+        let userMsg = err?.message || String(err);
+        let errStatus = "TRANSACTION_FAILED";
+
+        if (err.code === "ACTION_REJECTED" || err.code === 4001 || (err.message && err.message.toLowerCase().includes("user rejected"))) {
+            showToast("Transaction signature rejected by user in MetaMask.", "warning");
             closeExecModal();
-        } else {
-            renderExecutionResult({
-                success: false,
-                status: "TRANSACTION_FAILED",
-                message: err.message || String(err)
-            });
+            return;
+        } else if (err.code === "INSUFFICIENT_FUNDS" || (err.message && err.message.toLowerCase().includes("insufficient funds"))) {
+            errStatus = "INSUFFICIENT_FUNDS";
+            userMsg = "Your connected wallet does not have enough native ETH to cover the blockchain network gas fee.";
+        } else if (err.code === "CALL_EXCEPTION" || (err.message && err.message.toLowerCase().includes("execution reverted"))) {
+            errStatus = "TRANSACTION_REVERTED";
+            if (err.message && err.message.includes("INSUFFICIENT_OUTPUT_AMOUNT")) {
+                userMsg = "Swap reverted: Price moved beyond your slippage tolerance. Try increasing slippage slightly.";
+            } else if (err.message && err.message.includes("EXPIRED")) {
+                userMsg = "Swap deadline expired before the transaction was confirmed.";
+            } else {
+                userMsg = "DEX Smart Router reverted the transaction to guarantee fund safety against slippage.";
+            }
+        } else if (err.code === "NETWORK_ERROR" || (err.message && err.message.toLowerCase().includes("network error"))) {
+            errStatus = "NETWORK_ERROR";
+            userMsg = "Network RPC error. Check your internet connection or switch RPC endpoint in Settings.";
+        } else if (err.code === -32002) {
+            showToast("MetaMask request already pending. Open your MetaMask extension to approve.", "warning");
+            closeExecModal();
+            return;
         }
+
+        renderExecutionResult({
+            success: false,
+            status: errStatus,
+            message: userMsg
+        });
     }
 }
 

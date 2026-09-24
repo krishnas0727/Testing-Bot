@@ -84,7 +84,7 @@ def get_wallet_balances(eth_price_usdt: float = 3000.0, wallet_address: Optional
     Strictly queries real on-chain RPC endpoints. If wallet is not connected,
     returns zero balances and disconnected status. Never returns fake or mock balances.
     """
-    if wallet_address is not None and wallet_address.strip():
+    if wallet_address is not None:
         user_addr = wallet_address.strip()
     else:
         user_addr = get_wallet_address()

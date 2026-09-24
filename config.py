@@ -283,7 +283,7 @@ ARBITRAGE_CONTRACT_ADDRESS = os.getenv("ARBITRAGE_CONTRACT_ADDRESS", "")
 # ============================================================
 
 # MOCK | TESTNET | LIVE
-TRADING_MODE = os.getenv("TRADING_MODE", "LIVE").upper()
+TRADING_MODE = os.getenv("TRADING_MODE", "MOCK").upper()
 
 # Auto-trading background engine (safe default: False)
 AUTO_TRADE_ENABLED = os.getenv("AUTO_TRADE_ENABLED", "false").lower() == "true"

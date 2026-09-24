@@ -1662,6 +1662,25 @@ input:checked + .slider:before {
     animation: fadeIn 0.15s ease-out;
 }
 
+.exec-dialog {
+    background: #111a2b;
+    border: 1px solid #263753;
+    border-radius: 16px;
+    width: 520px;
+    max-width: 94%;
+    padding: 24px;
+    box-sizing: border-box;
+    margin: auto;
+    position: relative;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+    animation: modalScaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modalScaleIn {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+}
+
 @keyframes fadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
@@ -1695,6 +1714,15 @@ input:checked + .slider:before {
     .opp-details-grid { grid-template-columns: 1fr; }
     .route-leg-container { flex-direction: column; align-items: stretch; }
     .route-connector { display: none; }
+}
+
+@media (max-width: 480px) {
+    .exec-dialog { padding: 16px; width: 95%; }
+    .exec-stepper { gap: 3px; }
+    .step-pill { font-size: 8px; padding: 4px 2px; }
+    .step-pill .step-num { width: 13px; height: 13px; font-size: 8px; }
+    .header-chain-badge { font-size: 10px; }
+    .wallet-card-value { font-size: 16px; }
 }
 
 /* --- EXECUTION STEPPER PIPELINE --- */
