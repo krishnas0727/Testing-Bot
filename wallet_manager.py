@@ -44,17 +44,54 @@ def get_wallet_address() -> str:
     return ""
 
 
-def fetch_token_balance_onchain(wallet_address: str, token_address: str, decimals: int) -> float:
-    """Query ERC20 balanceOf(address) directly via JSON-RPC eth_call."""
+def fetch_token_balance_onchain(
+    wallet_address: str,
+    token_address: str,
+    decimals: int
+) -> float:
+    """Query ERC20 balanceOf(address) directly via Sepolia JSON-RPC."""
+
     if not wallet_address or not token_address:
         return 0.0
+
     try:
         from dex_engine import eth_call
+
         calldata = encode_balance_of(wallet_address)
-        hex_res = eth_call(token_address, calldata)
+
+        hex_res = eth_call(
+            token_address,
+            calldata
+        )
+
+        if not hex_res:
+            raise RuntimeError(
+                f"Empty RPC response for token {token_address}"
+            )
+
         raw_val = decode_uint256(hex_res)
-        return raw_val / (10 ** decimals)
-    except Exception:
+
+        balance = raw_val / (10 ** decimals)
+
+        print(
+            f"[Wallet Balance] "
+            f"token={token_address} "
+            f"wallet={wallet_address} "
+            f"raw={raw_val} "
+            f"decimals={decimals} "
+            f"balance={balance}",
+            flush=True
+        )
+
+        return balance
+
+    except Exception as exc:
+        print(
+            f"[Wallet Balance ERROR] "
+            f"token={token_address} "
+            f"wallet={wallet_address}: {exc}",
+            flush=True
+        )
         return 0.0
 
 
