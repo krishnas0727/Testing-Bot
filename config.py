@@ -58,8 +58,11 @@ RPC_URL = os.getenv("RPC_URL", "https://mainnet.base.org")
 PUBLIC_RPC_FALLBACKS = {
     8453: [
         "https://mainnet.base.org",
+        "https://base.llamarpc.com",
+        "https://1rpc.io/base",
         "https://base-rpc.publicnode.com",
         "https://base.drpc.org",
+        "https://base.blockpi.network/v1/rpc/public",
     ],
     1: [
         "https://ethereum-rpc.publicnode.com",
@@ -97,8 +100,11 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
         "rpc_url": "https://mainnet.base.org",
         "fallbacks": [
             "https://mainnet.base.org",
+            "https://base.llamarpc.com",
+            "https://1rpc.io/base",
             "https://base-rpc.publicnode.com",
             "https://base.drpc.org",
+            "https://base.blockpi.network/v1/rpc/public",
         ],
         "dexes": ["Uniswap_V2", "SushiSwap_V2"],
         "routers": {

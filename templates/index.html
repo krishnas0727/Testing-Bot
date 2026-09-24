@@ -502,6 +502,21 @@
                 <div class="chart-container" style="height:280px; position:relative;">
                     <canvas id="liveChart"></canvas>
                 </div>
+                <!-- LIVE DEX LIQUIDITY DEPTH RATIO GAUGE -->
+                <div class="liquidity-depth-widget" style="margin-top:14px; padding:12px 14px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Live Pool Depth Ratio</span>
+                        <span id="depthRatioSummary" style="font-size:11px; font-family:var(--font-mono); color:var(--accent-cyan); font-weight:600;">Uni 50% / Sushi 50%</span>
+                    </div>
+                    <div class="liquidity-bar-container" style="height:8px; background:rgba(30,41,59,0.8); border-radius:4px; overflow:hidden; display:flex;">
+                        <div id="depthBarUni" style="width:50%; background:linear-gradient(90deg, #00f2fe, #0ea5e9); transition:width 0.5s ease;" title="Uniswap V2 Pool Depth"></div>
+                        <div id="depthBarSushi" style="width:50%; background:linear-gradient(90deg, #00f59b, #10b981); transition:width 0.5s ease;" title="SushiSwap V2 Pool Depth"></div>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px; font-size:10px; font-family:var(--font-mono);">
+                        <span id="depthLabelUni" style="color:var(--accent-cyan);">Uniswap V2: Liquid</span>
+                        <span id="depthLabelSushi" style="color:var(--profit-color);">SushiSwap V2: Liquid</span>
+                    </div>
+                </div>
             </div>
 
             <!-- BEST ARBITRAGE OPPORTUNITY PANEL -->
@@ -617,6 +632,20 @@
                         <button type="button" class="size-btn" onclick="selectTradeSize(1)" style="padding:4px 8px; font-size:11px;">$1</button>
                         <button type="button" class="size-btn size-pct-pill" onclick="selectSizingPercentage(50)" style="padding:4px 8px; font-size:11px;">50%</button>
                         <button type="button" class="size-btn btn-max-safe" onclick="selectMaxSafeSize()" style="padding:4px 8px; font-size:11px;">⚡ Max Safe</button>
+                    </div>
+                </div>
+
+                <!-- SLIPPAGE TOLERANCE PRESETS -->
+                <div style="margin-top:10px; padding:10px 14px; background:rgba(15,23,42,0.7); border-radius:6px; border:1px solid rgba(56,189,248,0.2);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Slippage Tolerance</span>
+                        <span id="dashSlippageLabel" style="font-size:11px; font-family:var(--font-mono); color:var(--accent-mint); font-weight:600;">0.5% (Safe)</span>
+                    </div>
+                    <div class="size-btn-group" style="margin:0; gap:6px;">
+                        <button type="button" class="size-btn slippage-btn" onclick="selectSlippagePreset(0.1, event)" style="padding:4px 8px; font-size:11px;">0.1%</button>
+                        <button type="button" class="size-btn slippage-btn active" onclick="selectSlippagePreset(0.5, event)" style="padding:4px 8px; font-size:11px;">0.5%</button>
+                        <button type="button" class="size-btn slippage-btn" onclick="selectSlippagePreset(1.0, event)" style="padding:4px 8px; font-size:11px;">1.0%</button>
+                        <button type="button" class="size-btn slippage-btn" onclick="selectSlippagePreset(2.0, event)" style="padding:4px 8px; font-size:11px;">2.0%</button>
                     </div>
                 </div>
 
@@ -1094,13 +1123,26 @@
 
 <!-- EXECUTION MODAL -->
 <div id="execModalOverlay" style="display:none; position:fixed; inset:0; background:rgba(4,9,20,0.85); backdrop-filter:blur(8px); z-index:99999; align-items:center; justify-content:center;">
-    <div class="exec-modal" style="background:#111a2b; border:1px solid #263753; border-radius:16px; width:480px; max-width:90%; padding:30px;">
-        <h3 style="margin-bottom:8px;" id="execModalTitle">Executing Atomic DEX Arbitrage</h3>
-        <p id="execModalSub" style="color:var(--text-muted); font-size:12px; margin-bottom:16px;">Invoking DexArbitrage smart contract via Web3 RPC</p>
-        <div id="execModalBody" style="background:#0f172a; padding:15px; border-radius:8px; font-family:var(--font-mono); font-size:12px; line-height:1.6; margin-bottom:20px; max-height:200px; overflow-y:auto;">
+    <div class="exec-modal" style="background:#111a2b; border:1px solid #263753; border-radius:16px; width:520px; max-width:92%; padding:26px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <h3 style="margin:0; font-size:18px;" id="execModalTitle">Executing Atomic DEX Arbitrage</h3>
+            <button class="btn btn-secondary" style="padding:2px 8px; font-size:12px; border-radius:4px; min-width:auto;" onclick="closeExecModal()">✕</button>
+        </div>
+        <p id="execModalSub" style="color:var(--text-muted); font-size:12px; margin-bottom:14px;">Invoking Base L2 Smart Router via Web3 RPC</p>
+
+        <!-- STEPPER PIPELINE -->
+        <div id="execModalStepper" class="exec-stepper">
+            <div id="stepPill1" class="step-pill active"><span class="step-num">1</span> <span class="step-name">Wallet</span></div>
+            <div id="stepPill2" class="step-pill"><span class="step-num">2</span> <span class="step-name">Approve</span></div>
+            <div id="stepPill3" class="step-pill"><span class="step-num">3</span> <span class="step-name">Swap</span></div>
+            <div id="stepPill4" class="step-pill"><span class="step-num">4</span> <span class="step-name">Base L2</span></div>
+            <div id="stepPill5" class="step-pill"><span class="step-num">5</span> <span class="step-name">Settle</span></div>
+        </div>
+
+        <div id="execModalBody" style="background:#0f172a; padding:16px; border-radius:10px; font-family:var(--font-mono); font-size:12px; line-height:1.6; margin-bottom:18px; max-height:220px; overflow-y:auto; border:1px solid rgba(56,189,248,0.15);">
             Simulating on-chain execution...
         </div>
-        <button class="btn btn-primary" style="width:100%;" onclick="closeExecModal()">Dismiss</button>
+        <button id="execModalCloseBtn" class="btn btn-primary" style="width:100%;" onclick="closeExecModal()">Dismiss</button>
     </div>
 </div>
 

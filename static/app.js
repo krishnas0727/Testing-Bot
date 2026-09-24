@@ -634,7 +634,7 @@ function updateDashboardUI(payload) {
         }
     }
 
-    // 6. Prices Tab pool cards
+    // 6. Prices Tab pool cards & Liquidity Depth Ratio Gauge
     const uniRes = reserves["Uniswap_V2"] || {};
     const sushiRes = reserves["SushiSwap_V2"] || {};
     const activeChainInfo = SUPPORTED_CHAINS[activeChainId] || { short: "Base L2" };
@@ -648,6 +648,25 @@ function updateDashboardUI(payload) {
     setText("sushiSpotPrice", sushiP > 0 ? `$${sushiP.toFixed(2)}` : "--");
     setText("sushiResBase", `${Number(sushiRes.base_reserve || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })} WETH`);
     setText("sushiResQuote", `$${Number(sushiRes.quote_reserve || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })} USDT`);
+
+    // Live Pool Depth Ratio Gauge
+    const uniQuote = Number(uniRes.quote_reserve || 0);
+    const sushiQuote = Number(sushiRes.quote_reserve || 0);
+    const totalPoolDepth = uniQuote + sushiQuote;
+    const uniPct = totalPoolDepth > 0 ? Math.round((uniQuote / totalPoolDepth) * 100) : 50;
+    const sushiPct = 100 - uniPct;
+
+    const depthBarUni = document.getElementById("depthBarUni");
+    const depthBarSushi = document.getElementById("depthBarSushi");
+    const depthRatioSummary = document.getElementById("depthRatioSummary");
+    const depthLabelUni = document.getElementById("depthLabelUni");
+    const depthLabelSushi = document.getElementById("depthLabelSushi");
+
+    if (depthBarUni) depthBarUni.style.width = `${uniPct}%`;
+    if (depthBarSushi) depthBarSushi.style.width = `${sushiPct}%`;
+    if (depthRatioSummary) depthRatioSummary.innerText = `Uni ${uniPct}% / Sushi ${sushiPct}%`;
+    if (depthLabelUni) depthLabelUni.innerText = `Uniswap V2: $${uniQuote.toLocaleString("en-US", { maximumFractionDigits: 0 })} (${uniPct}%)`;
+    if (depthLabelSushi) depthLabelSushi.innerText = `SushiSwap V2: $${sushiQuote.toLocaleString("en-US", { maximumFractionDigits: 0 })} (${sushiPct}%)`;
 
     // 7. Arbitrage tab breakdown
     if (best.buy_dex) {
@@ -877,6 +896,22 @@ async function executeCurrentTrade() {
     }
 }
 
+function setModalStep(stepNumber, state = "active") {
+    const stepper = document.getElementById("execModalStepper");
+    if (stepper) stepper.style.display = "flex";
+    for (let i = 1; i <= 5; i++) {
+        const pill = document.getElementById(`stepPill${i}`);
+        if (!pill) continue;
+        if (i < stepNumber) {
+            pill.className = "step-pill completed";
+        } else if (i === stepNumber) {
+            pill.className = `step-pill ${state}`;
+        } else {
+            pill.className = "step-pill";
+        }
+    }
+}
+
 function renderExecutionResult(json) {
     const body = document.getElementById("execModalBody");
     if (!body) return;
@@ -887,15 +922,20 @@ function renderExecutionResult(json) {
     
     if (isSuccess) {
         playTerminalSound("trade_success");
-    } else if (isInsufficient) {
+        setModalStep(5, "completed");
+    } else {
         playTerminalSound("alert");
+        const currentActivePill = document.querySelector(".step-pill.active") || document.getElementById("stepPill1");
+        if (currentActivePill) {
+            currentActivePill.className = "step-pill failed";
+        }
     }
 
     const isSkipped = json.status === "TRADE SKIPPED";
     const statusColor = isSuccess ? "var(--profit-color)" : (isInsufficient ? "var(--loss-color)" : (isSkipped ? "#f59e0b" : "var(--loss-color)"));
     const explorerBase = (latestMarketData && Number(latestMarketData.chain_id) === 8453) ? "https://basescan.org/tx/" : "https://basescan.org/tx/";
 
-    const titleText = isSuccess ? "Atomic Trade Successful" : (isInsufficient ? "INSUFFICIENT BALANCE" : (json.status || "Trade Result"));
+    const titleText = isSuccess ? "Atomic Trade Verified On-Chain" : (isInsufficient ? "INSUFFICIENT BALANCE" : (json.status || "Trade Result"));
 
     let rawMsg = json.message || json.skip_reason || "";
     let cleanMsg = rawMsg
@@ -907,8 +947,9 @@ function renderExecutionResult(json) {
         .trim();
 
     body.innerHTML = `
-        <div style="color:${statusColor}; font-weight:700; margin-bottom:10px; font-size:14px;">
-            ${titleText}
+        <div style="color:${statusColor}; font-weight:700; margin-bottom:10px; font-size:14px; display:flex; align-items:center; gap:6px;">
+            <span>${isSuccess ? '✅' : (isInsufficient ? '⚠️' : '❌')}</span>
+            <span>${titleText}</span>
         </div>
         <div style="margin-bottom:12px; font-size:13px; color:var(--text-bright); line-height:1.5;">
             ${cleanMsg || rawMsg}
@@ -918,23 +959,55 @@ function renderExecutionResult(json) {
                 <strong>${isInsufficient ? "Balance Guard:" : "Diagnostic / Skip Reason:"}</strong> ${cleanMsg}
             </div>
         ` : ""}
-        ${json.tx_hash ? `<div style="word-break:break-all; margin-top:6px;">Tx Hash: <a href="${explorerBase}${json.tx_hash}" target="_blank" style="color:var(--action-color); text-decoration:underline;">${json.tx_hash}</a></div>` : ""}
+        ${json.tx_hash ? `
+            <div style="background:rgba(15,23,42,0.8); border:1px solid rgba(56,189,248,0.25); border-radius:6px; padding:10px; margin-top:8px; font-size:11px;">
+                <div style="color:var(--text-muted); margin-bottom:4px; font-weight:700;">BASE L2 TRANSACTION RECEIPT</div>
+                <div style="word-break:break-all; font-family:var(--font-mono); margin-bottom:8px;">
+                    <a href="${explorerBase}${json.tx_hash}" target="_blank" style="color:var(--accent-cyan); text-decoration:none; display:inline-flex; align-items:center; gap:4px;">
+                        <span>🔗</span> <span>${json.tx_hash}</span>
+                    </a>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn btn-secondary" style="padding:4px 8px; font-size:10px;" onclick="navigator.clipboard.writeText('${json.tx_hash}'); showToast('Tx Hash copied to clipboard!', 'success');">📋 Copy Hash</button>
+                    <a href="${explorerBase}${json.tx_hash}" target="_blank" class="btn btn-secondary" style="padding:4px 8px; font-size:10px; text-decoration:none; display:inline-flex; align-items:center; gap:4px;">🔍 View on BaseScan</a>
+                </div>
+            </div>
+        ` : ""}
         ${json.trade ? `
-            <div style="margin-top:8px;">
-                <div>Route: ${json.trade.buy_dex} ➔ ${json.trade.sell_dex}</div>
-                <div>Notional: $${Number(json.trade.amount_in).toFixed(2)} USDT</div>
-                <div>Net Profit: +$${Number(json.trade.net_profit || 0).toFixed(4)} USDT</div>
-                <div>Mode: <span class="badge badge-green">${json.trade.mode}</span></div>
+            <div style="margin-top:10px; padding:8px 12px; background:rgba(30,41,59,0.5); border-radius:6px; border:1px solid rgba(148,163,184,0.15); font-size:12px;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:3px;">
+                    <span style="color:var(--text-muted);">Route</span>
+                    <span style="font-weight:700; color:var(--text-bright);">${json.trade.buy_dex} ➔ ${json.trade.sell_dex}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:3px;">
+                    <span style="color:var(--text-muted);">Trade Notional</span>
+                    <span style="font-family:var(--font-mono); font-weight:600;">$${Number(json.trade.amount_in).toFixed(2)}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                    <span style="color:var(--text-muted);">Verified Net PnL</span>
+                    <span style="font-family:var(--font-mono); font-weight:700; color:var(--profit-color);">+$${Number(json.trade.net_profit || 0).toFixed(4)} USDT</span>
+                </div>
             </div>
         ` : ""}
     `;
 }
 
-function showExecModal(title, msg) {
+function showExecModal(title, msg, stepNumber = 0) {
     const modal = document.getElementById("execModalOverlay");
     setText("execModalTitle", title);
     const body = document.getElementById("execModalBody");
-    if (body) body.innerText = msg;
+    if (body) {
+        body.innerHTML = `
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                <span class="pulse-dot"></span>
+                <span style="color:var(--accent-cyan); font-weight:700;">${title}</span>
+            </div>
+            <div style="color:var(--text-bright); line-height:1.5;">${msg}</div>
+        `;
+    }
+    if (stepNumber > 0) {
+        setModalStep(stepNumber, "active");
+    }
     if (modal) modal.style.display = "flex";
 }
 
@@ -1548,6 +1621,7 @@ const safeStorage = {
 const CLIENT_TOKEN_ADDRESSES = {
     8453: { // Base L2
         USDC: { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6 },
+        USDbC: { address: "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA", decimals: 6 },
         USDT: { address: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", decimals: 6 },
         WETH: { address: "0x4200000000000000000000000000000000000006", decimals: 18 }
     },
@@ -1606,7 +1680,8 @@ const CLIENT_ERC20_ABI = [
 const CLIENT_ROUTER_V2_ABI = [
     "function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) returns (uint[] memory amounts)",
     "function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) payable returns (uint[] memory amounts)",
-    "function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) returns (uint[] memory amounts)"
+    "function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) returns (uint[] memory amounts)",
+    "function getAmountsOut(uint amountIn, address[] calldata path) view returns (uint[] memory amounts)"
 ];
 
 async function preApproveTokens() {
@@ -1672,6 +1747,7 @@ let clientWalletBalances = {
     weth: 0,
     usdt: 0,
     usdc: 0,
+    usdbc: 0,
     updated: 0
 };
 
@@ -1708,6 +1784,7 @@ async function fetchClientWalletBalances(account, chainIdNum) {
                     const rem = rawVal % divisor;
                     const val = Number(whole) + Number(rem) / (10 ** dec);
                     if (sym === "USDC") clientWalletBalances.usdc = val;
+                    else if (sym === "USDbC") clientWalletBalances.usdbc = val;
                     else if (sym === "USDT") clientWalletBalances.usdt = val;
                     else if (sym === "WETH") clientWalletBalances.weth = val;
                 }
@@ -1731,9 +1808,12 @@ function renderClientWalletBalances() {
     setText("balWETH", `${Number(clientWalletBalances.weth || 0).toFixed(4)} WETH`);
     setText("balWETHusd", `≈ $${(Number(clientWalletBalances.weth || 0) * ethPrice).toFixed(2)} USDT`);
     setText("balUSDT", `$${Number(clientWalletBalances.usdt || 0).toLocaleString("en-US", { minimumFractionDigits: 2 })} USDT`);
-    setText("balUSDC", `$${Number(clientWalletBalances.usdc || 0).toLocaleString("en-US", { minimumFractionDigits: 2 })} USDC`);
 
-    const totalStable = (clientWalletBalances.usdt || 0) + (clientWalletBalances.usdc || 0);
+    const effectiveUsdc = (clientWalletBalances.usdc || 0) + (clientWalletBalances.usdbc || 0);
+    const usdcLabel = (clientWalletBalances.usdbc > 0 && (clientWalletBalances.usdc || 0) === 0) ? "USDbC" : "USDC";
+    setText("balUSDC", `$${Number(effectiveUsdc).toLocaleString("en-US", { minimumFractionDigits: 2 })} ${usdcLabel}`);
+
+    const totalStable = (clientWalletBalances.usdt || 0) + effectiveUsdc;
     const totalEthEquity = ((clientWalletBalances.eth || 0) + (clientWalletBalances.weth || 0)) * ethPrice;
     const totalEquity = totalStable + totalEthEquity;
     setText("kpiBalance", `$${totalEquity.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
@@ -2076,6 +2156,14 @@ function updateWalletUIDisconnected() {
         portConnectBtn.className = "btn btn-secondary";
         portConnectBtn.onclick = connectMetaMask;
     }
+
+    setText("balETH", "0.0000 ETH");
+    setText("balETHusd", "≈ $0.00 USDT");
+    setText("balWETH", "0.0000 WETH");
+    setText("balWETHusd", "≈ $0.00 USDT");
+    setText("balUSDT", "$0.00 USDT");
+    setText("balUSDC", "$0.00 USDC");
+    setText("kpiBalance", "$0.00");
 }
 
 async function requestSwitchNetwork(targetChainOrEvent) {
@@ -2250,6 +2338,17 @@ async function quickSwitchPair(pair) {
 // ADVANCED FEATURE 3: 1-CLICK DIRECT METAMASK ON-CHAIN SWAP
 // ============================================================
 
+function selectSlippagePreset(val, event) {
+    if (event) event.stopPropagation();
+    document.querySelectorAll(".slippage-btn").forEach(b => b.classList.remove("active"));
+    if (event && event.currentTarget) event.currentTarget.classList.add("active");
+    const cfgSlippage = document.getElementById("cfgSlippage");
+    if (cfgSlippage) cfgSlippage.value = val;
+    const label = document.getElementById("dashSlippageLabel");
+    if (label) label.innerText = `${val}% ${val <= 0.5 ? '(Safe)' : '(Aggressive)'}`;
+    showToast(`Slippage tolerance set to ${val}%`, "info");
+}
+
 async function executeMetaMaskOnChainTrade() {
     const provider = getMetaMaskProvider();
     if (!provider) {
@@ -2277,7 +2376,8 @@ async function executeMetaMaskOnChainTrade() {
         return;
     }
 
-    showExecModal("MetaMask Direct On-Chain Execution", "Checking wallet balances and preparing transaction...");
+    // Step 1: Wallet & Gas Check
+    showExecModal("MetaMask Direct On-Chain Execution", "Checking wallet balances and preparing Base L2 transaction...", 1);
 
     try {
         if (!metamaskSigner) {
@@ -2308,22 +2408,43 @@ async function executeMetaMaskOnChainTrade() {
             return;
         }
 
-        // Quote token: default to USDC for Base L2
-        const tokenInMeta = (clientWalletBalances.usdc > 0 || !tokens.USDT) ? (tokens.USDC || tokens.USDT) : (tokens.USDT || tokens.USDC);
+        // Quote token: auto-select token with positive balance: Native USDC > Bridged USDbC > USDT
+        let tokenInMeta = null;
+        let availStable = 0;
+        let tokenSymbol = "USDC";
+
+        if ((clientWalletBalances.usdc || 0) > 0 && tokens.USDC) {
+            tokenInMeta = tokens.USDC;
+            availStable = clientWalletBalances.usdc;
+            tokenSymbol = "USDC";
+        } else if ((clientWalletBalances.usdbc || 0) > 0 && tokens.USDbC) {
+            tokenInMeta = tokens.USDbC;
+            availStable = clientWalletBalances.usdbc;
+            tokenSymbol = "USDbC";
+        } else if ((clientWalletBalances.usdt || 0) > 0 && tokens.USDT) {
+            tokenInMeta = tokens.USDT;
+            availStable = clientWalletBalances.usdt;
+            tokenSymbol = "USDT";
+        } else {
+            // Default fallback if balance is 0
+            tokenInMeta = tokens.USDC || tokens.USDbC || tokens.USDT;
+            availStable = 0;
+            tokenSymbol = tokenInMeta === tokens.USDT ? "USDT" : (tokenInMeta === tokens.USDbC ? "USDbC" : "USDC");
+        }
+
         const tokenOutMeta = tokens.WETH;
 
         if (!tokenInMeta || !tokenOutMeta) {
             renderExecutionResult({
                 success: false,
                 status: "CONFIGURATION_ERROR",
-                message: "Target tokens (USDC/WETH) are not defined for the selected blockchain."
+                message: "Target tokens (USDC/USDbC/WETH) are not defined for the selected blockchain."
             });
             return;
         }
 
         // Dynamic trade amount sizing
-        let tradeAmt = selectedTradeAmount || 1.0;
-        const availStable = (tokenInMeta === tokens.USDC) ? clientWalletBalances.usdc : clientWalletBalances.usdt;
+        let tradeAmt = selectedTradeAmount || 0.10;
         if (availStable > 0 && tradeAmt > availStable) {
             tradeAmt = Math.max(0.0001, Math.floor(availStable * 0.95 * 10000) / 10000);
         }
@@ -2332,7 +2453,7 @@ async function executeMetaMaskOnChainTrade() {
             renderExecutionResult({
                 success: false,
                 status: "INSUFFICIENT_BALANCE",
-                message: `Connected wallet ${metamaskAccount.slice(0, 6)}...${metamaskAccount.slice(-4)} has $0.0000 USDC/USDT on Base L2. Fund your wallet with at least $0.05 USDC to execute on-chain swaps.`
+                message: `Connected wallet ${metamaskAccount.slice(0, 6)}...${metamaskAccount.slice(-4)} has $0.0000 ${tokenSymbol} on Base L2. Fund your wallet with at least $0.05 ${tokenSymbol} to execute on-chain swaps.`
             });
             return;
         }
@@ -2341,43 +2462,58 @@ async function executeMetaMaskOnChainTrade() {
         const routerName = route.buy_dex || "Uniswap_V2";
         const routerAddress = routers[routerName] || routers.Uniswap_V2 || "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24";
 
-        // Step 1: Verify and request ERC-20 token approval
+        // Step 2: Verify and request ERC-20 token approval
+        showExecModal("Verifying Token Allowance", `Checking ${tokenSymbol} allowance for ${routerName}...`, 2);
         const tokenContract = new ethers.Contract(tokenInMeta.address, CLIENT_ERC20_ABI, metamaskSigner);
-        showExecModal("Verifying Token Allowance", `Checking ${tokenInMeta.decimals === 6 ? 'USDC' : 'USDT'} allowance for ${routerName}...`);
         const currentAllowance = await tokenContract.allowance(metamaskAccount, routerAddress);
 
         if (currentAllowance < parsedAmountIn) {
-            showExecModal("Approving Token Spending", `Please confirm Token Approval for ${routerName} in MetaMask...`);
+            showExecModal("Approving Token Spending", `Please confirm Token Approval for ${routerName} in MetaMask...`, 2);
             showToast("Please approve token spending in MetaMask...", "info");
             const approveTx = await tokenContract.approve(routerAddress, ethers.MaxUint256);
-            showExecModal("Confirming Approval", `Approval submitted (${approveTx.hash.slice(0, 10)}...). Waiting for block confirmation...`);
+            showExecModal("Confirming Approval", `Approval submitted (${approveTx.hash.slice(0, 10)}...). Waiting for block confirmation...`, 2);
             await approveTx.wait(1);
             showToast("Token approval confirmed on-chain!", "success");
         }
 
-        // Step 2: Execute swap via DEX Router contract
-        showExecModal("Executing DEX Swap", `Submitting trade of $${tradeAmt.toFixed(4)} on ${routerName}... Confirm in MetaMask.`);
+        // Step 3: Query DEX Router for expected output & calculate slippage guard
+        showExecModal("Executing DEX Swap", `Submitting trade of $${tradeAmt.toFixed(4)} ${tokenSymbol} on ${routerName}... Confirm in MetaMask.`, 3);
         showToast("Please confirm Swap transaction in MetaMask...", "info");
 
         const routerContract = new ethers.Contract(routerAddress, CLIENT_ROUTER_V2_ABI, metamaskSigner);
         const deadline = Math.floor(Date.now() / 1000) + 1200; // 20 min
         const path = [tokenInMeta.address, tokenOutMeta.address];
 
+        let amountOutMin = 0n;
+        try {
+            const amountsOut = await routerContract.getAmountsOut(parsedAmountIn, path);
+            if (amountsOut && amountsOut.length > 1) {
+                const expectedOut = amountsOut[1];
+                const slippageInput = parseFloat(document.getElementById("cfgSlippage")?.value || "0.5");
+                const slippageBps = BigInt(Math.max(10, Math.min(500, Math.round(slippageInput * 100)))); // 0.10% to 5.00%
+                amountOutMin = (expectedOut * (10000n - slippageBps)) / 10000n;
+            }
+        } catch (slipErr) {
+            console.warn("[MetaMask Trade] getAmountsOut estimation warning, proceeding safely:", slipErr);
+            amountOutMin = 0n;
+        }
+
         const txResponse = await routerContract.swapExactTokensForTokens(
             parsedAmountIn,
-            0,
+            amountOutMin,
             path,
             metamaskAccount,
             deadline,
-            { gasLimit: 250000 }
+            { gasLimit: 280000 }
         );
 
-        showExecModal("Mining Transaction", `Swap broadcasted! Hash: ${txResponse.hash.slice(0, 10)}... Waiting for Base L2 block receipt...`);
+        // Step 4: Base L2 Mining
+        showExecModal("Mining Transaction", `Swap broadcasted! Hash: ${txResponse.hash.slice(0, 10)}... Waiting for Base L2 block receipt (~2s)...`, 4);
         showToast(`Transaction Broadcasted: ${txResponse.hash.slice(0, 10)}...`, "info");
         const receipt = await txResponse.wait(1);
 
-        // Step 3: Verify and record live trade on backend
-        showExecModal("Verifying On-Chain Receipt", "Verifying block receipt & updating live KPIs with Base L2 RPC...");
+        // Step 5: Verify and record live trade on backend
+        showExecModal("Verifying On-Chain Receipt", "Verifying block receipt & updating live KPIs with Base L2 RPC...", 5);
         const confirmRes = await fetch("/api/trade/confirm-live", {
             method: "POST",
             headers: { "Content-Type": "application/json" },

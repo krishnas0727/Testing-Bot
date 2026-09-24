@@ -107,6 +107,7 @@ def get_wallet_balances(eth_price_usdt: float = 3000.0, wallet_address: Optional
             weth_bal = MOCK_WALLET_BALANCES["weth"]
             usdt_bal = MOCK_WALLET_BALANCES["usdt"]
             usdc_bal = MOCK_WALLET_BALANCES["usdc"]
+            usdbc_bal = 0.0
             source = "mock-simulated"
             is_connected = True
         else:
@@ -116,6 +117,7 @@ def get_wallet_balances(eth_price_usdt: float = 3000.0, wallet_address: Optional
             weth_bal = 0.0
             usdt_bal = 0.0
             usdc_bal = 0.0
+            usdbc_bal = 0.0
             source = "disconnected"
             is_connected = False
     else:
@@ -124,15 +126,18 @@ def get_wallet_balances(eth_price_usdt: float = 3000.0, wallet_address: Optional
         weth_info = config.TOKEN_REGISTRY.get("WETH", {"decimals": 18, "address": ""})
         usdt_info = config.TOKEN_REGISTRY.get("USDT", {"decimals": 6, "address": ""})
         usdc_info = config.TOKEN_REGISTRY.get("USDC", {"decimals": 6, "address": ""})
+        usdbc_info = config.TOKEN_REGISTRY.get("USDbC", {"decimals": 6, "address": ""})
 
         weth_bal = fetch_token_balance_onchain(wallet_addr, weth_info["address"], weth_info["decimals"])
         usdt_bal = fetch_token_balance_onchain(wallet_addr, usdt_info["address"], usdt_info["decimals"])
         usdc_bal = fetch_token_balance_onchain(wallet_addr, usdc_info["address"], usdc_info["decimals"])
+        usdbc_bal = fetch_token_balance_onchain(wallet_addr, usdbc_info["address"], usdbc_info["decimals"]) if usdbc_info and usdbc_info.get("address") else 0.0
         source = "on-chain-rpc"
         is_connected = True
 
-    # Total liquid USDT + USDC
-    stable_equity = usdt_bal + usdc_bal
+    # Total liquid USDT + USDC + USDbC (support both Native USDC and Bridged USDbC on Base)
+    effective_usdc = usdc_bal if usdc_bal > 0 else usdbc_bal
+    stable_equity = usdt_bal + usdc_bal + usdbc_bal
     # Total ETH + WETH converted to USD
     eth_equity = (eth_bal + weth_bal) * eth_price_usdt
     total_equity_usdt = stable_equity + eth_equity
@@ -146,7 +151,9 @@ def get_wallet_balances(eth_price_usdt: float = 3000.0, wallet_address: Optional
         "eth": round(eth_bal, 6),
         "weth": round(weth_bal, 6),
         "usdt": round(usdt_bal, 4),
-        "usdc": round(usdc_bal, 4),
+        "usdc": round(effective_usdc, 4),
+        "native_usdc": round(usdc_bal, 4),
+        "usdbc": round(usdbc_bal, 4),
         "total_stable_usdt": round(stable_equity, 4),
         "total_eth_equity_usdt": round(eth_equity, 4),
         "total_equity_usdt": round(total_equity_usdt, 4),

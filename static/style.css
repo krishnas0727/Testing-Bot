@@ -1590,3 +1590,86 @@ input:checked + .slider:before {
     .kpi-grid { grid-template-columns: 1fr; }
     .dex-wallet-grid { grid-template-columns: 1fr; }
 }
+
+/* --- EXECUTION STEPPER PIPELINE --- */
+.exec-stepper {
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+    margin-bottom: 16px;
+}
+
+.step-pill {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 6px 4px;
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+}
+
+.step-pill.active {
+    background: rgba(56, 189, 248, 0.15);
+    border-color: var(--accent-cyan);
+    color: var(--accent-cyan);
+    box-shadow: 0 0 10px rgba(0, 242, 254, 0.25);
+}
+
+.step-pill.completed {
+    background: rgba(0, 245, 155, 0.15);
+    border-color: var(--accent-mint);
+    color: var(--accent-mint);
+    box-shadow: 0 0 10px rgba(0, 245, 155, 0.2);
+}
+
+.step-pill.failed {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: var(--loss-color);
+    color: var(--loss-color);
+}
+
+.step-pill .step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
+    font-size: 9px;
+}
+
+.step-pill.completed .step-num {
+    background: var(--accent-mint);
+    color: #040811;
+}
+
+.step-pill.active .step-num {
+    background: var(--accent-cyan);
+    color: #040811;
+}
+
+/* --- LIQUIDITY DEPTH BAR --- */
+.liquidity-depth-widget {
+    background: rgba(15, 23, 42, 0.65);
+    border-radius: 8px;
+    border: 1px solid rgba(56, 189, 248, 0.18);
+    backdrop-filter: blur(8px);
+}
+
+/* --- SLIPPAGE PRESET BUTTONS --- */
+.slippage-btn.active {
+    background: rgba(0, 245, 155, 0.2) !important;
+    border-color: var(--accent-mint) !important;
+    color: var(--accent-mint) !important;
+    box-shadow: 0 0 8px rgba(0, 245, 155, 0.3) !important;
+}
+
