@@ -15,21 +15,29 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap');
 
 :root {
-    --bg-main: #070d17;
-    --bg-card: #0b1524;
-    --bg-card-hover: #101d30;
-    --bg-header: #0f1c2e;
+    --bg-main: #060b14;
+    --bg-card: rgba(11, 21, 36, 0.85);
+    --bg-card-hover: rgba(16, 29, 48, 0.95);
+    --bg-header: rgba(15, 28, 46, 0.88);
     --border-color: #1b2a3d;
     --border-hover: #2a3e59;
     --action-color: #3b82f6;
     --action-hover: #2563eb;
-    --profit-color: #22c55e;
+    --profit-color: #00f59b;
     --loss-color: #ef4444;
     --text-main: #cbd5e1;
     --text-muted: #64748b;
     --text-bright: #ffffff;
+    --accent-cyan: #00f2fe;
+    --accent-blue: #38bdf8;
+    --accent-mint: #00f59b;
+    --accent-gold: #f59e0b;
+    --glow-cyan: rgba(0, 242, 254, 0.25);
+    --glow-mint: rgba(0, 245, 155, 0.25);
+    --glow-gold: rgba(245, 158, 11, 0.25);
     --radius-sm: 6px;
     --radius-md: 8px;
+    --radius-lg: 12px;
     --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     --font-mono: 'JetBrains Mono', 'Roboto Mono', 'SF Mono', Consolas, monospace;
 }
@@ -2035,4 +2043,291 @@ button, .btn {
         min-width: 180px;
     }
 }
+
+/* =========================================================
+   WORLD-CLASS GLASSMORPHYSIM & MODERN DeFi THEME
+========================================================= */
+
+.header, .second-header {
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-bottom: 1px solid rgba(56, 189, 248, 0.15) !important;
+}
+
+.panel, .stat-card, .chart-card, .route-card {
+    background: rgba(11, 21, 36, 0.85) !important;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(38, 55, 83, 0.75) !important;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.panel:hover, .stat-card:hover {
+    border-color: rgba(56, 189, 248, 0.4) !important;
+    box-shadow: 0 10px 36px 0 rgba(0, 0, 0, 0.45), 0 0 15px rgba(56, 189, 248, 0.1);
+}
+
+.stat-card .value {
+    background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+/* =========================================================
+   INTERACTIVE MULTI-HOP ARBITRAGE ROUTE FLOW DIAGRAM
+========================================================= */
+
+.interactive-route-flow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 16px 14px;
+    background: linear-gradient(135deg, rgba(8, 15, 28, 0.95) 0%, rgba(15, 23, 42, 0.85) 100%);
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 6px 24px rgba(0, 0, 0, 0.45);
+    margin-bottom: 16px;
+    overflow-x: auto;
+    position: relative;
+}
+
+.route-node {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: rgba(15, 23, 42, 0.9);
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(56, 189, 248, 0.2);
+    min-width: 125px;
+    position: relative;
+    transition: all 0.2s ease;
+}
+
+.route-node-token {
+    border-color: rgba(56, 189, 248, 0.3);
+    background: rgba(14, 28, 48, 0.95);
+}
+
+.route-node-dex {
+    min-width: 135px;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 10px 12px;
+}
+
+.route-node-dex .node-badge-top {
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-bottom: 4px;
+    display: inline-block;
+}
+
+.buy-dex-glow {
+    border-color: rgba(56, 189, 248, 0.45) !important;
+    box-shadow: 0 0 15px rgba(56, 189, 248, 0.18);
+}
+
+.buy-dex-glow .node-badge-top {
+    background: rgba(56, 189, 248, 0.2);
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.35);
+}
+
+.sell-dex-glow {
+    border-color: rgba(0, 245, 155, 0.45) !important;
+    box-shadow: 0 0 15px rgba(0, 245, 155, 0.18);
+}
+
+.sell-dex-glow .node-badge-top {
+    background: rgba(0, 245, 155, 0.2);
+    color: #00f59b;
+    border: 1px solid rgba(0, 245, 155, 0.35);
+}
+
+.profit-glow {
+    border-color: rgba(0, 245, 155, 0.5) !important;
+    background: rgba(6, 40, 28, 0.7) !important;
+    box-shadow: 0 0 18px rgba(0, 245, 155, 0.25);
+}
+
+.node-icon {
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.node-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.node-tag {
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.node-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-bright);
+    white-space: nowrap;
+}
+
+.node-price {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.node-sub {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+}
+
+/* Glowing Flow Connectors with Pulsing Particles */
+.route-connector {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    padding: 0 4px;
+    flex-shrink: 0;
+}
+
+.connector-line {
+    width: 32px;
+    height: 3px;
+    background: rgba(56, 189, 248, 0.25);
+    position: relative;
+    overflow: hidden;
+    border-radius: 2px;
+}
+
+.pulse-particle {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 14px;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, #00f2fe, #00f59b, transparent);
+    animation: flowParticle 1.4s infinite cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pulse-particle.reverse {
+    animation: flowParticle 1.4s infinite 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes flowParticle {
+    0% {
+        transform: translateX(-120%);
+        opacity: 0.2;
+    }
+    50% {
+        opacity: 1;
+    }
+    100% {
+        transform: translateX(300%);
+        opacity: 0.1;
+    }
+}
+
+.connector-bridge {
+    font-size: 9px;
+    font-weight: 800;
+    color: #38bdf8;
+    background: rgba(15, 23, 42, 0.9);
+    border: 1px solid rgba(56, 189, 248, 0.4);
+    border-radius: 4px;
+    padding: 1px 5px;
+    margin-top: 4px;
+    letter-spacing: 0.5px;
+}
+
+.connector-arrow {
+    font-size: 9px;
+    color: var(--accent-cyan);
+    margin-top: 2px;
+}
+
+/* Audio Sound Toggle Pill */
+.sound-toggle-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(15, 23, 42, 0.7);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-size: 11px;
+    transition: all 0.15s ease;
+    outline: none;
+}
+
+.sound-toggle-pill:hover {
+    border-color: var(--accent-cyan);
+    color: var(--text-bright);
+}
+
+.sound-toggle-pill.sound-active {
+    border-color: #00f59b !important;
+    color: #00f59b !important;
+    box-shadow: 0 0 10px rgba(0, 245, 155, 0.25);
+    background: rgba(6, 40, 28, 0.5) !important;
+}
+
+.sound-toggle-pill.sound-muted {
+    border-color: #475569 !important;
+    color: #94a3b8 !important;
+    background: rgba(15, 23, 42, 0.5) !important;
+}
+
+/* MEV Shield Badge */
+.badge-mev-shield {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    color: #38bdf8;
+    background: rgba(14, 165, 233, 0.12);
+    border: 1px solid rgba(14, 165, 233, 0.35);
+    padding: 2px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+}
+
+/* Percentage Sizing Buttons */
+.size-pct-pill {
+    border-color: rgba(56, 189, 248, 0.35) !important;
+    color: #38bdf8 !important;
+    font-weight: 700 !important;
+    font-size: 11px !important;
+    padding: 6px 12px !important;
+}
+
+.size-pct-pill:hover, .size-pct-pill.active {
+    background: rgba(56, 189, 248, 0.2) !important;
+    border-color: #38bdf8 !important;
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.3) !important;
+    color: #ffffff !important;
+}
+
 

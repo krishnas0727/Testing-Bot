@@ -40,12 +40,122 @@ let liveChart = null;
 let priceSnapshots = [];
 const MAX_SNAPSHOTS = 30;
 
+// Web Audio API State & Synthesizer
+let terminalAudioCtx = null;
+let terminalSoundEnabled = localStorage.getItem("terminalSoundEnabled") !== "false";
+let lastChimedRoute = "";
+let lastChimeTime = 0;
+
+function initTerminalAudio() {
+    updateAudioButtonUI();
+    const unlockAudio = () => {
+        if (!terminalAudioCtx) {
+            try {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                if (AudioContextClass) terminalAudioCtx = new AudioContextClass();
+            } catch (e) {}
+        }
+        if (terminalAudioCtx && terminalAudioCtx.state === "suspended") {
+            terminalAudioCtx.resume();
+        }
+        window.removeEventListener("pointerdown", unlockAudio);
+        window.removeEventListener("keydown", unlockAudio);
+    };
+    window.addEventListener("pointerdown", unlockAudio, { once: true });
+    window.addEventListener("keydown", unlockAudio, { once: true });
+}
+
+function toggleTerminalAudio() {
+    terminalSoundEnabled = !terminalSoundEnabled;
+    localStorage.setItem("terminalSoundEnabled", terminalSoundEnabled ? "true" : "false");
+    updateAudioButtonUI();
+    if (terminalSoundEnabled) {
+        playTerminalSound("test");
+        showToast("🔊 Audio Chimes Enabled", "info");
+    } else {
+        showToast("🔇 Audio Chimes Muted", "info");
+    }
+}
+
+function updateAudioButtonUI() {
+    const btn = document.getElementById("btnSoundToggle");
+    if (btn) {
+        if (terminalSoundEnabled) {
+            btn.innerHTML = `<span style="font-size:12px;">🔊</span> <span id="soundToggleLabel" style="font-size:11px; font-weight:700;">Sound ON</span>`;
+            btn.className = "sound-toggle-pill sound-active";
+        } else {
+            btn.innerHTML = `<span style="font-size:12px;">🔇</span> <span id="soundToggleLabel" style="font-size:11px; font-weight:700;">Muted</span>`;
+            btn.className = "sound-toggle-pill sound-muted";
+        }
+    }
+}
+
+function playTerminalSound(type) {
+    if (!terminalSoundEnabled) return;
+    try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return;
+        if (!terminalAudioCtx) {
+            terminalAudioCtx = new AudioContextClass();
+        }
+        if (terminalAudioCtx.state === "suspended") {
+            terminalAudioCtx.resume();
+        }
+        const now = terminalAudioCtx.currentTime;
+        const osc = terminalAudioCtx.createOscillator();
+        const gain = terminalAudioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(terminalAudioCtx.destination);
+
+        if (type === "opp" || type === "profitable") {
+            osc.type = "sine";
+            osc.frequency.setValueAtTime(587.33, now);
+            osc.frequency.exponentialRampToValueAtTime(880, now + 0.15);
+            gain.gain.setValueAtTime(0.001, now);
+            gain.gain.linearRampToValueAtTime(0.12, now + 0.04);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+            osc.start(now);
+            osc.stop(now + 0.35);
+        } else if (type === "trade_success") {
+            osc.type = "triangle";
+            osc.frequency.setValueAtTime(523.25, now);
+            osc.frequency.setValueAtTime(659.25, now + 0.08);
+            osc.frequency.setValueAtTime(783.99, now + 0.16);
+            osc.frequency.setValueAtTime(1046.50, now + 0.24);
+            gain.gain.setValueAtTime(0.001, now);
+            gain.gain.linearRampToValueAtTime(0.15, now + 0.05);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.55);
+            osc.start(now);
+            osc.stop(now + 0.55);
+        } else if (type === "alert" || type === "error") {
+            osc.type = "sawtooth";
+            osc.frequency.setValueAtTime(220, now);
+            osc.frequency.linearRampToValueAtTime(160, now + 0.2);
+            gain.gain.setValueAtTime(0.001, now);
+            gain.gain.linearRampToValueAtTime(0.08, now + 0.04);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
+            osc.start(now);
+            osc.stop(now + 0.25);
+        } else {
+            osc.type = "sine";
+            osc.frequency.setValueAtTime(700, now);
+            gain.gain.setValueAtTime(0.05, now);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+            osc.start(now);
+            osc.stop(now + 0.08);
+        }
+    } catch (e) {
+        console.warn("WebAudio synthesis notice:", e);
+    }
+}
+
 // ============================================================
 // INITIALIZATION
 // ============================================================
 
 document.addEventListener("DOMContentLoaded", () => {
     initChart();
+    initTerminalAudio();
     handleInitialRoute();
     startClock();
     startPolling();
@@ -454,7 +564,7 @@ function updateDashboardUI(payload) {
     setText("balUSDT", `$${dispUsdt.toLocaleString("en-US", { minimumFractionDigits: 2 })} USDT`);
     setText("balUSDC", `$${dispUsdc.toLocaleString("en-US", { minimumFractionDigits: 2 })} USDC`);
 
-    // 5. Best Opportunity card
+    // 5. Best Opportunity card & Multi-Hop Flow Diagram
     if (best.buy_dex) {
         setText("oppBuyDex", best.buy_dex.replace("_", " "));
         setText("oppBuyPrice", `$${best.buy_price.toFixed(2)}`);
@@ -472,10 +582,26 @@ function updateDashboardUI(payload) {
             oppNetProfEl.style.color = (best.net_profit_usdt || 0) >= 0 ? "var(--profit-color)" : "var(--loss-color)";
         }
 
+        // Multi-Hop Flow Nodes
+        setText("flowInputAmount", `$${Number(best.amount_in || selectedTradeAmount).toFixed(2)} USDT`);
+        setText("flowImpactSub", `Impact: ${Number(best.max_price_impact_pct || 0.01).toFixed(2)}%`);
+        setText("flowOutputProfit", `${oppNetProfSign}$${Number(best.net_profit_usdt || 0).toFixed(4)} (${oppNetProfSign}${Number(best.net_profit_percent || 0).toFixed(2)}%)`);
+
         const oppBadge = document.getElementById("oppBadge");
         if (oppBadge) {
             oppBadge.innerText = best.is_profitable ? "PROFITABLE" : "LOW PROFIT";
             oppBadge.className = "badge " + (best.is_profitable ? "badge-green" : "badge-yellow");
+        }
+
+        // Web Audio chime for new profitable opportunities (throttled)
+        const currentRouteKey = `${best.buy_dex}->${best.sell_dex}`;
+        const nowMs = Date.now();
+        if (best.is_profitable && (best.net_profit_percent || 0) > 0.25) {
+            if (lastChimedRoute !== currentRouteKey || (nowMs - lastChimeTime > 45000)) {
+                lastChimedRoute = currentRouteKey;
+                lastChimeTime = nowMs;
+                playTerminalSound("profitable");
+            }
         }
     }
 
@@ -568,19 +694,26 @@ function selectTradeSize(amount) {
         const btnVal = parseFloat(btn.innerText.replace("$", ""));
         btn.classList.toggle("active", Math.abs(btnVal - amount) < 0.0001);
     });
+    document.querySelectorAll(".size-pct-pill, .btn-max-safe").forEach(btn => {
+        btn.classList.remove("active");
+    });
     const inp = document.getElementById("customTradeInput");
     if (inp) inp.value = amount;
+    const dashLbl = document.getElementById("dashSizingLabel");
+    if (dashLbl) dashLbl.innerText = `$${Number(amount).toFixed(2)} USDT`;
     updateExecutionPlanForAmount(amount);
     fetchMarketData();
 }
 
 function selectMaxSafeSize() {
     let available = 0;
-    if (latestMarketData && latestMarketData.wallet) {
+    if (clientWalletBalances && (clientWalletBalances.usdt > 0 || clientWalletBalances.usdc > 0)) {
+        available = clientWalletBalances.usdt + clientWalletBalances.usdc;
+    } else if (latestMarketData && latestMarketData.wallet) {
         available = Number(latestMarketData.wallet.total_stable_usdt || 0);
     }
     if (available <= 0.0) {
-        showToast("Wallet has $0.00 USDT/USDC. Deposit funds to trade.", "error");
+        showToast("Wallet has $0.00 USDT/USDC. Deposit funds or connect MetaMask.", "warning");
         return;
     }
     const safeAmt = Math.floor(available * 0.95 * 10000) / 10000;
@@ -589,10 +722,42 @@ function selectMaxSafeSize() {
         btn.classList.toggle("active", btn.classList.contains("btn-max-safe"));
     });
     const inp = document.getElementById("customTradeInput");
-    if (inp) inp.value = selectedTradeAmount;
+    if (inp) inp.value = selectedTradeAmount.toFixed(4);
+    const dashLbl = document.getElementById("dashSizingLabel");
+    if (dashLbl) dashLbl.innerText = `$${selectedTradeAmount.toFixed(4)} USDT`;
     updateExecutionPlanForAmount(selectedTradeAmount);
     fetchMarketData();
-    showToast(`Set trade size to max safe balance: $${selectedTradeAmount.toFixed(4)} USDT`, "success");
+    playTerminalSound("test");
+    showToast(`Set trade size to max safe balance (95%): $${selectedTradeAmount.toFixed(4)} USDT`, "success");
+}
+
+function selectSizingPercentage(pct) {
+    let available = 0;
+    if (clientWalletBalances && (clientWalletBalances.usdt > 0 || clientWalletBalances.usdc > 0)) {
+        available = clientWalletBalances.usdt + clientWalletBalances.usdc;
+    } else if (latestMarketData && latestMarketData.wallet) {
+        available = Number(latestMarketData.wallet.total_stable_usdt || 0);
+    }
+    if (available <= 0.0) {
+        showToast("Wallet has $0.00 USDT/USDC. Deposit funds or connect MetaMask.", "warning");
+        return;
+    }
+    const factor = Math.min(1.0, pct / 100.0);
+    const amt = Math.floor(available * factor * 10000) / 10000;
+    selectedTradeAmount = Math.max(0.0001, amt);
+
+    document.querySelectorAll(".size-btn").forEach(btn => btn.classList.remove("active"));
+    const activePill = document.getElementById(`pctBtn${pct}`);
+    if (activePill) activePill.classList.add("active");
+
+    const inp = document.getElementById("customTradeInput");
+    if (inp) inp.value = selectedTradeAmount.toFixed(4);
+    const dashLbl = document.getElementById("dashSizingLabel");
+    if (dashLbl) dashLbl.innerText = `$${selectedTradeAmount.toFixed(4)} USDT (${pct}%)`;
+    updateExecutionPlanForAmount(selectedTradeAmount);
+    fetchMarketData();
+    playTerminalSound("test");
+    showToast(`Set trade size to ${pct}%: $${selectedTradeAmount.toFixed(4)} USDT`, "success");
 }
 
 function onCustomAmountChange() {
@@ -690,6 +855,13 @@ function renderExecutionResult(json) {
     const isInsufficient = (json.status === "INSUFFICIENT BALANCE") || 
                            (json.skip_reason && json.skip_reason.includes("INSUFFICIENT BALANCE")) || 
                            (json.message && json.message.includes("INSUFFICIENT BALANCE"));
+    
+    if (isSuccess) {
+        playTerminalSound("trade_success");
+    } else if (isInsufficient) {
+        playTerminalSound("alert");
+    }
+
     const isSkipped = json.status === "TRADE SKIPPED";
     const statusColor = isSuccess ? "var(--profit-color)" : (isInsufficient ? "var(--loss-color)" : (isSkipped ? "#f59e0b" : "var(--loss-color)"));
     const explorerBase = (latestMarketData && Number(latestMarketData.chain_id) === 8453) ? "https://basescan.org/tx/" : "https://basescan.org/tx/";
