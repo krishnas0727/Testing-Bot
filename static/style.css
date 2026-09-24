@@ -1,5 +1,4 @@
-/* ==========================================================================
-   NEXUS ARB - WORLD-CLASS WEB3 DEX ARBITRAGE TERMINAL
+/* ===================================================================   NEXUS ARB - WORLD-CLASS WEB3 DEX ARBITRAGE TERMINAL
    Cyberpunk Glassmorphism Design System (2026 Edition)
    Inspired by: Photon, Hyperliquid, 1inch Fusion, Coinhall, DexScreener
    ========================================================================== */
@@ -1068,19 +1067,11 @@ header {
     position: relative;
     padding: 0 2px;
     flex: 0 0 24px;
-<<<<<<< HEAD
-    min-width: 24px;
-}
-
-.connector-line {
-    width: 22px;
-=======
     flex-shrink: 0;
 }
 
 .connector-line {
     width: 20px;
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     height: 2px;
     background: rgba(56, 189, 248, 0.25);
     position: relative;
@@ -1094,15 +1085,11 @@ header {
     left: 0;
     width: 10px;
     height: 100%;
-<<<<<<< HEAD
-    background: linear-gradient(90deg, transparent, #00f2fe, transparent);
-=======
     background: linear-gradient(90deg, transparent, #00f2fe, #00f59b, transparent);
     animation: flowParticle 1.4s infinite cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .pulse-particle.reverse {
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     animation: flowParticle 1.4s infinite 0.7s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -1136,31 +1123,12 @@ header {
 
 .opp-details-grid {
     display: grid;
-<<<<<<< HEAD
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-=======
     grid-template-columns: repeat(2, 1fr);
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     gap: 10px;
 }
 
 .opp-details-grid div {
     background: rgba(15, 23, 42, 0.6);
-<<<<<<< HEAD
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    padding: 10px 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.opp-details-grid span {
-    font-size: 10px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-=======
     padding: 10px 14px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border-subtle);
@@ -1174,34 +1142,21 @@ header {
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.4px;
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 }
 
 .opp-details-grid strong {
     font-family: var(--font-mono);
-<<<<<<< HEAD
-    font-size: 13px;
-    color: var(--text-bright);
-}
-
-/* --- TRADE SIZING BUTTONS --- */
-=======
     font-size: 14px;
     color: var(--text-bright);
     margin-top: 2px;
 }
 
 /* --- TRADE SIZING BUTTONS & PILLS --- */
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 .size-btn-group {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-<<<<<<< HEAD
-    margin-top: 12px;
-=======
     margin-bottom: 12px;
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 }
 
 .size-btn {
@@ -1210,17 +1165,6 @@ header {
     border-radius: var(--radius-sm);
     color: var(--text-main);
     padding: 6px 12px;
-<<<<<<< HEAD
-    font-size: 11px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.15s ease;
-}
-
-.size-btn:hover {
-    background: rgba(22, 34, 60, 0.95);
-    border-color: var(--border-hover);
-=======
     font-size: 12px;
     font-weight: 700;
     cursor: pointer;
@@ -1233,15 +1177,13 @@ header {
     background: rgba(22, 34, 60, 0.9);
     border-color: var(--border-hover);
     color: #ffffff;
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 }
 
 .size-btn.active {
     background: rgba(14, 165, 233, 0.2);
-<<<<<<< HEAD
-    border-color: rgba(56, 189, 248, 0.5);
+    border-color: #0284c7;
     color: #38bdf8;
-    box-shadow: 0 0 12px rgba(14, 165, 233, 0.15);
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.25);
 }
 
 .size-pct-pill {
@@ -1260,29 +1202,6 @@ header {
     background: rgba(56, 189, 248, 0.12);
     border-color: rgba(56, 189, 248, 0.4);
     color: var(--accent-cyan);
-}
-
-.btn-max-safe {
-    background: rgba(0, 245, 155, 0.08);
-    border-color: rgba(0, 245, 155, 0.3);
-    color: var(--profit-color);
-}
-
-.btn-max-safe.active {
-    background: rgba(0, 245, 155, 0.18);
-    border-color: rgba(0, 245, 155, 0.5);
-}
-
-/* --- EXECUTION PLAN & STEP FLOW --- */
-=======
-    border-color: #0284c7;
-    color: #38bdf8;
-    box-shadow: 0 0 10px rgba(56, 189, 248, 0.25);
-}
-
-.size-pct-pill {
-    border-color: rgba(56, 189, 248, 0.35) !important;
-    color: #38bdf8 !important;
 }
 
 .size-pct-pill:hover, .size-pct-pill.active {
@@ -1312,7 +1231,6 @@ header {
     gap: 20px;
 }
 
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 .execution-plan-box {
     background: rgba(15, 23, 42, 0.85);
     border: 1px solid var(--border-color);
@@ -1346,20 +1264,13 @@ header {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-<<<<<<< HEAD
-    background: rgba(15, 23, 42, 0.75);
-=======
     background: rgba(15, 23, 42, 0.7);
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     color: var(--text-secondary);
     border: 1px solid var(--border-color);
     border-radius: 6px;
     padding: 4px 10px;
     cursor: pointer;
-<<<<<<< HEAD
-=======
     font-size: 11px;
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     transition: all 0.15s ease;
     outline: none;
 }
@@ -1382,17 +1293,10 @@ header {
     background: rgba(15, 23, 42, 0.5) !important;
 }
 
-<<<<<<< HEAD
-/* --- POOLS CARDS --- */
-.pools-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-=======
 /* --- POOL CARDS (PRICES TAB) --- */
 .pools-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     gap: 18px;
 }
 
@@ -1443,11 +1347,7 @@ header {
     font-weight: 700;
 }
 
-<<<<<<< HEAD
-/* --- DATA TABLES --- */
-=======
 /* --- DATA TABLES (TRADES AUDIT LOG) --- */
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 .table-responsive {
     overflow-x: auto;
     border-radius: var(--radius-md);
@@ -1484,11 +1384,7 @@ header {
 /* --- FORM CONTROLS & SETTINGS --- */
 .settings-grid {
     display: grid;
-<<<<<<< HEAD
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-=======
     grid-template-columns: repeat(2, 1fr);
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     gap: 20px;
 }
 
@@ -1628,11 +1524,7 @@ header {
     align-items: center;
     width: 100%;
     padding: 6px 10px;
-<<<<<<< HEAD
-    background: rgba(15, 23, 42, 0.7);
-=======
     background: rgba(15, 23, 42, 0.6);
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
     color: var(--text-main);
@@ -1642,13 +1534,8 @@ header {
 }
 
 .dropdown-net-card.active {
-<<<<<<< HEAD
-    background: rgba(14, 165, 233, 0.12);
-    border-color: rgba(56, 189, 248, 0.4);
-=======
     background: rgba(14, 165, 233, 0.2);
     border-color: #0284c7;
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     color: #38bdf8;
 }
 
@@ -1702,11 +1589,7 @@ header {
     cursor: pointer;
     top: 0; left: 0; right: 0; bottom: 0;
     background-color: #334155;
-<<<<<<< HEAD
-    transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-=======
     transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     border-radius: 20px;
 }
 
@@ -1718,11 +1601,7 @@ header {
     left: 3px;
     bottom: 3px;
     background-color: white;
-<<<<<<< HEAD
-    transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-=======
     transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     border-radius: 50%;
 }
 
@@ -1735,11 +1614,7 @@ input:checked + .slider:before {
     transform: translateX(18px);
 }
 
-<<<<<<< HEAD
-/* --- TAB CONTENT --- */
-=======
 /* --- TAB CONTROL --- */
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 .tab-content {
     display: none !important;
 }
@@ -1754,11 +1629,7 @@ input:checked + .slider:before {
     to { opacity: 1; transform: translateY(0); }
 }
 
-<<<<<<< HEAD
-/* --- MODALS & TOASTS --- */
-=======
 /* --- MODALS --- */
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 .exec-modal {
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
@@ -1768,11 +1639,7 @@ input:checked + .slider:before {
     display: flex;
     align-items: center;
     justify-content: center;
-<<<<<<< HEAD
-    z-index: 99999;
-=======
     z-index: 999999;
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     animation: fadeIn 0.15s ease-out;
 }
 
@@ -1781,98 +1648,12 @@ input:checked + .slider:before {
     to { opacity: 1; }
 }
 
-<<<<<<< HEAD
-=======
 /* --- COLOR UTILITIES --- */
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 .text-profit { color: var(--profit-color) !important; }
 .text-loss { color: var(--loss-color) !important; }
 .text-blue { color: var(--accent-blue) !important; }
 .text-yellow { color: var(--accent-gold) !important; }
 
-<<<<<<< HEAD
-@media (max-width: 1360px) {
-    .chart-layout {
-        grid-template-columns: 1fr;
-    }
-
-    .kpi-grid {
-        grid-template-columns: repeat(2, 1fr);
-    }
-
-    .dex-wallet-grid {
-        grid-template-columns: repeat(2, 1fr);
-    }
-
-    .pools-grid {
-        grid-template-columns: 1fr;
-    }
-}
-
-@media (max-width: 768px) {
-    .sidebar {
-        width: 68px;
-        padding: 12px 6px;
-    }
-
-    .logo {
-        justify-content: center;
-        padding: 8px 6px 12px;
-    }
-
-    .logo span:not(.logo-icon) {
-        display: none;
-    }
-
-    .sidebar nav a {
-        justify-content: center;
-        padding: 12px 8px;
-    }
-
-    .sidebar nav a span {
-        display: none;
-    }
-
-    .bot-status {
-        display: none;
-    }
-
-    .main {
-        margin-left: 68px;
-        width: calc(100vw - 68px);
-        max-width: calc(100vw - 68px);
-        padding: 12px 12px 24px;
-    }
-
-    header, .second-header {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    .header-status-strip, .second-header-right {
-        width: 100%;
-        justify-content: flex-start;
-    }
-
-    .kpi-grid,
-    .dex-wallet-grid,
-    .settings-grid,
-    .opp-details-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .route-leg-container {
-        flex-direction: column;
-        align-items: stretch;
-    }
-
-    .route-connector {
-        display: none;
-    }
-}
-
-/* --- EXECUTION STEPPER --- */
-=======
 /* --- RESPONSIVE MEDIA QUERIES --- */
 @media (max-width: 1360px) {
     .chart-layout { grid-template-columns: 1fr; }
@@ -1892,20 +1673,20 @@ input:checked + .slider:before {
     .header-status-strip { width: 100%; justify-content: space-between; }
     .kpi-grid { grid-template-columns: 1fr; }
     .dex-wallet-grid { grid-template-columns: 1fr; }
+    .kpi-grid,
+    .dex-wallet-grid,
+    .settings-grid,
+    .opp-details-grid { grid-template-columns: 1fr; }
+    .route-leg-container { flex-direction: column; align-items: stretch; }
+    .route-connector { display: none; }
 }
 
 /* --- EXECUTION STEPPER PIPELINE --- */
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 .exec-stepper {
     display: flex;
     justify-content: space-between;
     gap: 6px;
-<<<<<<< HEAD
-    margin-top: 16px;
-    margin-bottom: 12px;
-=======
     margin-bottom: 16px;
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 }
 
 .step-pill {
@@ -1914,24 +1695,15 @@ input:checked + .slider:before {
     align-items: center;
     justify-content: center;
     gap: 5px;
-<<<<<<< HEAD
-    padding: 6px 8px;
-=======
     padding: 6px 4px;
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     background: rgba(15, 23, 42, 0.8);
     border: 1px solid rgba(148, 163, 184, 0.2);
     border-radius: 6px;
     font-size: 10px;
     font-weight: 700;
     color: var(--text-muted);
-<<<<<<< HEAD
-    text-transform: uppercase;
-    transition: all 0.3s ease;
-=======
     transition: all 0.3s ease;
     text-transform: uppercase;
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 }
 
 .step-pill.active {
@@ -1945,10 +1717,7 @@ input:checked + .slider:before {
     background: rgba(0, 245, 155, 0.15);
     border-color: var(--accent-mint);
     color: var(--accent-mint);
-<<<<<<< HEAD
-=======
     box-shadow: 0 0 10px rgba(0, 245, 155, 0.2);
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 }
 
 .step-pill.failed {
@@ -1968,11 +1737,6 @@ input:checked + .slider:before {
     font-size: 9px;
 }
 
-<<<<<<< HEAD
-.step-pill.completed .step-num,
-.step-pill.active .step-num {
-    background: rgba(255, 255, 255, 0.14);
-=======
 .step-pill.completed .step-num {
     background: var(--accent-mint);
     color: #040811;
@@ -1981,26 +1745,17 @@ input:checked + .slider:before {
 .step-pill.active .step-num {
     background: var(--accent-cyan);
     color: #040811;
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 }
 
 /* --- LIQUIDITY DEPTH BAR --- */
 .liquidity-depth-widget {
     background: rgba(15, 23, 42, 0.65);
     border-radius: 8px;
-<<<<<<< HEAD
-    border: 1px solid var(--border-subtle);
-    background-filter: blur(8px);
-}
-
-/* --- SLIPPAGE PRESETS --- */
-=======
     border: 1px solid rgba(56, 189, 248, 0.18);
     backdrop-filter: blur(8px);
 }
 
 /* --- SLIPPAGE PRESET BUTTONS --- */
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 .slippage-btn.active {
     background: rgba(0, 245, 155, 0.2) !important;
     border-color: var(--accent-mint) !important;
@@ -2008,7 +1763,6 @@ input:checked + .slider:before {
     box-shadow: 0 0 8px rgba(0, 245, 155, 0.3) !important;
 }
 
-<<<<<<< HEAD
 /* --- FIXED CSS OVERFLOW/RESPONSIVE ERRORS --- */
 html, body {
     overflow-x: hidden;
@@ -2043,5 +1797,679 @@ html, body {
         grid-template-columns: 1fr;
     }
 }
-=======
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
+
+
+@keyframes flowParticle {
+    0% { transform: translateX(-120%); opacity: 0.2; }
+    50% { opacity: 1; }
+    100% { transform: translateX(300%); opacity: 0.1; }
+}
+
+
+}
+
+.opp-details-grid div {
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.opp-details-grid span {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.opp-details-grid span {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.opp-details-grid strong {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    color: var(--text-bright);
+    margin-top: 2px;
+}
+
+/* --- TRADE SIZING BUTTONS & PILLS --- */
+.size-btn-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.size-btn {
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-main);
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    transition: all 0.15s ease;
+    outline: none;
+}
+
+.size-btn:hover {
+    background: rgba(22, 34, 60, 0.9);
+    border-color: var(--border-hover);
+    color: #ffffff;
+}
+
+.size-btn.active {
+    background: rgba(14, 165, 233, 0.2);
+    border-color: #0284c7;
+    color: #38bdf8;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.25);
+}
+
+.size-pct-pill {
+    border-color: rgba(56, 189, 248, 0.35) !important;
+    color: #38bdf8 !important;
+}
+
+.size-pct-pill:hover, .size-pct-pill.active {
+    background: rgba(56, 189, 248, 0.2) !important;
+    border-color: #38bdf8 !important;
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.3) !important;
+    color: #ffffff !important;
+}
+
+.btn-max-safe {
+    background: rgba(245, 158, 11, 0.12) !important;
+    border-color: rgba(245, 158, 11, 0.35) !important;
+    color: #f59e0b !important;
+}
+
+.btn-max-safe:hover, .btn-max-safe.active {
+    background: rgba(245, 158, 11, 0.25) !important;
+    border-color: #f59e0b !important;
+    box-shadow: 0 0 14px rgba(245, 158, 11, 0.3) !important;
+    color: #ffffff !important;
+}
+
+/* --- EXECUTION PLAN (ARBITRAGE TAB) --- */
+.arb-terminal-grid {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 20px;
+}
+
+.execution-plan-box {
+    background: rgba(15, 23, 42, 0.85);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    box-shadow: var(--glow-card);
+}
+
+.plan-item-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: 12.5px;
+}
+
+.plan-item-row.highlight {
+    background: rgba(0, 245, 155, 0.08);
+    padding: 10px 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(0, 245, 155, 0.25);
+    margin-top: 6px;
+}
+
+/* --- SOUND TOGGLE --- */
+.sound-toggle-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(15, 23, 42, 0.7);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-size: 11px;
+    transition: all 0.15s ease;
+    outline: none;
+}
+
+.sound-toggle-pill:hover {
+    border-color: var(--accent-cyan);
+    color: var(--text-bright);
+}
+
+.sound-toggle-pill.sound-active {
+    border-color: #00f59b !important;
+    color: #00f59b !important;
+    box-shadow: 0 0 10px rgba(0, 245, 155, 0.25);
+    background: rgba(6, 40, 28, 0.5) !important;
+}
+
+.sound-toggle-pill.sound-muted {
+    border-color: #475569 !important;
+    color: #94a3b8 !important;
+    background: rgba(15, 23, 42, 0.5) !important;
+}
+
+/* --- POOL CARDS (PRICES TAB) --- */
+.pools-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 18px;
+}
+
+.pool-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    box-shadow: var(--glow-card);
+}
+
+.pool-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.pool-spot-price {
+    font-family: var(--font-mono);
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--text-bright);
+}
+
+.pool-stats-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.pool-stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12.5px;
+}
+
+.pool-stat-label {
+    color: var(--text-muted);
+}
+
+.pool-stat-val {
+    color: var(--text-bright);
+    font-family: var(--font-mono);
+    font-weight: 700;
+}
+
+/* --- DATA TABLES (TRADES AUDIT LOG) --- */
+.table-responsive {
+    overflow-x: auto;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    text-align: left;
+}
+
+.data-table th {
+    background: rgba(15, 23, 42, 0.9);
+    padding: 12px 14px;
+    color: var(--text-muted);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.data-table td {
+    padding: 12px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    color: var(--text-main);
+}
+
+.data-table tr:hover td {
+    background: rgba(30, 41, 59, 0.4);
+}
+
+/* --- FORM CONTROLS & SETTINGS --- */
+.settings-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+}
+
+.form-group {
+    margin-bottom: 16px;
+}
+
+.form-group label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+}
+
+.form-control {
+    width: 100%;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-bright);
+    padding: 9px 12px;
+    font-size: 13px;
+    font-family: var(--font-mono);
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.form-control:focus {
+    border-color: #00f2fe;
+    box-shadow: 0 0 10px rgba(0, 242, 254, 0.25);
+}
+
+.settings-section-title {
+    font-size: 14px;
+    font-weight: 800;
+    color: var(--text-bright);
+    margin-bottom: 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+/* --- WALLET PILL & DROPDOWN --- */
+.wallet-pill {
+    background: rgba(15, 23, 42, 0.85);
+    border: 1px solid rgba(0, 245, 155, 0.35);
+    border-radius: 20px;
+    padding: 5px 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 11.5px;
+    font-family: var(--font-mono);
+    color: var(--text-bright);
+    box-shadow: 0 0 12px rgba(0, 245, 155, 0.15);
+    transition: all 0.15s ease;
+}
+
+.wallet-pill:hover {
+    border-color: #00f59b;
+    box-shadow: 0 0 16px rgba(0, 245, 155, 0.25);
+}
+
+.network-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+}
+
+.dot-green {
+    background: #00f59b;
+    box-shadow: 0 0 6px #00f59b;
+}
+
+.dropdown-caret {
+    font-size: 9px;
+    color: var(--text-muted);
+}
+
+.wallet-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 280px;
+    background: rgba(10, 18, 32, 0.95);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 14px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
+    z-index: 10000;
+}
+
+.wallet-menu-header {
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.menu-label {
+    font-size: 9px;
+    font-weight: 800;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.full-address-mono {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent-cyan);
+    word-break: break-all;
+}
+
+.wallet-menu-network {
+    margin-bottom: 12px;
+}
+
+.network-name-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-bright);
+}
+
+.dropdown-net-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    padding: 6px 10px;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--text-main);
+    font-size: 11px;
+    margin-bottom: 4px;
+    cursor: pointer;
+}
+
+.dropdown-net-card.active {
+    background: rgba(14, 165, 233, 0.2);
+    border-color: #0284c7;
+    color: #38bdf8;
+}
+
+.wallet-menu-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-subtle);
+}
+
+.menu-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 10px;
+    background: rgba(15, 23, 42, 0.7);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--text-main);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.menu-btn:hover {
+    background: rgba(30, 41, 59, 0.9);
+    color: var(--text-bright);
+    border-color: var(--border-hover);
+}
+
+/* --- SWITCH TOGGLES --- */
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 38px;
+    height: 20px;
+}
+
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: #334155;
+    transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: 20px;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 14px;
+    width: 14px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: 50%;
+}
+
+input:checked + .slider {
+    background-color: var(--profit-color);
+    box-shadow: 0 0 10px rgba(0, 245, 155, 0.35);
+}
+
+input:checked + .slider:before {
+    transform: translateX(18px);
+}
+
+/* --- TAB CONTROL --- */
+.tab-content {
+    display: none !important;
+}
+
+.tab-content.active {
+    display: block !important;
+    animation: tabEntrance 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes tabEntrance {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* --- MODALS --- */
+.exec-modal {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(4, 8, 17, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 999999;
+    animation: fadeIn 0.15s ease-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* --- COLOR UTILITIES --- */
+.text-profit { color: var(--profit-color) !important; }
+.text-loss { color: var(--loss-color) !important; }
+.text-blue { color: var(--accent-blue) !important; }
+.text-yellow { color: var(--accent-gold) !important; }
+
+/* --- RESPONSIVE MEDIA QUERIES --- */
+@media (max-width: 1360px) {
+    .chart-layout { grid-template-columns: 1fr; }
+    .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    .dex-wallet-grid { grid-template-columns: repeat(2, 1fr); }
+    .pools-grid { grid-template-columns: 1fr; }
+    .arb-terminal-grid { grid-template-columns: 1fr; }
+    .settings-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 768px) {
+    .sidebar { width: 68px; padding: 12px 6px; }
+    .logo span, .sidebar nav a span, .bot-status span:not(.dot) { display: none; }
+    .sidebar nav a { justify-content: center; padding: 12px; }
+    .main { margin-left: 68px; width: calc(100vw - 68px); max-width: calc(100vw - 68px); padding: 12px; }
+    header { flex-direction: column; align-items: flex-start; }
+    .header-status-strip { width: 100%; justify-content: space-between; }
+    .kpi-grid { grid-template-columns: 1fr; }
+    .dex-wallet-grid { grid-template-columns: 1fr; }
+}
+
+/* --- EXECUTION STEPPER PIPELINE --- */
+.exec-stepper {
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+    margin-bottom: 16px;
+}
+
+.step-pill {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 6px 4px;
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+}
+
+.step-pill.active {
+    background: rgba(56, 189, 248, 0.15);
+    border-color: var(--accent-cyan);
+    color: var(--accent-cyan);
+    box-shadow: 0 0 10px rgba(0, 242, 254, 0.25);
+}
+
+.step-pill.completed {
+    background: rgba(0, 245, 155, 0.15);
+    border-color: var(--accent-mint);
+    color: var(--accent-mint);
+    box-shadow: 0 0 10px rgba(0, 245, 155, 0.2);
+}
+
+.step-pill.failed {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: var(--loss-color);
+    color: var(--loss-color);
+}
+
+.step-pill .step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
+    font-size: 9px;
+}
+
+.step-pill.completed .step-num {
+    background: var(--accent-mint);
+    color: #040811;
+}
+
+.step-pill.active .step-num {
+    background: var(--accent-cyan);
+    color: #040811;
+}
+
+/* --- LIQUIDITY DEPTH BAR --- */
+.liquidity-depth-widget {
+    background: rgba(15, 23, 42, 0.65);
+    border-radius: 8px;
+    border: 1px solid rgba(56, 189, 248, 0.18);
+    backdrop-filter: blur(8px);
+}
+
+/* --- SLIPPAGE PRESET BUTTONS --- */
+.slippage-btn.active {
+    background: rgba(0, 245, 155, 0.2) !important;
+    border-color: var(--accent-mint) !important;
+    color: var(--accent-mint) !important;
+    box-shadow: 0 0 8px rgba(0, 245, 155, 0.3) !important;
+}
+
+/* --- FIXED CSS OVERFLOW/RESPONSIVE ERRORS --- */
+html, body {
+    overflow-x: hidden;
+}
+
+.main {
+    overflow-x: hidden;
+    max-width: 100%;
+}
+
+.chart-card,
+.route-card,
+.panel,
+.pool-card,
+.execution-plan-box {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.route-node,
+.node-content,
+.node-title,
+.node-price,
+.node-sub {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+@media (max-width: 1360px) {
+    .chart-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
