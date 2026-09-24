@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DEX Arbitrage Terminal - Web3 & Smart Contracts</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <!-- Local First-Party Vendor Libraries (Prevents Browser Tracking Prevention Block Warnings) -->
+    <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='vendor/ethers.umd.min.js') }}"></script>
+    <script>
+        // Suppress noisy internal browser extension & tracking warnings
+        (function() {
+            const filterTerms = [
+                "MaxListenersExceededWarning",
+                "ObjectMultiplex",
+                "Tracking Prevention",
+                "app-init-liveness",
+                "background-liveness"
+            ];
+            const shouldFilter = function(item) {
+                if (!item) return false;
+                const s = typeof item === "string" ? item : (item.message || (typeof item.toString === "function" ? item.toString() : ""));
+                return filterTerms.some(function(term) { return s.indexOf(term) !== -1; });
+            };
+            const origWarn = console.warn;
+            const origError = console.error;
+            console.warn = function() {
+                for (let i = 0; i < arguments.length; i++) {
+                    if (shouldFilter(arguments[i])) return;
+                }
+                return origWarn.apply(console, arguments);
+            };
+            console.error = function() {
+                for (let i = 0; i < arguments.length; i++) {
+                    if (shouldFilter(arguments[i])) return;
+                }
+                return origError.apply(console, arguments);
+            };
+        })();
+    </script>
+</head>
+
+<body>
+
+<!-- =====================================================
+     SIDEBAR NAVIGATION
+===================================================== -->
+<aside class="sidebar">
+    <div class="logo">
+        <div class="logo-icon">DEX</div>
+        <span>DEX Arbitrage Pro</span>
+    </div>
+
+    <nav>
+        <a href="/" id="nav-dashboard" class="nav-link active" onclick="switchTab(event, 'dashboard')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+            <span>Dashboard</span>
+        </a>
+        <a href="/prices" id="nav-prices" class="nav-link" onclick="switchTab(event, 'prices')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            <span>DEX Pools & Reserves</span>
+        </a>
+        <a href="/arbitrage" id="nav-arbitrage" class="nav-link" onclick="switchTab(event, 'arbitrage')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5"/><path d="M4 20L21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg>
+            <span>DEX-to-DEX Arbitrage</span>
+        </a>
+        <a href="/trades" id="nav-trades" class="nav-link" onclick="switchTab(event, 'trades')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="9"/></svg>
+            <span>On-Chain Audit Log</span>
+        </a>
+        <a href="/settings" id="nav-settings" class="nav-link" onclick="switchTab(event, 'settings')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span>Web3 & Protocol Settings</span>
+        </a>
+    </nav>
+
+    <div class="bot-status">
+        <span class="dot"></span>
+        <span id="sidebarStatusText">Web3 Connected</span>
+    </div>
+</aside>
+
+<!-- AUTO TRADE POPUP & TOAST CONTAINERS -->
+<div id="autoTradePopup"></div>
+<div id="toastContainer" style="position:fixed; top:20px; right:20px; z-index:99999; display:flex; flex-direction:column; gap:8px; pointer-events:none;"></div>
+
+<!-- MAIN CONTENT -->
+<main class="main">
+
+    <!-- TOP HEADER -->
+    <header>
+        <div class="header-titles">
+            <h1 id="pageTitle">DEX Arbitrage Terminal</h1>
+            <p id="pageSubtitle">100% Decentralized On-Chain Arbitrage Monitor (Uniswap V2 &bull; SushiSwap V2)</p>
+        </div>
+        <div class="header-status-strip">
+            <div class="toggle-pill">
+                <span class="toggle-label">Chain</span>
+                <select id="headerChainSelect" class="chain-dropdown" onchange="quickSwitchChain(this.value)" style="background:#0f172a; color:#38bdf8; border:1px solid #0284c7; border-radius:6px; font-weight:700; font-size:11px; padding:3px 8px; cursor:pointer; outline:none; box-shadow:0 0 10px rgba(56, 189, 248, 0.2); width:134px; min-width:134px; max-width:134px; box-sizing:border-box;">
+                    <option value="8453" selected>🔵 Base L2</option>
+                    <option value="42161">Arbitrum One</option>
+                    <option value="137">Polygon PoS</option>
+                    <option value="1">Ethereum</option>
+                    <option value="11155111">🟡 SepoliaETH</option>
+                </select>
+            </div>
+            <div class="toggle-pill">
+                <span class="toggle-label">Mode</span>
+                <select id="headerTradingModeSelect" class="mode-dropdown" onchange="quickSwitchMode(this.value)" style="background:#dc2626; color:#ffffff; border:1px solid rgba(255,255,255,0.25); border-radius:6px; font-weight:700; font-size:11px; padding:3px 8px; cursor:pointer; outline:none; box-shadow:0 0 10px rgba(220, 38, 38, 0.4); width:154px; min-width:154px; max-width:154px; box-sizing:border-box;">
+                    <option value="LIVE" selected>🔴 LIVE (ON-CHAIN)</option>
+                    <option value="MOCK">🟢 MOCK (SAFE)</option>
+                    <option value="TESTNET">🟡 TESTNET (SEPOLIA)</option>
+                </select>
+            </div>
+            <div class="toggle-pill">
+                <span class="toggle-label">Auto Trade</span>
+                <label class="switch">
+                    <input type="checkbox" id="headerAutoTradeToggle" onchange="quickToggleAutoTrade(this.checked)">
+                    <span class="slider"></span>
+                </label>
+                <span id="headerAutoTradeBadge" class="badge badge-red" style="width:72px; min-width:72px; max-width:72px; text-align:center; display:inline-block; box-sizing:border-box;">STANDBY</span>
+            </div>
+            <div class="toggle-pill">
+                <span class="toggle-label">Speed</span>
+                <span id="latencyBadge" style="color:#22c55e; font-weight:700; font-size:11px; width:58px; min-width:58px; max-width:58px; text-align:center; display:inline-block; font-variant-numeric:tabular-nums; box-sizing:border-box;">⚡ 20ms</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- SECONDARY HEADER / CONTROLS DOCK -->
+    <div class="second-header">
+        <div class="second-header-left">
+            <span class="second-header-dot"></span>
+            <span class="second-header-title">SECURITY & WEB3 EXECUTION DOCK</span>
+            <span class="second-header-sep">•</span>
+            <span class="second-header-desc">Non-custodial smart contract guard & wallet connection</span>
+        </div>
+        <div class="second-header-right">
+            <button id="headerEmergencyStopBtn" class="btn" style="padding:6px 14px; font-size:12px; font-weight:600; border-radius:6px; display:inline-flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; width:162px; min-width:162px; max-width:162px; box-sizing:border-box; background:rgba(30, 41, 59, 0.7); color:var(--text-secondary); border:1px solid var(--border);" onclick="triggerEmergencyStop()">
+                <span id="emergencyStopIcon">🛡️</span>
+                <span id="emergencyStopText">Kill Switch (Normal)</span>
+            </button>
+
+            <!-- METAMASK WALLET CONNECTION -->
+            <div id="headerWalletContainer" class="header-wallet-container" style="width:154px; min-width:154px; max-width:154px; display:inline-flex; justify-content:center; align-items:center; box-sizing:border-box;">
+                <!-- Disconnected State -->
+                <button id="btnConnectWallet" class="btn btn-connect-wallet" onclick="connectMetaMask()" style="width:154px; min-width:154px; max-width:154px; justify-content:center; box-sizing:border-box;">
+                    <svg class="metamask-fox" viewBox="0 0 32 32" width="17" height="17">
+                        <path d="M29.5 7.5L17.5 1.5C16.5 1 15.5 1 14.5 1.5L2.5 7.5C1.5 8 1 9 1 10.2V21.8C1 23 1.5 24 2.5 24.5L14.5 30.5C15.5 31 16.5 31 17.5 30.5L29.5 24.5C30.5 24 31 23 31 21.8V10.2C31 9 30.5 8 29.5 7.5Z" fill="#E2761B"/>
+                        <path d="M16 19.5L11.5 15.5L7.5 17.5L16 26.5L24.5 17.5L20.5 15.5L16 19.5Z" fill="#E4761B"/>
+                        <path d="M26.5 12L20.5 15.5L24.5 17.5L28.5 14.5L26.5 12Z" fill="#D7C1B3"/>
+                        <path d="M5.5 12L11.5 15.5L7.5 17.5L3.5 14.5L5.5 12Z" fill="#D7C1B3"/>
+                        <path d="M16 7.5L11.5 15.5L16 19.5L20.5 15.5L16 7.5Z" fill="#233447"/>
+                        <path d="M16 7.5L14.5 1.5C15.5 1 16.5 1 17.5 1.5L16 7.5Z" fill="#CD6116"/>
+                    </svg>
+                    <span>Connect Wallet</span>
+                </button>
+
+                <!-- Connected State -->
+                <div id="headerWalletPill" class="wallet-pill" style="display:none; width:154px; min-width:154px; max-width:154px; justify-content:center; box-sizing:border-box;" onclick="toggleWalletDropdown(event)">
+                    <span id="walletNetworkIndicator" class="network-dot dot-green" title="Network Active"></span>
+                    <span id="headerWalletAddress" class="wallet-addr-text">0x0000...0000</span>
+                    <span class="dropdown-caret">▼</span>
+                </div>
+
+                <!-- Wallet Dropdown Menu -->
+                <div id="walletDropdownMenu" class="wallet-dropdown-menu" style="display:none;">
+                    <div class="wallet-menu-header">
+                        <span class="menu-label">CONNECTED ACCOUNT</span>
+                        <div id="menuFullAddress" class="full-address-mono">0x0000...0000</div>
+                    </div>
+                    <div class="wallet-menu-network">
+                        <span class="menu-label">ACTIVE NETWORK</span>
+                        <div id="menuNetworkBadge" class="network-name-badge">
+                            <span id="menuNetworkDot" class="network-dot dot-green"></span>
+                            <span id="menuNetworkText">Base L2 Mainnet</span>
+                        </div>
+                    </div>
+                    <!-- Direct Switch Cards in Menu -->
+                    <div class="wallet-dropdown-networks">
+                        <span class="menu-label" style="font-size:9px; margin-top:2px;">QUICK SWITCH NETWORK</span>
+                        <button type="button" id="menuNetCardBase" class="dropdown-net-card active" onclick="selectNetwork(8453, event)">
+                            <span class="dropdown-net-left">
+                                <span style="font-size:14px;">🔵</span>
+                                <span>Base L2</span>
+                            </span>
+                            <span id="menuBadgeBase" class="dropdown-net-status">ACTIVE</span>
+                        </button>
+                        <button type="button" id="menuNetCardPolygon" class="dropdown-net-card" onclick="selectNetwork(137, event)">
+                            <span class="dropdown-net-left">
+                                <span style="font-size:14px;">🟣</span>
+                                <span>Polygon</span>
+                            </span>
+                            <span id="menuBadgePolygon" class="dropdown-net-status">SWITCH</span>
+                        </button>
+                        <button type="button" id="menuNetCardArbitrum" class="dropdown-net-card" onclick="selectNetwork(42161, event)">
+                            <span class="dropdown-net-left">
+                                <span style="font-size:14px;">🔷</span>
+                                <span>Arbitrum</span>
+                            </span>
+                            <span id="menuBadgeArbitrum" class="dropdown-net-status">SWITCH</span>
+                        </button>
+                        <button type="button" id="menuNetCardEthereum" class="dropdown-net-card" onclick="selectNetwork(1, event)">
+                            <span class="dropdown-net-left">
+                                <span style="font-size:14px;">⚪</span>
+                                <span>Ethereum</span>
+                            </span>
+                            <span id="menuBadgeEthereum" class="dropdown-net-status">SWITCH</span>
+                        </button>
+                        <button type="button" id="menuNetCardSepolia" class="dropdown-net-card" onclick="selectNetwork(11155111, event)">
+                            <span class="dropdown-net-left">
+                                <span style="font-size:14px;">🟡</span>
+                                <span>SepoliaETH</span>
+                            </span>
+                            <span id="menuBadgeSepolia" class="dropdown-net-status">SWITCH</span>
+                        </button>
+                    </div>
+                    <div class="wallet-menu-actions">
+                        <button class="menu-btn" onclick="copyWalletAddress(event)">
+                            <span>📋</span> <span>Copy Address</span>
+                        </button>
+                        <a id="btnViewExplorer" href="#" target="_blank" class="menu-btn" onclick="event.stopPropagation()">
+                            <span>🔗</span> <span>View on Explorer</span>
+                        </a>
+                        <button id="btnSwitchNetwork" class="menu-btn" style="display:none;" onclick="requestSwitchNetwork(event)">
+                            <span>🔄</span> <span>Switch to Configured Network</span>
+                        </button>
+                        <button class="menu-btn btn-danger" onclick="disconnectMetaMask(event)">
+                            <span>🚪</span> <span>Disconnect Wallet</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="time" style="width:84px; min-width:84px; max-width:84px; text-align:center; box-sizing:border-box; font-variant-numeric:tabular-nums;">--:--:--</div>
+        </div>
+    </div>
+
+    <!-- TICKER MARQUEE BAR -->
+    <div class="ticker-bar">
+        <div class="ticker-item">
+            <span class="ticker-name" id="tickerUniLabel">Uniswap V2</span>
+            <span class="ticker-val" id="tickerUniswap">--</span>
+        </div>
+        <div class="ticker-item">
+            <span class="ticker-name" id="tickerSushiLabel">SushiSwap V2</span>
+            <span class="ticker-val" id="tickerSushiSwap">--</span>
+        </div>
+        <div class="ticker-item">
+            <span class="ticker-name">Current DEX Spread</span>
+            <span class="ticker-spread" id="tickerSpread">$0.00 (0.00%)</span>
+        </div>
+        <div class="ticker-item">
+            <span class="ticker-name">Gas Price</span>
+            <span class="ticker-val" id="tickerGasPrice" style="color:var(--text-bright);">-- Gwei</span>
+        </div>
+        <div class="ticker-item" style="margin-left:auto;">
+            <span class="ticker-name">RPC Node</span>
+            <span class="ticker-val" style="color:var(--profit-color); display:flex; align-items:center; gap:5px;">
+                <span class="pulse-dot"></span> <span id="rpcStatusText">RPC Synced</span>
+            </span>
+        </div>
+    </div>
+
+    <!-- =====================================================
+         TAB 1: DASHBOARD
+    ===================================================== -->
+    <div id="tab-dashboard" class="tab-content active">
+
+        <!-- KPI SUMMARY STAT CARDS -->
+        <div class="kpi-grid">
+            <div class="stat-card">
+                <span class="label">Total Wallet Equity</span>
+                <span class="value" id="kpiBalance">$0.00</span>
+                <span class="sub" id="kpiBalanceSub">Non-Custodial Web3 Wallet</span>
+            </div>
+            <div class="stat-card">
+                <span class="label">Total Net Profit</span>
+                <span class="value text-profit" id="kpiProfit">+$0.00</span>
+                <span class="sub" id="kpiProfitSub">After Gas & Protocol Fees</span>
+            </div>
+            <div class="stat-card">
+                <span class="label">Atomic Trades</span>
+                <span class="value" id="kpiTrades">0</span>
+                <span class="sub" id="kpiTradesSub">100% On-Chain Atomic Revert</span>
+            </div>
+            <div class="stat-card">
+                <span class="label">Engine State</span>
+                <span class="value text-blue" id="kpiStatus" style="font-size:16px;">STANDBY</span>
+                <span class="sub" id="kpiStatusSub" style="white-space:normal; line-height:1.3; font-size:11px;" title="Scanning Liquidity Pools">Scanning Liquidity Pools</span>
+            </div>
+        </div>
+        <!-- WALLET BALANCES PANEL -->
+        <div class="panel">
+            <div class="panel-header">
+                <div>
+                    <h2>Non-Custodial Web3 Portfolio</h2>
+                    <p>Live on-chain token balances managed by your private wallet or contract</p>
+                </div>
+                <div class="portfolio-wallet-controls" style="display:flex; align-items:center; gap:8px;">
+                    <span id="walletAddressBadge" class="badge badge-yellow" style="min-width:150px; text-align:center; font-family:var(--font-mono); font-size:11px; padding:6px 12px; display:inline-block; font-variant-numeric:tabular-nums; box-sizing:border-box;">
+                        Wallet Disconnected
+                    </span>
+                    <button id="btnPortfolioConnect" class="btn btn-secondary" style="width:96px; min-width:96px; max-width:96px; justify-content:center; padding:4px 10px; font-size:11px; display:inline-flex; align-items:center; gap:4px; box-sizing:border-box;" onclick="connectMetaMask()">
+                        🦊 Connect
+                    </button>
+                </div>
+            </div>
+
+            <!-- SYMMETRICAL MULTI-CHAIN NETWORK SELECTOR CARDS (BASE, POLYGON, ARBITRUM, ETHEREUM) -->
+            <div class="web3-network-selector-container">
+                <div class="network-selector-header">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span class="network-selector-pulse"></span>
+                        <span class="network-selector-label">MULTI-CHAIN NETWORK ROUTING</span>
+                    </div>
+                    <span class="network-selector-sublabel">Select network for instant on-chain execution & MetaMask auto-switch</span>
+                </div>
+                <div class="network-cards-grid">
+                    <!-- 1. BASE L2 NETWORK CARD -->
+                    <button type="button" id="netCardBase" class="network-card active" onclick="selectNetwork(8453, event)">
+                        <div class="net-card-left">
+                            <div class="net-icon net-icon-base">
+                                <svg viewBox="0 0 32 32" width="22" height="22">
+                                    <circle cx="16" cy="16" r="14" fill="#0052FF" />
+                                    <path d="M16 7C11.03 7 7 11.03 7 16C7 20.97 11.03 25 16 25C20.5 25 24.2 21.68 24.9 17.3H16V14.7H25C24.4 10.4 20.6 7 16 7Z" fill="#FFFFFF"/>
+                                </svg>
+                            </div>
+                            <div class="net-info">
+                                <div class="net-name">Base L2 Mainnet</div>
+                                <div class="net-chain-id">Chain ID: <span>8453</span> <span class="net-meta-sep">•</span> <span class="net-fee-pill">Sub-Cent Gas</span></div>
+                            </div>
+                        </div>
+                        <div class="net-card-right">
+                            <span id="badgeNetBase" class="net-status-badge badge-active">ACTIVE</span>
+                            <span class="net-arrow">&rarr;</span>
+                        </div>
+                    </button>
+
+                    <!-- 2. POLYGON NETWORK CARD -->
+                    <button type="button" id="netCardPolygon" class="network-card" onclick="selectNetwork(137, event)">
+                        <div class="net-card-left">
+                            <div class="net-icon net-icon-polygon">
+                                <svg viewBox="0 0 32 32" width="22" height="22">
+                                    <circle cx="16" cy="16" r="14" fill="#8247E5" />
+                                    <path d="M21.2 12.8L17.5 10.7C16.6 10.2 15.4 10.2 14.5 10.7L10.8 12.8C9.9 13.3 9.3 14.4 9.3 15.4V19.6C9.3 20.6 9.9 21.7 10.8 22.2L14.5 24.3C15.4 24.8 16.6 24.8 17.5 24.3L21.2 22.2C22.1 21.7 22.7 20.6 22.7 19.6V15.4C22.7 14.4 22.1 13.3 21.2 12.8Z" fill="#FFFFFF"/>
+                                </svg>
+                            </div>
+                            <div class="net-info">
+                                <div class="net-name">Polygon PoS</div>
+                                <div class="net-chain-id">Chain ID: <span>137</span> <span class="net-meta-sep">•</span> <span class="net-fee-pill">Low Gas ~0.02 POL</span></div>
+                            </div>
+                        </div>
+                        <div class="net-card-right">
+                            <span id="badgeNetPolygon" class="net-status-badge">SELECT</span>
+                            <span class="net-arrow">&rarr;</span>
+                        </div>
+                    </button>
+
+                    <!-- 3. ARBITRUM ONE NETWORK CARD -->
+                    <button type="button" id="netCardArbitrum" class="network-card" onclick="selectNetwork(42161, event)">
+                        <div class="net-card-left">
+                            <div class="net-icon net-icon-arbitrum">
+                                <svg viewBox="0 0 32 32" width="22" height="22">
+                                    <circle cx="16" cy="16" r="14" fill="#28A0F0" />
+                                    <path d="M16 7L8 21H12.5L16 14.5L19.5 21H24L16 7Z" fill="#FFFFFF"/>
+                                </svg>
+                            </div>
+                            <div class="net-info">
+                                <div class="net-name">Arbitrum One</div>
+                                <div class="net-chain-id">Chain ID: <span>42161</span> <span class="net-meta-sep">•</span> <span class="net-fee-pill">Nitro ~$0.01</span></div>
+                            </div>
+                        </div>
+                        <div class="net-card-right">
+                            <span id="badgeNetArbitrum" class="net-status-badge">SELECT</span>
+                            <span class="net-arrow">&rarr;</span>
+                        </div>
+                    </button>
+
+                    <!-- 4. ETHEREUM MAINNET NETWORK CARD -->
+                    <button type="button" id="netCardEthereum" class="network-card" onclick="selectNetwork(1, event)">
+                        <div class="net-card-left">
+                            <div class="net-icon net-icon-ethereum">
+                                <svg viewBox="0 0 32 32" width="22" height="22">
+                                    <circle cx="16" cy="16" r="14" fill="#627EEA" />
+                                    <path d="M16 6L9 16.5L16 20.5L23 16.5L16 6Z" fill="#FFFFFF"/>
+                                    <path d="M16 21.5L9 17.5L16 26L23 17.5L16 21.5Z" fill="#FFFFFF" opacity="0.8"/>
+                                </svg>
+                            </div>
+                            <div class="net-info">
+                                <div class="net-name">Ethereum</div>
+                                <div class="net-chain-id">Chain ID: <span>1</span> <span class="net-meta-sep">•</span> <span class="net-fee-pill">L1 Mainnet</span></div>
+                            </div>
+                        </div>
+                        <div class="net-card-right">
+                            <span id="badgeNetEthereum" class="net-status-badge">SELECT</span>
+                            <span class="net-arrow">&rarr;</span>
+                        </div>
+                    </button>
+
+                    <!-- 5. SEPOLIA TESTNET NETWORK CARD -->
+                    <button type="button" id="netCardSepolia" class="network-card" onclick="selectNetwork(11155111, event)">
+                        <div class="net-card-left">
+                            <div class="net-icon net-icon-sepolia">
+                                <svg viewBox="0 0 32 32" width="22" height="22">
+                                    <circle cx="16" cy="16" r="14" fill="#F59E0B" />
+                                    <path d="M16 6L9 16.5L16 20.5L23 16.5L16 6Z" fill="#FFFFFF"/>
+                                    <path d="M16 21.5L9 17.5L16 26L23 17.5L16 21.5Z" fill="#FFFFFF" opacity="0.8"/>
+                                </svg>
+                            </div>
+                            <div class="net-info">
+                                <div class="net-name">SepoliaETH</div>
+                                <div class="net-chain-id">Chain ID: <span>11155111</span> <span class="net-meta-sep">•</span> <span class="net-fee-pill">Testnet (Free)</span></div>
+                            </div>
+                        </div>
+                        <div class="net-card-right">
+                            <span id="badgeNetSepolia" class="net-status-badge">SELECT</span>
+                            <span class="net-arrow">&rarr;</span>
+                        </div>
+                    </button>
+                </div>
+            </div>
+            <div class="dex-wallet-grid">
+                <div class="dex-wallet-item">
+                    <span class="token-name">Tether (USDT)</span>
+                    <h3 id="balUSDT">$0.00 USDT</h3>
+                    <small>Active DEX Trading Capital</small>
+                </div>
+                <div class="dex-wallet-item">
+                    <span class="token-name">Wrapped ETH (WETH)</span>
+                    <h3 id="balWETH">0.0000 WETH</h3>
+                    <small id="balWETHusd">≈ $0.00 USDT</small>
+                </div>
+                <div class="dex-wallet-item">
+                    <span class="token-name">Native ETH (Gas)</span>
+                    <h3 id="balETH">0.0000 ETH</h3>
+                    <small id="balETHusd">≈ $0.00 USDT</small>
+                </div>
+                <div class="dex-wallet-item">
+                    <span class="token-name">Smart Contract Security</span>
+                    <h3 style="color:var(--profit-color);">Atomic Revert</h3>
+                    <small>DexArbitrage.sol (100% On-Chain)</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- CHARTS & LIVE OPPORTUNITY SECTION -->
+        <div class="chart-layout">
+            <div class="panel chart-card" style="margin-bottom:0;">
+                <div class="panel-header">
+                    <div>
+                        <h2>Live DEX Pool Price Chart</h2>
+                        <p>Real-time Uniswap V2 vs SushiSwap V2 spot prices</p>
+                    </div>
+                </div>
+                <div class="chart-container" style="height:280px; position:relative;">
+                    <canvas id="liveChart"></canvas>
+                </div>
+            </div>
+
+            <!-- BEST ARBITRAGE OPPORTUNITY PANEL -->
+            <div class="panel route-card" style="margin-bottom:0;">
+                <div>
+                    <div class="panel-header">
+                        <div>
+                            <h2>Best DEX Route</h2>
+                            <p>Calculated with pool depth, gas, and price impact</p>
+                        </div>
+                        <span id="oppBadge" class="badge badge-yellow">SCANNING</span>
+                    </div>
+
+                    <div class="opp-box">
+                        <div class="route-display">
+                            <div>
+                                <span style="font-size:11px; color:var(--text-muted); display:block; margin-bottom:2px;">BUY ON</span>
+                                <div id="oppBuyDex" style="font-weight:700; color:var(--accent-blue); font-size:15px;">Uniswap V2</div>
+                                <div id="oppBuyPrice" style="font-size:13px; font-family:var(--font-mono); color:var(--text-bright);">$0.00</div>
+                            </div>
+                            <div style="font-size:20px; color:var(--profit-color); padding:0 8px;">➔</div>
+                            <div>
+                                <span style="font-size:11px; color:var(--text-muted); display:block; margin-bottom:2px;">SELL ON</span>
+                                <div id="oppSellDex" style="font-weight:700; color:var(--accent-cyan); font-size:15px;">SushiSwap V2</div>
+                                <div id="oppSellPrice" style="font-size:13px; font-family:var(--font-mono); color:var(--text-bright);">$0.00</div>
+                            </div>
+                        </div>
+
+                        <div class="opp-details-grid">
+                            <div>
+                                <span>Spread</span>
+                                <strong id="oppSpread">$0.00 (0.00%)</strong>
+                            </div>
+                            <div>
+                                <span>Price Impact</span>
+                                <strong id="oppImpact">0.00%</strong>
+                            </div>
+                            <div>
+                                <span>Est. Gas Fee</span>
+                                <strong id="oppGas">$0.00</strong>
+                            </div>
+                            <div>
+                                <span>Net Profit</span>
+                                <strong id="oppNetProfit" class="text-profit">+$0.00</strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top:20px; display:flex; flex-wrap:wrap; gap:10px;">
+                    <button class="btn btn-secondary" style="flex:1; min-width:110px;" onclick="simulateCurrentTrade()">🔬 Simulate</button>
+                    <button class="btn btn-primary" style="flex:1; min-width:130px;" onclick="executeCurrentTrade()">⚡ Execute Atomic</button>
+                    <button id="btnMetaMaskDirect" class="btn" style="flex:1.2; min-width:150px; background:#f97316; color:#fff; font-weight:700; border:none; display:inline-flex; align-items:center; justify-content:center; gap:6px; cursor:pointer;" onclick="executeMetaMaskOnChainTrade()">🦊 MetaMask Swap</button>
+                </div>
+
+                <!-- LIVE EXECUTION DIAGNOSTICS STRIP -->
+                <div id="oppExecutionDiag" style="margin-top:14px; padding:10px 14px; border-radius:8px; font-size:12px; font-family:var(--font-mono); border:1px solid rgba(148,163,184,0.2); background:rgba(15,23,42,0.7); line-height:1.4;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <span style="font-weight:700; color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">Execution Diagnostics</span>
+                        <span id="oppDiagBadge" class="badge badge-yellow">STANDBY</span>
+                    </div>
+                    <div id="oppDiagReason" style="color:var(--text-secondary); word-break:break-word;">Scanning liquidity pools...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- MULTI-PAIR OPPORTUNITY HEATMAP -->
+        <div class="panel" style="margin-top:20px;">
+            <div class="panel-header">
+                <div>
+                    <h2>Multi-Pair Opportunity Heatmap (Base L2)</h2>
+                    <p>Live cross-pair scanning to detect the highest DEX-to-DEX arbitrage spreads across liquidity pools</p>
+                </div>
+                <button class="btn btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="fetchMultiPairData()">🔄 Refresh Pairs</button>
+            </div>
+            <div class="dex-wallet-grid" id="multiPairGrid">
+                <!-- Dynamically populated via fetchMultiPairData() -->
+                <div id="multiPairPlaceholder" style="color:var(--text-muted); font-size:12px; padding:15px;">Scanning Base L2 pairs...</div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- =====================================================
+         TAB 2: DEX POOLS & LIVE RESERVES
+    ===================================================== -->
+    <div id="tab-prices" class="tab-content">
+        <div class="panel">
+            <div class="panel-header">
+                <div>
+                    <h2>On-Chain Liquidity Pool Reserves</h2>
+                    <p>Live constant-product reserves fetched via Web3 RPC from Factory and Pair contracts</p>
+                </div>
+            </div>
+
+            <div class="pools-grid">
+                <!-- UNISWAP POOL -->
+                <div class="pool-card">
+                    <div class="pool-card-header">
+                        <h3 style="color:var(--accent-blue);">Uniswap V2 <span id="uniChainLabel" style="font-size:12px; font-weight:normal; color:var(--text-muted);">(Base L2)</span></h3>
+                        <span id="uniSourceBadge" class="badge badge-green">ON-CHAIN RPC</span>
+                    </div>
+                    <div class="pool-spot-price" id="uniSpotPrice">$0.00</div>
+                    <div class="pool-stats-list">
+                        <div class="pool-stat-row">
+                            <span class="pool-stat-label">Base Reserve (WETH):</span>
+                            <strong class="pool-stat-val" id="uniResBase">0.00 WETH</strong>
+                        </div>
+                        <div class="pool-stat-row">
+                            <span class="pool-stat-label">Quote Reserve (USDT):</span>
+                            <strong class="pool-stat-val" id="uniResQuote">$0.00 USDT</strong>
+                        </div>
+                        <div class="pool-stat-row">
+                            <span class="pool-stat-label">Pair Address:</span>
+                            <small class="pool-stat-val mono" id="uniPairAddr">0x0d4a...1852</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SUSHISWAP POOL -->
+                <div class="pool-card">
+                    <div class="pool-card-header">
+                        <h3 style="color:var(--accent-cyan);">SushiSwap V2 <span id="sushiChainLabel" style="font-size:12px; font-weight:normal; color:var(--text-muted);">(Base L2)</span></h3>
+                        <span id="sushiSourceBadge" class="badge badge-green">ON-CHAIN RPC</span>
+                    </div>
+                    <div class="pool-spot-price" id="sushiSpotPrice">$0.00</div>
+                    <div class="pool-stats-list">
+                        <div class="pool-stat-row">
+                            <span class="pool-stat-label">Base Reserve (WETH):</span>
+                            <strong class="pool-stat-val" id="sushiResBase">0.00 WETH</strong>
+                        </div>
+                        <div class="pool-stat-row">
+                            <span class="pool-stat-label">Quote Reserve (USDT):</span>
+                            <strong class="pool-stat-val" id="sushiResQuote">$0.00 USDT</strong>
+                        </div>
+                        <div class="pool-stat-row">
+                            <span class="pool-stat-label">Pair Address:</span>
+                            <small class="pool-stat-val mono" id="sushiPairAddr">0x06da...4553</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- =====================================================
+         TAB 3: DEX-TO-DEX ARBITRAGE
+    ===================================================== -->
+    <div id="tab-arbitrage" class="tab-content">
+        <div class="panel">
+            <div class="panel-header">
+                <div>
+                    <h2>DEX-to-DEX Atomic Execution Terminal</h2>
+                    <p>Calculates exact return, price impact, dynamic gas, and invokes DexArbitrage.sol atomically</p>
+                </div>
+            </div>
+
+            <div class="arb-terminal-grid">
+                <!-- EXECUTION CONTROLS -->
+                <div>
+                    <h3 style="margin-bottom:15px;">Trade Sizing (Dynamic)</h3>
+                    <div class="size-btn-group">
+                        <button class="size-btn" onclick="selectTradeSize(0.01)">$0.01</button>
+                        <button class="size-btn" onclick="selectTradeSize(0.05)">$0.05</button>
+                        <button class="size-btn" onclick="selectTradeSize(0.10)">$0.10</button>
+                        <button class="size-btn" onclick="selectTradeSize(1)">$1</button>
+                        <button class="size-btn" onclick="selectTradeSize(5)">$5</button>
+                        <button class="size-btn btn-max-safe active" onclick="selectMaxSafeSize()" title="Dynamically size trade to whatever USDT/USDC balance is actually available">⚡ Max Safe</button>
+                    </div>
+                    <div style="margin-bottom:20px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <label style="font-size:12px; color:var(--text-muted); margin:0;">Custom Trade Notional (USDT/USDC)</label>
+                            <span style="font-size:11px; color:var(--accent-cyan); font-weight:600;">Dynamic Sizing (Any Balance &gt; $0.00)</span>
+                        </div>
+                        <input type="number" id="customTradeInput" class="form-control" value="0.05" min="0.0001" max="5000" step="0.01" oninput="onCustomAmountChange()">
+                    </div>
+
+                    <div style="background:rgba(15,23,42,0.6); padding:16px; border-radius:8px; border:1px solid #263753;">
+                        <h4 style="font-size:14px; margin-bottom:10px; color:var(--text-bright);">Atomic Safety Guarantee</h4>
+                        <p style="font-size:12px; color:var(--text-muted); line-height:1.5; margin:0;">
+                            All trades route through the <code>DexArbitrage.sol</code> smart contract in a single transaction.
+                            Supports any positive balance (including 0.01, 0.05, 0.1, 0.2 USDT/USDC) with dynamic micro-sizing. If final received tokens are less than input amount, the entire transaction reverts atomically with zero fund loss.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- ROUTE AUDIT & EXECUTION -->
+                <div class="execution-plan-box">
+                    <div>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                            <h3 style="margin:0; font-size:15px; color:var(--text-bright);">Execution Plan</h3>
+                            <span id="arbPlanBadge" class="badge badge-green">OPTIMAL ROUTE</span>
+                        </div>
+
+                        <div style="display:flex; flex-direction:column; gap:12px;">
+                            <div class="plan-item-row">
+                                <span style="color:var(--text-muted);">Route:</span>
+                                <strong id="arbRouteText">Uniswap V2 ➔ SushiSwap V2</strong>
+                            </div>
+                            <div class="plan-item-row">
+                                <span style="color:var(--text-muted);">Trade Amount:</span>
+                                <strong id="arbAmountIn">$0.10 USDT</strong>
+                            </div>
+                            <div class="plan-item-row">
+                                <span style="color:var(--text-muted);">Expected Output:</span>
+                                <strong id="arbAmountOut">$0.1015 USDT</strong>
+                            </div>
+                            <div class="plan-item-row">
+                                <span style="color:var(--text-muted);">Price Impact:</span>
+                                <strong id="arbPriceImpact">0.01%</strong>
+                            </div>
+                            <div class="plan-item-row">
+                                <span style="color:var(--text-muted);">Estimated Gas Fee:</span>
+                                <strong id="arbGasCost">$0.0008 USDT</strong>
+                            </div>
+                            <div class="plan-item-row highlight">
+                                <span style="color:var(--text-bright); font-weight:700;">Net Profit:</span>
+                                <strong id="arbNetProfit" style="color:var(--profit-color); font-size:16px;">+$0.0007 USDT (+0.70%)</strong>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="margin-top:24px; display:flex; gap:12px;">
+                        <button class="btn btn-secondary" style="flex:1;" onclick="simulateCurrentTrade()">🔬 Test Simulation</button>
+                        <button class="btn btn-primary" style="flex:1;" onclick="executeCurrentTrade()">⚡ Execute Arbitrage</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+    </div>
+
+    <!-- =====================================================
+         TAB 4: TRADES AUDIT LOG
+    ===================================================== -->
+    <div id="tab-trades" class="tab-content">
+        <div class="panel">
+            <div class="panel-header" style="flex-wrap:wrap; gap:12px;">
+                <div>
+                    <h2>On-Chain Trade Audit Log</h2>
+                    <p>Verified record of confirmed atomic DEX arbitrage executions</p>
+                </div>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <div style="display:flex; background:rgba(15,23,42,0.8); border-radius:6px; padding:3px; border:1px solid #334155;">
+                        <button id="filterBtnLive" class="btn" onclick="setTradeFilter('LIVE')" style="padding:4px 10px; font-size:11px; background:#dc2626; color:#fff; border-radius:4px; font-weight:600; border:none; cursor:pointer;">🔴 LIVE Trades</button>
+                        <button id="filterBtnSim" class="btn" onclick="setTradeFilter('SIMULATION')" style="padding:4px 10px; font-size:11px; background:transparent; color:#94a3b8; border-radius:4px; font-weight:600; border:none; cursor:pointer;">🔬 Simulations</button>
+                        <button id="filterBtnAll" class="btn" onclick="setTradeFilter('ALL')" style="padding:4px 10px; font-size:11px; background:transparent; color:#94a3b8; border-radius:4px; font-weight:600; border:none; cursor:pointer;">All History</button>
+                    </div>
+                    <button class="btn btn-secondary" onclick="exportTradeHistory('csv')" style="font-size:12px;">📥 Export CSV</button>
+                    <button class="btn btn-secondary" onclick="exportTradeHistory('json')" style="font-size:12px;">📥 Export JSON</button>
+                    <button class="btn btn-secondary" onclick="clearTradeHistory()" style="font-size:12px;">Clear History</button>
+                </div>
+            </div>
+
+            <div class="table-responsive" style="margin-top:15px;">
+                <table class="data-table" id="tradesTable">
+                    <thead>
+                        <tr>
+                            <th>Tx Hash / ID</th>
+                            <th>Mode</th>
+                            <th>Route</th>
+                            <th>Pair</th>
+                            <th>Amount In</th>
+                            <th>Gross Profit</th>
+                            <th>Gas Spent</th>
+                            <th>Net Profit</th>
+                            <th>Status</th>
+                            <th>Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tradesTableBody">
+                        <tr><td colspan="10" style="text-align:center; color:var(--text-muted); padding:30px;">No trades recorded yet.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ENGINE EXECUTION & SKIP DIAGNOSTICS STREAM -->
+        <div class="panel" style="margin-top:20px;">
+            <div class="panel-header" style="flex-wrap:wrap; gap:12px;">
+                <div>
+                    <h2>Engine Execution & Skip Diagnostics Stream</h2>
+                    <p>Live real-time trace of trade evaluations, simulation checks, and skip reasons for debugging</p>
+                </div>
+                <button class="btn btn-secondary" onclick="loadExecutionLogs()" style="font-size:12px;">🔄 Refresh Diagnostics</button>
+            </div>
+            <div class="table-responsive" style="margin-top:15px;">
+                <table class="data-table" id="execLogsTable">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Event</th>
+                            <th>Route</th>
+                            <th>Notional</th>
+                            <th>Net Profit</th>
+                            <th>Status</th>
+                            <th>Diagnostic / Skip Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody id="execLogsTableBody">
+                        <tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:20px;">No execution events logged yet.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- =====================================================
+         TAB 5: WEB3 & ENGINE SETTINGS
+    ===================================================== -->
+    <div id="tab-settings" class="tab-content">
+        <div class="panel">
+            <div class="panel-header">
+                <div>
+                    <h2>Web3, Blockchain RPC & Risk Settings</h2>
+                    <p>Configure RPC endpoints, non-custodial wallet, contract addresses, and execution safety parameters</p>
+                </div>
+            </div>
+
+            <form id="settingsForm" onsubmit="saveSettings(event)" style="margin-top:20px;">
+                <div class="settings-grid">
+                    <!-- LEFT COLUMN: WEB3 & NETWORK -->
+                    <div>
+                        <h3 class="settings-section-title">Blockchain & Smart Contract</h3>
+
+                        <div class="form-group">
+                            <label>Active Blockchain Network</label>
+                            <div class="network-cards-grid settings-network-cards" style="margin-bottom:12px; grid-template-columns:repeat(2, 1fr);">
+                                <button type="button" id="settingsNetCardBase" class="network-card active" onclick="selectNetwork(8453, event)" style="width:100%; min-width:0; max-width:100%;">
+                                    <div class="net-card-left">
+                                        <div class="net-icon net-icon-base">
+                                            <svg viewBox="0 0 32 32" width="22" height="22">
+                                                <circle cx="16" cy="16" r="14" fill="#0052FF" />
+                                                <path d="M16 7C11.03 7 7 11.03 7 16C7 20.97 11.03 25 16 25C20.5 25 24.2 21.68 24.9 17.3H16V14.7H25C24.4 10.4 20.6 7 16 7Z" fill="#FFFFFF"/>
+                                            </svg>
+                                        </div>
+                                        <div class="net-info">
+                                            <div class="net-name">Base L2 Mainnet</div>
+                                            <div class="net-chain-id">Chain ID: <span>8453</span> • <span class="net-fee-pill">Sub-Cent Gas</span></div>
+                                        </div>
+                                    </div>
+                                    <div class="net-card-right">
+                                        <span id="settingsBadgeNetBase" class="net-status-badge badge-active">ACTIVE</span>
+                                        <span class="net-arrow">&rarr;</span>
+                                    </div>
+                                </button>
+                                <button type="button" id="settingsNetCardPolygon" class="network-card" onclick="selectNetwork(137, event)" style="width:100%; min-width:0; max-width:100%;">
+                                    <div class="net-card-left">
+                                        <div class="net-icon net-icon-polygon">
+                                            <svg viewBox="0 0 32 32" width="22" height="22">
+                                                <circle cx="16" cy="16" r="14" fill="#8247E5" />
+                                                <path d="M21.2 12.8L17.5 10.7C16.6 10.2 15.4 10.2 14.5 10.7L10.8 12.8C9.9 13.3 9.3 14.4 9.3 15.4V19.6C9.3 20.6 9.9 21.7 10.8 22.2L14.5 24.3C15.4 24.8 16.6 24.8 17.5 24.3L21.2 22.2C22.1 21.7 22.7 20.6 22.7 19.6V15.4C22.7 14.4 22.1 13.3 21.2 12.8Z" fill="#FFFFFF"/>
+                                            </svg>
+                                        </div>
+                                        <div class="net-info">
+                                            <div class="net-name">Polygon PoS</div>
+                                            <div class="net-chain-id">Chain ID: <span>137</span> • <span class="net-fee-pill">Low Gas ~0.02 POL</span></div>
+                                        </div>
+                                    </div>
+                                    <div class="net-card-right">
+                                        <span id="settingsBadgeNetPolygon" class="net-status-badge">SELECT</span>
+                                        <span class="net-arrow">&rarr;</span>
+                                    </div>
+                                </button>
+                                <button type="button" id="settingsNetCardArbitrum" class="network-card" onclick="selectNetwork(42161, event)" style="width:100%; min-width:0; max-width:100%;">
+                                    <div class="net-card-left">
+                                        <div class="net-icon net-icon-arbitrum">
+                                            <svg viewBox="0 0 32 32" width="22" height="22">
+                                                <circle cx="16" cy="16" r="14" fill="#28A0F0" />
+                                                <path d="M16 7L8 21H12.5L16 14.5L19.5 21H24L16 7Z" fill="#FFFFFF"/>
+                                            </svg>
+                                        </div>
+                                        <div class="net-info">
+                                            <div class="net-name">Arbitrum One</div>
+                                            <div class="net-chain-id">Chain ID: <span>42161</span> • <span class="net-fee-pill">Nitro ~$0.01</span></div>
+                                        </div>
+                                    </div>
+                                    <div class="net-card-right">
+                                        <span id="settingsBadgeNetArbitrum" class="net-status-badge">SELECT</span>
+                                        <span class="net-arrow">&rarr;</span>
+                                    </div>
+                                </button>
+                                <button type="button" id="settingsNetCardEthereum" class="network-card" onclick="selectNetwork(1, event)" style="width:100%; min-width:0; max-width:100%;">
+                                    <div class="net-card-left">
+                                        <div class="net-icon net-icon-ethereum">
+                                            <svg viewBox="0 0 32 32" width="22" height="22">
+                                                <circle cx="16" cy="16" r="14" fill="#627EEA" />
+                                                <path d="M16 6L9 16.5L16 20.5L23 16.5L16 6Z" fill="#FFFFFF"/>
+                                                <path d="M16 21.5L9 17.5L16 26L23 17.5L16 21.5Z" fill="#FFFFFF" opacity="0.8"/>
+                                            </svg>
+                                        </div>
+                                        <div class="net-info">
+                                            <div class="net-name">Ethereum</div>
+                                            <div class="net-chain-id">Chain ID: <span>1</span> • <span class="net-fee-pill">L1 Mainnet</span></div>
+                                        </div>
+                                    </div>
+                                    <div class="net-card-right">
+                                        <span id="settingsBadgeNetEthereum" class="net-status-badge">SELECT</span>
+                                        <span class="net-arrow">&rarr;</span>
+                                    </div>
+                                </button>
+                                <button type="button" id="settingsNetCardSepolia" class="network-card" onclick="selectNetwork(11155111, event)" style="width:100%; min-width:0; max-width:100%;">
+                                    <div class="net-card-left">
+                                        <div class="net-icon net-icon-sepolia">
+                                            <svg viewBox="0 0 32 32" width="22" height="22">
+                                                <circle cx="16" cy="16" r="14" fill="#F59E0B" />
+                                                <path d="M16 6L9 16.5L16 20.5L23 16.5L16 6Z" fill="#FFFFFF"/>
+                                                <path d="M16 21.5L9 17.5L16 26L23 17.5L16 21.5Z" fill="#FFFFFF" opacity="0.8"/>
+                                            </svg>
+                                        </div>
+                                        <div class="net-info">
+                                            <div class="net-name">SepoliaETH</div>
+                                            <div class="net-chain-id">Chain ID: <span>11155111</span> • <span class="net-fee-pill">Testnet (Free)</span></div>
+                                        </div>
+                                    </div>
+                                    <div class="net-card-right">
+                                        <span id="settingsBadgeNetSepolia" class="net-status-badge">SELECT</span>
+                                        <span class="net-arrow">&rarr;</span>
+                                    </div>
+                                </button>
+                            </div>
+                            <select id="cfgChainId" class="form-control" onchange="quickSwitchChain(this.value)">
+                                <option value="8453">Base L2 Mainnet (Sub-Cent Fees ~$0.004 - 95%+ Profit Retention)</option>
+                                <option value="42161">Arbitrum One</option>
+                                <option value="137">Polygon PoS</option>
+                                <option value="1">Ethereum Mainnet</option>
+                                <option value="11155111">Sepolia Testnet (SepoliaETH)</option>
+                            </select>
+                            <small style="color:var(--text-muted); font-size:11px;">Base L2 is optimized for micro-trades (any balance &gt; $0.00) with sub-cent gas fees.</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Trading Mode</label>
+                            <select id="cfgTradingMode" class="form-control">
+                                <option value="MOCK">MOCK (Safe Simulation - Zero Risk)</option>
+                                <option value="TESTNET">TESTNET (Sepolia Testnet)</option>
+                                <option value="LIVE">LIVE (Mainnet On-Chain Trading)</option>
+                            </select>
+                            <small style="color:var(--text-muted); font-size:11px;">MOCK mode fetches real on-chain quotes without broadcasting transactions.</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Web3 JSON-RPC Endpoint URL</label>
+                            <div style="display:flex; gap:8px;">
+                                <input type="text" id="cfgRpcUrl" class="form-control" placeholder="https://cloudflare-eth.com">
+                                <button type="button" class="btn btn-secondary" onclick="testRpcEndpoint()" style="white-space:nowrap;">Test RPC</button>
+                            </div>
+                            <small id="rpcTestMsg" style="font-size:11px; min-height:16px; margin-top:4px; display:block;"></small>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Non-Custodial Wallet Address</label>
+                            <input type="text" id="cfgWalletAddress" class="form-control" placeholder="0x... (Leave empty in MOCK mode)">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Arbitrage Smart Contract Address</label>
+                            <input type="text" id="cfgContractAddress" class="form-control" placeholder="0x... (DexArbitrage.sol deployed address)">
+                        </div>
+                    </div>
+
+                    <!-- RIGHT COLUMN: PROFIT & RISK CONTROLS -->
+                    <div>
+                        <h3 class="settings-section-title">Execution & Profit Gates</h3>
+
+                        <div class="form-group">
+                            <label>Default Trade Notional (USDT)</label>
+                            <input type="number" id="cfgTradeAmount" class="form-control" step="1" min="1">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Minimum Net Profit (USDT)</label>
+                            <input type="number" id="cfgMinProfit" class="form-control" step="0.001" min="0.0001">
+                            <small style="color:var(--text-muted); font-size:11px;">Recommended: $0.005 - $0.01 USDT for Base L2 / Polygon sub-cent gas fees (~$0.003).</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Max Slippage Tolerance (%)</label>
+                            <input type="number" id="cfgSlippage" class="form-control" step="0.05">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Max Price Impact Allowed (%)</label>
+                            <input type="number" id="cfgPriceImpact" class="form-control" step="0.1">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Max Gas Price Ceiling (Gwei)</label>
+                            <input type="number" id="cfgGasCeiling" class="form-control" step="1">
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top:25px; display:flex; gap:12px; justify-content:flex-end;">
+                    <button type="button" class="btn btn-secondary" onclick="loadSettings()">Reset</button>
+                    <button type="submit" class="btn btn-primary">Save DEX Configuration</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+
+</main>
+
+<!-- EXECUTION MODAL -->
+<div id="execModalOverlay" style="display:none; position:fixed; inset:0; background:rgba(4,9,20,0.85); backdrop-filter:blur(8px); z-index:99999; align-items:center; justify-content:center;">
+    <div class="exec-modal" style="background:#111a2b; border:1px solid #263753; border-radius:16px; width:480px; max-width:90%; padding:30px;">
+        <h3 style="margin-bottom:8px;" id="execModalTitle">Executing Atomic DEX Arbitrage</h3>
+        <p id="execModalSub" style="color:var(--text-muted); font-size:12px; margin-bottom:16px;">Invoking DexArbitrage smart contract via Web3 RPC</p>
+        <div id="execModalBody" style="background:#0f172a; padding:15px; border-radius:8px; font-family:var(--font-mono); font-size:12px; line-height:1.6; margin-bottom:20px; max-height:200px; overflow-y:auto;">
+            Simulating on-chain execution...
+        </div>
+        <button class="btn btn-primary" style="width:100%;" onclick="closeExecModal()">Dismiss</button>
+    </div>
+</div>
+
+<!-- METAMASK NOT DETECTED MODAL -->
+<div id="metamaskModalOverlay" style="display:none; position:fixed; inset:0; background:rgba(4,9,20,0.85); backdrop-filter:blur(8px); z-index:99999; align-items:center; justify-content:center;">
+    <div class="exec-modal" style="background:#111a2b; border:1px solid #263753; border-radius:16px; width:440px; max-width:90%; padding:28px; text-align:center;">
+        <div style="font-size:42px; margin-bottom:12px;">🦊</div>
+        <h3 style="margin-bottom:8px; font-size:18px; color:var(--text-bright);">MetaMask Required</h3>
+        <p style="color:var(--text-muted); font-size:13px; line-height:1.6; margin-bottom:22px;">
+            MetaMask extension was not detected in this browser. To connect your non-custodial wallet and sign on-chain DEX transactions, install MetaMask or use a Web3 browser.
+        </p>
+        <div style="display:flex; gap:10px;">
+            <a href="https://metamask.io/download/" target="_blank" class="btn btn-primary" style="flex:1; text-align:center; text-decoration:none; padding:10px; font-size:13px; font-weight:700;">
+                Download MetaMask
+            </a>
+            <button class="btn btn-secondary" style="flex:1; padding:10px; font-size:13px;" onclick="closeMetaMaskModal()">
+                Dismiss
+            </button>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

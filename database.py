@@ -1,0 +1,378 @@
+"""100% Decentralized Database Module.
+
+Stores DEX trade history, on-chain execution details (tx hash, gas, price impact),
+non-custodial portfolio balances, and engine configuration settings.
+Completely free of centralized exchange dependencies.
+"""
+import os
+import sqlite3
+import json
+from datetime import datetime
+from typing import Dict, Any, List, Optional
+
+from config import DATABASE_NAME, BACKUP_JSON_PATH
+
+os.makedirs(os.path.dirname(DATABASE_NAME), exist_ok=True)
+
+
+def get_connection():
+    conn = sqlite3.connect(DATABASE_NAME)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def create_database():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # DEX Trades Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tx_hash TEXT NOT NULL,
+            chain_id INTEGER DEFAULT 1,
+            buy_dex TEXT NOT NULL,
+            sell_dex TEXT NOT NULL,
+            token_pair TEXT DEFAULT 'WETH/USDT',
+            amount_in REAL NOT NULL,
+            amount_out REAL NOT NULL,
+            gross_profit REAL NOT NULL,
+            net_profit REAL NOT NULL,
+            gas_used INTEGER DEFAULT 0,
+            gas_price_gwei REAL DEFAULT 0.0,
+            gas_cost_usdt REAL DEFAULT 0.0,
+            price_impact REAL DEFAULT 0.0,
+            slippage REAL DEFAULT 0.0,
+            status TEXT DEFAULT 'CONFIRMED',
+            mode TEXT DEFAULT 'MOCK',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Non-Custodial DEX Portfolio Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS portfolio (
+            id INTEGER PRIMARY KEY DEFAULT 1,
+            wallet_address TEXT DEFAULT '',
+            chain_id INTEGER DEFAULT 1,
+            eth_balance REAL DEFAULT 0.0,
+            weth_balance REAL DEFAULT 0.0,
+            usdt_balance REAL DEFAULT 0.0,
+            usdc_balance REAL DEFAULT 0.0,
+            total_equity_usdt REAL DEFAULT 0.0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Initialize portfolio table (zero balances until real on-chain balance is verified)
+    cursor.execute("SELECT COUNT(*) FROM portfolio")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("""
+            INSERT INTO portfolio (id, wallet_address, chain_id, eth_balance, weth_balance, usdt_balance, usdc_balance, total_equity_usdt)
+            VALUES (1, '', 1, 0.0, 0.0, 0.0, 0.0, 0.0)
+        """)
+
+    # DEX Settings Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS bot_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Arbitrage Opportunity Scan Log
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS opportunity_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            buy_dex TEXT,
+            sell_dex TEXT,
+            symbol TEXT,
+            spread REAL DEFAULT 0.0,
+            net_profit REAL DEFAULT 0.0,
+            gas_cost_usdt REAL DEFAULT 0.0,
+            price_impact_pct REAL DEFAULT 0.0,
+            profitable INTEGER DEFAULT 0,
+            decision TEXT DEFAULT '',
+            scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+# ============================================================
+# BOT SETTINGS
+# ============================================================
+
+def save_bot_setting(key: str, value: Any):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO bot_settings (key, value, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = CURRENT_TIMESTAMP
+        """, (str(key), json.dumps(value)))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Error saving setting {key}: {e}", flush=True)
+
+
+def load_all_bot_settings() -> Dict[str, Any]:
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT key, value FROM bot_settings")
+        rows = cursor.fetchall()
+        conn.close()
+        settings = {}
+        for row in rows:
+            try:
+                settings[row["key"]] = json.loads(row["value"])
+            except Exception:
+                settings[row["key"]] = row["value"]
+        return settings
+    except Exception as e:
+        print(f"⚠️ Error loading bot settings: {e}", flush=True)
+        return {}
+
+
+# ============================================================
+# TRADES MANAGEMENT
+# ============================================================
+
+def save_trade(trade_data: Dict[str, Any]) -> int:
+    create_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        INSERT INTO trades (
+            tx_hash, chain_id, buy_dex, sell_dex, token_pair,
+            amount_in, amount_out, gross_profit, net_profit,
+            gas_used, gas_price_gwei, gas_cost_usdt, price_impact, slippage,
+            status, mode, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        trade_data.get("tx_hash", ""),
+        int(trade_data.get("chain_id", 1)),
+        trade_data.get("buy_dex") or trade_data.get("buy", "Uniswap_V2"),
+        trade_data.get("sell_dex") or trade_data.get("sell", "SushiSwap_V2"),
+        trade_data.get("token_pair") or trade_data.get("symbol", "WETH/USDT"),
+        float(trade_data.get("amount_in", 0.0)),
+        float(trade_data.get("amount_out", 0.0)),
+        float(trade_data.get("gross_profit", 0.0)),
+        float(trade_data.get("net_profit", trade_data.get("profit", 0.0))),
+        int(trade_data.get("gas_used", 0)),
+        float(trade_data.get("gas_price_gwei", 0.0)),
+        float(trade_data.get("gas_cost_usdt", trade_data.get("fees", 0.0))),
+        float(trade_data.get("price_impact", 0.0)),
+        float(trade_data.get("slippage", 0.0)),
+        trade_data.get("status", "CONFIRMED"),
+        trade_data.get("mode", "MOCK"),
+        trade_data.get("created_at") or datetime.now().astimezone().isoformat()
+    ))
+
+    trade_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+
+    sync_trades_to_json_backup()
+    return trade_id
+
+
+def get_all_trades(limit: int = 100, mode: Optional[str] = None) -> List[Dict[str, Any]]:
+    create_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+    if mode and mode != "ALL":
+        cursor.execute("SELECT * FROM trades WHERE mode = ? ORDER BY id DESC LIMIT ?", (mode, limit))
+    else:
+        cursor.execute("SELECT * FROM trades ORDER BY id DESC LIMIT ?", (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+get_trades = get_all_trades
+
+
+def get_latest_trade(mode: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    create_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+    if mode and mode != "ALL":
+        cursor.execute("SELECT * FROM trades WHERE mode = ? ORDER BY id DESC LIMIT 1", (mode,))
+    else:
+        cursor.execute("SELECT * FROM trades ORDER BY id DESC LIMIT 1")
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_total_trades(mode: Optional[str] = None) -> int:
+    create_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+    if mode and mode != "ALL":
+        cursor.execute("SELECT COUNT(*) FROM trades WHERE mode = ? AND status = 'CONFIRMED'", (mode,))
+    else:
+        cursor.execute("SELECT COUNT(*) FROM trades WHERE status = 'CONFIRMED'")
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+
+def get_total_profit(mode: Optional[str] = None) -> float:
+    create_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+    if mode and mode != "ALL":
+        cursor.execute("SELECT COALESCE(SUM(net_profit), 0.0) FROM trades WHERE mode = ? AND status = 'CONFIRMED'", (mode,))
+    else:
+        cursor.execute("SELECT COALESCE(SUM(net_profit), 0.0) FROM trades WHERE status = 'CONFIRMED'")
+    total = cursor.fetchone()[0]
+    conn.close()
+    return round(float(total), 4)
+
+
+def get_today_live_profit(mode: Optional[str] = None) -> float:
+    create_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+    if mode and mode != "ALL":
+        cursor.execute("""
+            SELECT COALESCE(SUM(net_profit), 0.0)
+            FROM trades
+            WHERE DATE(created_at) = DATE('now') AND mode = ? AND status = 'CONFIRMED'
+        """, (mode,))
+    else:
+        cursor.execute("""
+            SELECT COALESCE(SUM(net_profit), 0.0)
+            FROM trades
+            WHERE DATE(created_at) = DATE('now') AND status = 'CONFIRMED'
+        """)
+    today_profit = cursor.fetchone()[0]
+    conn.close()
+    return round(float(today_profit), 4)
+
+
+def delete_all_trades():
+    create_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM trades")
+    cursor.execute("DELETE FROM opportunity_log")
+    conn.commit()
+    conn.close()
+
+    if os.path.exists(BACKUP_JSON_PATH):
+        try:
+            with open(BACKUP_JSON_PATH, "w", encoding="utf-8") as f:
+                json.dump([], f)
+        except Exception:
+            pass
+
+
+def get_live_pnl_summary(mode: Optional[str] = None) -> Dict[str, Any]:
+    create_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    where_clause = "WHERE mode = ? AND status = 'CONFIRMED'" if (mode and mode != "ALL") else "WHERE status = 'CONFIRMED'"
+    params = (mode,) if (mode and mode != "ALL") else ()
+
+    cursor.execute(f"""
+        SELECT
+            COUNT(*) as total_trades,
+            COALESCE(SUM(net_profit), 0.0) as total_net_profit,
+            COALESCE(SUM(gross_profit), 0.0) as total_gross_profit,
+            COALESCE(SUM(gas_cost_usdt), 0.0) as total_gas_spent,
+            COALESCE(AVG(net_profit), 0.0) as avg_profit_per_trade,
+            COALESCE(MAX(net_profit), 0.0) as max_profit_trade
+        FROM trades
+        {where_clause}
+    """, params)
+    row = dict(cursor.fetchone())
+
+    recent_query = f"SELECT * FROM trades {where_clause} ORDER BY id DESC LIMIT 5"
+    cursor.execute(recent_query, params)
+    recent = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+
+    row["recent_trades"] = recent
+    row["total_net_profit"] = round(row["total_net_profit"], 4)
+    row["total_gross_profit"] = round(row["total_gross_profit"], 4)
+    row["total_gas_spent"] = round(row["total_gas_spent"], 4)
+    row["avg_profit_per_trade"] = round(row["avg_profit_per_trade"], 4)
+    return row
+
+
+# ============================================================
+# BACKUP & RESTORE
+# ============================================================
+
+def sync_trades_to_json_backup():
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM trades ORDER BY id ASC")
+        rows = cursor.fetchall()
+        conn.close()
+
+        trades_list = [dict(row) for row in rows]
+        with open(BACKUP_JSON_PATH, "w", encoding="utf-8") as f:
+            json.dump(trades_list, f, indent=2)
+    except Exception as e:
+        print(f"⚠️ JSON backup sync error: {e}", flush=True)
+
+
+def restore_trades_from_json_backup():
+    if not os.path.exists(BACKUP_JSON_PATH):
+        return
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM trades")
+        count = cursor.fetchone()[0]
+
+        if count == 0:
+            with open(BACKUP_JSON_PATH, "r", encoding="utf-8") as f:
+                backup = json.load(f)
+            if backup and isinstance(backup, list):
+                for t in backup:
+                    cursor.execute("""
+                        INSERT INTO trades (
+                            tx_hash, chain_id, buy_dex, sell_dex, token_pair,
+                            amount_in, amount_out, gross_profit, net_profit,
+                            gas_used, gas_price_gwei, gas_cost_usdt, price_impact, slippage,
+                            status, mode, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        t.get("tx_hash", "0xbackup"),
+                        int(t.get("chain_id", 1)),
+                        t.get("buy_dex", "Uniswap_V2"),
+                        t.get("sell_dex", "SushiSwap_V2"),
+                        t.get("token_pair", "WETH/USDT"),
+                        float(t.get("amount_in", 0.0)),
+                        float(t.get("amount_out", 0.0)),
+                        float(t.get("gross_profit", 0.0)),
+                        float(t.get("net_profit", 0.0)),
+                        int(t.get("gas_used", 0)),
+                        float(t.get("gas_price_gwei", 0.0)),
+                        float(t.get("gas_cost_usdt", 0.0)),
+                        float(t.get("price_impact", 0.0)),
+                        float(t.get("slippage", 0.0)),
+                        t.get("status", "CONFIRMED"),
+                        t.get("mode", "MOCK"),
+                        t.get("created_at") or datetime.now().astimezone().isoformat()
+                    ))
+                conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Restore trades backup error: {e}", flush=True)
