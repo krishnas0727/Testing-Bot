@@ -278,12 +278,12 @@
             <span class="ticker-val" id="tickerGasPrice" style="color:var(--text-bright);">-- Gwei</span>
         </div>
         <div class="ticker-item">
-            <span class="ticker-name">Base L2 Speed</span>
-            <span class="ticker-val" style="color:var(--accent-cyan); font-weight:700;">⚡ ~2.0s Block</span>
+            <span class="ticker-name" id="networkSpeedLabel">Base L2 Speed</span>
+            <span class="ticker-val" id="networkSpeedVal" style="color:var(--accent-cyan); font-weight:700;">⚡ ~2.0s Block</span>
         </div>
         <div class="ticker-item">
-            <span class="ticker-name">Avg L2 Fee</span>
-            <span class="ticker-val" style="color:var(--profit-color); font-weight:700;">&lt; $0.001</span>
+            <span class="ticker-name" id="networkFeeLabel">Avg L2 Fee</span>
+            <span class="ticker-val" id="networkFeeVal" style="color:var(--profit-color); font-weight:700;">&lt; $0.001</span>
         </div>
         <div class="ticker-item" style="margin-left:auto;">
             <span class="ticker-name">RPC Node</span>
@@ -494,7 +494,7 @@
                         <span style="font-size:10px; font-weight:800; color:#38bdf8; background:rgba(39,117,202,0.2); padding:2px 6px; border-radius:4px; font-family:var(--font-mono);">USDC</span>
                     </div>
                     <h3 id="balUSDC">$0.00 USDC</h3>
-                    <small style="color:var(--text-muted);">Base L2 Primary Liquidity</small>
+                    <small id="balUSDCsub" style="color:var(--text-muted);">Base L2 Primary Liquidity</small>
                 </div>
                 <div class="dex-wallet-item" style="border-left:3px solid #26a17b;">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -502,7 +502,7 @@
                         <span style="font-size:10px; font-weight:800; color:#00f59b; background:rgba(38,161,123,0.2); padding:2px 6px; border-radius:4px; font-family:var(--font-mono);">USDT</span>
                     </div>
                     <h3 id="balUSDT">$0.00 USDT</h3>
-                    <small style="color:var(--text-muted);">Active Arbitrage Inventory</small>
+                    <small id="balUSDTsub" style="color:var(--text-muted);">Active Arbitrage Inventory</small>
                 </div>
                 <div class="dex-wallet-item" style="border-left:3px solid #00f2fe;">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -1289,7 +1289,7 @@
             <div id="stepPill1" class="step-pill active"><span class="step-num">1</span> <span class="step-name">Wallet</span></div>
             <div id="stepPill2" class="step-pill"><span class="step-num">2</span> <span class="step-name">Approve</span></div>
             <div id="stepPill3" class="step-pill"><span class="step-num">3</span> <span class="step-name">Swap</span></div>
-            <div id="stepPill4" class="step-pill"><span class="step-num">4</span> <span class="step-name">Base L2</span></div>
+            <div id="stepPill4" class="step-pill"><span class="step-num">4</span> <span class="step-name" id="stepPill4Name">Base L2</span></div>
             <div id="stepPill5" class="step-pill"><span class="step-num">5</span> <span class="step-name">Settle</span></div>
         </div>
 

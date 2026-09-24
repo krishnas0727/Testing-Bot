@@ -325,12 +325,52 @@ function invalidateAndResetChainUI(newChainId) {
     setText("balUSDT", "--");
     setText("balUSDC", "--");
 
-    // 7. Update all prominent visual badges
+    // 7. Update all prominent visual badges, labels, and modal pipeline steps
     setText("globalNetworkText", `NETWORK: ${shortUpper}`);
     setText("heatmapChainLabel", `(${chainInfo.short || chainInfo.name})`);
     setText("bestRouteChainBadge", shortUpper);
     setText("bestRouteChainName", chainInfo.name);
     setText("networkSpeedLabel", `${chainInfo.short} Speed`);
+    setText("stepPill4Name", chainInfo.short || chainInfo.name);
+    setText("execModalSub", `Invoking ${chainInfo.name} Smart Router via Web3 RPC`);
+
+    if (chainIdNum === 137) {
+        setText("networkSpeedVal", "⚡ ~2.1s Block");
+        setText("networkFeeLabel", "Avg POL Fee");
+        setText("networkFeeVal", "< 0.01 POL");
+        setText("balUSDCsub", "Polygon Secondary Liquidity");
+        setText("balUSDTsub", "Polygon Primary Liquidity");
+    } else if (chainIdNum === 42161) {
+        setText("networkSpeedVal", "⚡ ~0.25s Block");
+        setText("networkFeeLabel", "Avg Nitro Fee");
+        setText("networkFeeVal", "< $0.01");
+        setText("balUSDCsub", "Arbitrum Primary Liquidity");
+        setText("balUSDTsub", "Arbitrum Active Inventory");
+    } else if (chainIdNum === 1) {
+        setText("networkSpeedVal", "⚡ ~12.0s Block");
+        setText("networkFeeLabel", "Avg Gas Fee");
+        setText("networkFeeVal", "~$1.50");
+        setText("balUSDCsub", "Ethereum Primary Liquidity");
+        setText("balUSDTsub", "Ethereum Active Inventory");
+    } else if (chainIdNum === 11155111) {
+        setText("networkSpeedVal", "⚡ ~12.0s Block");
+        setText("networkFeeLabel", "Sepolia Faucet");
+        setText("networkFeeVal", "Free (0.00)");
+        setText("balUSDCsub", "Sepolia Test Token");
+        setText("balUSDTsub", "Sepolia Primary Liquidity");
+    } else if (chainIdNum === 84532) {
+        setText("networkSpeedVal", "⚡ ~2.0s Block");
+        setText("networkFeeLabel", "Avg Testnet Fee");
+        setText("networkFeeVal", "Free (0.00)");
+        setText("balUSDCsub", "Base Sepolia Primary");
+        setText("balUSDTsub", "Base Sepolia Secondary");
+    } else {
+        setText("networkSpeedVal", "⚡ ~2.0s Block");
+        setText("networkFeeLabel", "Avg L2 Fee");
+        setText("networkFeeVal", "< $0.001");
+        setText("balUSDCsub", "Base L2 Primary Liquidity");
+        setText("balUSDTsub", "Active Arbitrage Inventory");
+    }
 
     // 8. Update network selector cards & dropdowns
     if (typeof updateNetworkCardsVisual === "function") {
@@ -466,6 +506,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initTerminalAudio();
     handleInitialRoute();
     startClock();
+    invalidateAndResetChainUI(currentSelectedChainId);
     startPolling();
     loadSettings();
     loadTrades();
@@ -764,6 +805,10 @@ function updateDashboardUI(payload) {
     if (typeof updateNetworkCardsVisual === "function") {
         updateNetworkCardsVisual(currentSelectedChainId);
     }
+    const currentActiveChain = SUPPORTED_CHAINS[currentSelectedChainId] || SUPPORTED_CHAINS[8453];
+    setText("stepPill4Name", currentActiveChain.short || currentActiveChain.name);
+    setText("execModalSub", `Invoking ${currentActiveChain.name} Smart Router via Web3 RPC`);
+    setText("networkSpeedLabel", `${currentActiveChain.short} Speed`);
 
     // 2. Mode & Auto-trade badges
     const modeSelect = document.getElementById("headerTradingModeSelect");
@@ -1330,7 +1375,11 @@ function renderExecutionResult(json) {
 
     const isSkipped = json.status === "TRADE SKIPPED";
     const statusColor = isSuccess ? "var(--profit-color)" : (isInsufficient ? "var(--loss-color)" : (isSkipped ? "#f59e0b" : "var(--loss-color)"));
-    const explorerBase = (latestMarketData && Number(latestMarketData.chain_id) === 8453) ? "https://basescan.org/tx/" : "https://basescan.org/tx/";
+    const activeCid = (latestMarketData && latestMarketData.chain_id) ? Number(latestMarketData.chain_id) : currentSelectedChainId;
+    const activeChainConfig = SUPPORTED_CHAINS[activeCid] || SUPPORTED_CHAINS[8453];
+    const explorerBase = activeChainConfig.explorer ? `${activeChainConfig.explorer}/tx/` : "https://basescan.org/tx/";
+    const chainShort = (activeChainConfig.short || activeChainConfig.name).toUpperCase();
+    const explorerName = activeChainConfig.name.includes("Polygon") ? "PolygonScan" : (activeChainConfig.name.includes("Arbitrum") ? "Arbiscan" : (activeChainConfig.name.includes("Sepolia") && !activeChainConfig.name.includes("Base") ? "Etherscan (Sepolia)" : (activeChainConfig.name.includes("Base Sepolia") ? "BaseScan (Sepolia)" : (activeChainConfig.name.includes("Ethereum") ? "Etherscan" : "BaseScan"))));
 
     const titleText = isSuccess ? "Atomic Trade Verified On-Chain" : (isInsufficient ? "INSUFFICIENT BALANCE" : (json.status || "Trade Result"));
 
@@ -1358,7 +1407,7 @@ function renderExecutionResult(json) {
         ` : ""}
         ${json.tx_hash ? `
             <div style="background:rgba(15,23,42,0.8); border:1px solid rgba(56,189,248,0.25); border-radius:6px; padding:10px; margin-top:8px; font-size:11px;">
-                <div style="color:var(--text-muted); margin-bottom:4px; font-weight:700;">BASE L2 TRANSACTION RECEIPT</div>
+                <div style="color:var(--text-muted); margin-bottom:4px; font-weight:700;">${chainShort} TRANSACTION RECEIPT</div>
                 <div style="word-break:break-all; font-family:var(--font-mono); margin-bottom:8px;">
                     <a href="${explorerBase}${json.tx_hash}" target="_blank" style="color:var(--accent-cyan); text-decoration:none; display:inline-flex; align-items:center; gap:4px;">
                         <span>🔗</span> <span>${json.tx_hash}</span>
@@ -1366,7 +1415,7 @@ function renderExecutionResult(json) {
                 </div>
                 <div style="display:flex; gap:8px;">
                     <button class="btn btn-secondary" style="padding:4px 8px; font-size:10px;" onclick="navigator.clipboard.writeText('${json.tx_hash}'); showToast('Tx Hash copied to clipboard!', 'success');">📋 Copy Hash</button>
-                    <a href="${explorerBase}${json.tx_hash}" target="_blank" class="btn btn-secondary" style="padding:4px 8px; font-size:10px; text-decoration:none; display:inline-flex; align-items:center; gap:4px;">🔍 View on BaseScan</a>
+                    <a href="${explorerBase}${json.tx_hash}" target="_blank" class="btn btn-secondary" style="padding:4px 8px; font-size:10px; text-decoration:none; display:inline-flex; align-items:center; gap:4px;">🔍 View on ${explorerName}</a>
                 </div>
             </div>
         ` : ""}
@@ -1417,6 +1466,14 @@ async function switchToMockAndExecute() {
 function showExecModal(title, msg, stepNumber = 0) {
     const modal = document.getElementById("execModalOverlay");
     setText("execModalTitle", title);
+
+    const activeChainId = currentSelectedChainId || 8453;
+    const chainInfo = SUPPORTED_CHAINS[activeChainId] || SUPPORTED_CHAINS[8453];
+    const chainShort = chainInfo.short || chainInfo.name;
+
+    setText("execModalSub", `Invoking ${chainInfo.name} Smart Router via Web3 RPC`);
+    setText("stepPill4Name", chainShort);
+
     const body = document.getElementById("execModalBody");
     if (body) {
         body.innerHTML = `
