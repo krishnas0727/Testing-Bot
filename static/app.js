@@ -219,7 +219,7 @@ const CLIENT_ROUTER_ADDRESSES = {
     },
     11155111: { // Sepolia Testnet
         Uniswap_V2: "0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008",
-        SushiSwap_V2: "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506"
+        SushiSwap_V2: "0xeaBcE3E74EF41FB40024a21Cc2ee2F5dDc615791"
     },
     84532: { // Base Sepolia Testnet
         Uniswap_V2: "0x1662C4Ca803B6d5d42C85d552318b7625038923d",
@@ -2219,7 +2219,10 @@ async function preApproveTokens() {
             return;
         }
 
-        const tokenObj = tokens.USDC || tokens.USDT;
+        let tokenObj = tokens.USDC || tokens.USDT;
+        if (chainIdNum === 11155111) {
+            tokenObj = tokens.USDT || tokens.USDC;
+        }
         if (!tokenObj) {
             showToast("No stablecoin found to approve.", "error");
             return;
@@ -3168,7 +3171,7 @@ async function executeMetaMaskOnChainTrade() {
     const route = bestRoute;
 
     const isMock = latestMarketData && (latestMarketData.trading_mode === "MOCK" || (latestMarketData.settings && latestMarketData.settings.trading_mode === "MOCK"));
-    if (isMock) {
+    if (isMock && targetChainId !== 11155111) {
         await executeMockPipelineTrade(route, targetChainInfo);
         return;
     }
@@ -3230,6 +3233,16 @@ async function executeMetaMaskOnChainTrade() {
                 availStable = 0;
                 tokenSymbol = "USDC";
             }
+        } else if (targetChainId === 11155111) {
+            // Sepolia: Strictly prioritize Pimlico test USDT (0xd077A400968890Eacc75cdc901F0356c943e4fDb, decimals: 6)
+            tokenInMeta = tokens.USDT;
+            availStable = Number(clientWalletBalances.usdt || 0);
+            tokenSymbol = "USDT";
+            if (availStable <= 0 && (clientWalletBalances.usdc || 0) > 0 && tokens.USDC) {
+                tokenInMeta = tokens.USDC;
+                availStable = clientWalletBalances.usdc;
+                tokenSymbol = "USDC";
+            }
         } else {
             if ((clientWalletBalances.usdt || 0) > 0 && tokens.USDT) {
                 tokenInMeta = tokens.USDT;
@@ -3271,7 +3284,7 @@ async function executeMetaMaskOnChainTrade() {
             return;
         }
 
-        const parsedAmountIn = ethers.parseUnits(tradeAmt.toString(), tokenInMeta.decimals);
+        const parsedAmountIn = ethers.parseUnits(tradeAmt.toFixed(tokenInMeta.decimals), tokenInMeta.decimals);
         const routerName = route.buy_dex || "Uniswap_V2";
         const routerAddress = routers[routerName] || Object.values(routers)[0];
 
@@ -3317,26 +3330,7 @@ async function executeMetaMaskOnChainTrade() {
             return;
         }
 
-        // Step 2: Verify and request ERC-20 token approval
-        showExecModal("Verifying Token Allowance", `Checking ${tokenSymbol} allowance for ${routerName}...`, 2);
-        const tokenContract = new ethers.Contract(tokenInMeta.address, CLIENT_ERC20_ABI, activeSigner);
-        const currentAllowance = await tokenContract.allowance(metamaskAccount, routerAddress);
-
-        if (currentAllowance < parsedAmountIn) {
-            showExecModal("Approving Token Spending", `Please confirm Token Approval for ${routerName} in MetaMask...`, 2);
-            showToast("Please approve token spending in MetaMask...", "info");
-            const approveTx = await tokenContract.approve(routerAddress, ethers.MaxUint256);
-            showExecModal("Confirming Approval", `Approval submitted (${approveTx.hash.slice(0, 10)}...). Waiting for block confirmation...`, 2);
-            await approveTx.wait(1);
-            showToast("Token approval confirmed on-chain!", "success");
-            await fetchClientWalletBalances(metamaskAccount, targetChainId);
-        }
-
-        // Step 3: Query DEX Router for expected output & submit swap
-        showExecModal("Executing DEX Swap", `Submitting trade of $${tradeAmt.toFixed(4)} ${tokenSymbol} on ${routerName}... Confirm in MetaMask.`, 3);
-        showToast("Please confirm Swap transaction in MetaMask...", "info");
-
-        // Swap contract instance MUST use the transaction-capable activeSigner runner
+        // Step 2: Query DEX Router for fresh on-chain quote
         const routerContract = new ethers.Contract(routerAddress, CLIENT_ROUTER_V2_ABI, activeSigner);
         if (!routerContract.runner || typeof routerContract.runner.sendTransaction !== "function") {
             throw new Error("Router contract runner does not support sending transactions. Wallet transaction aborted.");
@@ -3344,19 +3338,85 @@ async function executeMetaMaskOnChainTrade() {
         const deadline = Math.floor(Date.now() / 1000) + 1200; // 20 min
         const path = [tokenInMeta.address, tokenOutMeta.address];
 
-        let amountOutMin = 0n;
+        showExecModal("Querying Fresh Quote", `Fetching live on-chain quote from ${routerName}...`, 2);
+        let expectedOut = 0n;
         try {
             const amountsOut = await routerContract.getAmountsOut(parsedAmountIn, path);
-            if (amountsOut && amountsOut.length > 1) {
-                const expectedOut = amountsOut[1];
-                const slippageInput = parseFloat(document.getElementById("cfgSlippage")?.value || "0.5");
-                const slippageBps = BigInt(Math.max(10, Math.min(500, Math.round(slippageInput * 100))));
-                amountOutMin = (expectedOut * (10000n - slippageBps)) / 10000n;
+            if (!amountsOut || amountsOut.length < 2 || amountsOut[1] <= 0n) {
+                throw new Error("Zero output tokens returned by router for this input amount.");
             }
-        } catch (slipErr) {
-            console.warn("[MetaMask Trade] getAmountsOut estimation warning, proceeding safely:", slipErr);
-            amountOutMin = 0n;
+            expectedOut = amountsOut[1];
+        } catch (quoteErr) {
+            console.error("[MetaMask Trade] Quote query error:", quoteErr);
+            const rawMsg = quoteErr.reason || quoteErr.data?.message || quoteErr.shortMessage || quoteErr.message || "Execution reverted during quote query";
+            let friendlyMsg = rawMsg;
+            if (rawMsg.includes("INSUFFICIENT_LIQUIDITY") || rawMsg.includes("execution reverted")) {
+                friendlyMsg = `No active liquidity pool found for ${tokenSymbol}/WETH on ${routerName}.`;
+            }
+            renderExecutionResult({
+                success: false,
+                status: "QUOTE_FETCH_FAILED",
+                message: `Could not fetch fresh on-chain quote from ${routerName}: ${friendlyMsg} Transaction was NOT sent to protect capital.`
+            });
+            showToast(`Quote failed: ${friendlyMsg}`, "error");
+            return;
         }
+
+        const slippageInput = parseFloat(document.getElementById("cfgSlippage")?.value || "0.5");
+        const slippageBps = BigInt(Math.max(1, Math.min(5000, Math.round(slippageInput * 100))));
+        const amountOutMin = (expectedOut * (10000n - slippageBps)) / 10000n;
+
+        // Step 3: Verify and request ERC-20 token approval
+        showExecModal("Verifying Token Allowance", `Checking ${tokenSymbol} allowance for ${routerName}...`, 2);
+        const tokenContract = new ethers.Contract(tokenInMeta.address, CLIENT_ERC20_ABI, activeSigner);
+        const currentAllowance = await tokenContract.allowance(metamaskAccount, routerAddress);
+
+        if (currentAllowance < parsedAmountIn) {
+            showExecModal("Approving Token Spending", `Please confirm Token Approval for ${routerName} in MetaMask...`, 2);
+            showToast(`Please approve ${tokenSymbol} spending in MetaMask...`, "info");
+            const approveTx = await tokenContract.approve(routerAddress, ethers.MaxUint256);
+            showExecModal("Confirming Approval", `Approval submitted (${approveTx.hash.slice(0, 10)}...). Waiting for block confirmation...`, 2);
+            const appReceipt = await approveTx.wait(1);
+            if (!appReceipt || (appReceipt.status !== 1 && appReceipt.status !== "0x1")) {
+                renderExecutionResult({
+                    success: false,
+                    status: "APPROVAL_REVERTED",
+                    message: `Token approval transaction reverted on ${targetChainInfo.name}. Swap aborted.`
+                });
+                showToast("Token approval reverted on-chain.", "error");
+                return;
+            }
+            showToast("Token approval confirmed on-chain!", "success");
+            await fetchClientWalletBalances(metamaskAccount, targetChainId);
+        }
+
+        // Step 4: Pre-flight Simulation & Gas Estimation
+        showExecModal("Simulating On-Chain Swap", `Simulating exact ${routerName} swap on ${targetChainInfo.name} before broadcast...`, 3);
+        let safeGasLimit = 350000n;
+        try {
+            const estimatedGas = await routerContract.swapExactTokensForTokens.estimateGas(
+                parsedAmountIn,
+                amountOutMin,
+                path,
+                metamaskAccount,
+                deadline
+            );
+            safeGasLimit = (estimatedGas * 125n) / 100n;
+        } catch (simErr) {
+            console.error("[MetaMask Trade] Pre-flight simulation failed:", simErr);
+            const errMsg = simErr.reason || simErr.data?.message || simErr.shortMessage || simErr.message || "Transaction would revert on-chain";
+            renderExecutionResult({
+                success: false,
+                status: "SIMULATION_FAILED",
+                message: `Transaction pre-flight simulation failed: ${errMsg}. Capital was protected and no transaction was broadcasted.`
+            });
+            showToast(`Simulation failed: ${errMsg}`, "error");
+            return;
+        }
+
+        // Step 5: Broadcast real transaction via MetaMask
+        showExecModal("Executing DEX Swap", `Submitting trade of $${tradeAmt.toFixed(4)} ${tokenSymbol} on ${routerName}... Confirm in MetaMask.`, 3);
+        showToast("Please confirm Swap transaction in MetaMask...", "info");
 
         const txResponse = await routerContract.swapExactTokensForTokens(
             parsedAmountIn,
@@ -3364,24 +3424,25 @@ async function executeMetaMaskOnChainTrade() {
             path,
             metamaskAccount,
             deadline,
-            { gasLimit: 280000 }
+            { gasLimit: safeGasLimit }
         );
 
-        // Step 4: Block Mining Receipt
+        // Step 6: Block Mining Receipt
         showExecModal("Mining Transaction", `Swap broadcasted! Hash: ${txResponse.hash.slice(0, 10)}... Waiting for block receipt...`, 4);
         showToast(`Transaction Broadcasted: ${txResponse.hash.slice(0, 10)}...`, "info");
         const receipt = await txResponse.wait(1);
 
-        if (receipt && receipt.status !== 1 && receipt.status !== "0x1") {
+        if (!receipt || (receipt.status !== 1 && receipt.status !== "0x1")) {
             renderExecutionResult({
                 success: false,
                 status: "TRANSACTION_REVERTED",
-                message: `Transaction ${txResponse.hash.slice(0, 10)}... reverted on-chain. Capital was preserved, but gas was consumed.`
+                message: `Transaction ${txResponse.hash} reverted on-chain. Capital was preserved, but gas was consumed. No trade was recorded.`
             });
+            showToast("Transaction reverted on-chain. Capital preserved.", "error");
             return;
         }
 
-        // Step 5: Verify and record live trade on backend
+        // Step 7: Verify and record live trade on backend
         showExecModal("Verifying On-Chain Receipt", "Verifying block receipt & updating live audit log...", 5);
         const confirmRes = await fetch("/api/trade/confirm-live", {
             method: "POST",
@@ -3389,8 +3450,8 @@ async function executeMetaMaskOnChainTrade() {
             body: JSON.stringify({
                 tx_hash: txResponse.hash,
                 chain_id: targetChainId,
-                buy_dex: route.buy_dex || "Uniswap_V2",
-                sell_dex: route.sell_dex || "SushiSwap_V2",
+                buy_dex: routerName,
+                sell_dex: route.sell_dex || routerName,
                 token_pair: `${tokenSymbol}/WETH`,
                 amount_in: tradeAmt,
                 expected_profit: route.net_profit_usdt || 0.0,
@@ -3403,24 +3464,17 @@ async function executeMetaMaskOnChainTrade() {
             renderExecutionResult({
                 success: true,
                 status: "TRANSACTION_CONFIRMED",
-                message: `Atomic trade verified on-chain! Net PnL: +$${Number(confirmData.trade.net_profit || 0).toFixed(4)} USDT`,
+                message: `Trade verified on-chain! Net PnL: +$${Number(confirmData.trade.net_profit || 0).toFixed(4)} USDT`,
                 tx_hash: txResponse.hash,
                 trade: confirmData.trade
             });
             showToast("Live trade verified and committed to database!", "success");
         } else {
             renderExecutionResult({
-                success: true,
-                status: "ON_CHAIN_MINED",
-                message: `Transaction mined on ${targetChainInfo.name}! Hash: ${txResponse.hash}`,
-                tx_hash: txResponse.hash,
-                trade: {
-                    buy_dex: route.buy_dex || "Uniswap_V2",
-                    sell_dex: route.sell_dex || "SushiSwap_V2",
-                    amount_in: tradeAmt,
-                    net_profit: route.net_profit_usdt || 0.0,
-                    mode: "LIVE"
-                }
+                success: false,
+                status: "RECEIPT_VERIFICATION_FAILED",
+                message: confirmData.message || `Receipt verification returned an issue on ${targetChainInfo.name}`,
+                tx_hash: txResponse.hash
             });
         }
 

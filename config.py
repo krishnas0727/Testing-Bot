@@ -104,9 +104,9 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
         "is_testnet": False,
         "currency": "ETH",
         "explorer": "https://basescan.org",
-        "rpc_url": "https://ethereum-sepolia-rpc.publicnode.com",
+        "rpc_url": "https://mainnet.base.org",
         "fallbacks": [
-            "https://ethereum-sepolia-rpc.publicnode.com",
+            "https://mainnet.base.org",
             "https://base.llamarpc.com",
             "https://1rpc.io/base",
             "https://base-rpc.publicnode.com",
@@ -244,11 +244,11 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
         "dexes": ["Uniswap_V2", "SushiSwap_V2"],
         "routers": {
             "Uniswap_V2": "0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008",
-            "SushiSwap_V2": "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506",
+            "SushiSwap_V2": "0xeaBcE3E74EF41FB40024a21Cc2ee2F5dDc615791",
         },
         "factories": {
             "Uniswap_V2": "0x7E0987E5b3a30e3f2828572Bb659A548460a3003",
-            "SushiSwap_V2": "0xc35DADB65012eC5796536bD9864eD8773aBc74C4",
+            "SushiSwap_V2": "0x734583F62bB6acE3c9bA9Bd5a53143CA2CE8c55a",
         },
         "tokens": {
             "WETH": {"address": "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9", "decimals": 18, "symbol": "WETH"},

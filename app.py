@@ -637,6 +637,10 @@ def confirm_live_trade_api():
                 "message": "Invalid transaction hash. Must be a 66-character 0x-prefixed hex string."
             }), 400
 
+        target_chain_id = int(req.get("chain_id") or config.CHAIN_ID)
+        if target_chain_id in config.CHAIN_REGISTRY and target_chain_id != config.CHAIN_ID:
+            config.set_active_chain(target_chain_id)
+
         from dex_engine import rpc_call
         receipt = rpc_call("eth_getTransactionReceipt", [tx_hash])
         if not receipt:

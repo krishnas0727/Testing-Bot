@@ -317,20 +317,26 @@ class ProfitThresholdAndSkipReasonTests(unittest.TestCase):
         self.assertEqual(initial_trades, after_trades, "Total trades must not change on insufficient balance")
         self.assertEqual(initial_profit, after_profit, "Total profit must not change on insufficient balance")
 
-    def test_positive_spread_yields_positive_net_profit_for_micro_trades(self):
+    @patch("dex_engine.get_gas_price", return_value=(6_000_000, 0.006))
+    def test_positive_spread_yields_positive_net_profit_for_micro_trades(self, mock_gas):
         """Verify that micro trades (0.05, 0.10, 0.50, 1.0, 5.0) yield positive net profit on profitable spreads and aren't crushed by gas."""
-        for amt in [0.05, 0.10, 0.50, 1.0, 5.0]:
-            market = arbitrage.analyze_market(custom_amount=amt)
-            self.assertIsNotNone(market, f"Market analysis must return data for trade amount {amt}")
-            best = market.get("best_route")
-            self.assertIsNotNone(best, f"Best route must be found for trade amount {amt}")
-            if best.get("spread_pct", 0) > 0.60:  # If spread covers swap fees (0.3% x 2)
-                self.assertGreater(
-                    best.get("net_profit_usdt", 0),
-                    0.0,
-                    f"Net profit must be positive for ${amt} trade on a {best.get('spread_pct')}% spread, got {best.get('net_profit_usdt')}"
-                )
-                self.assertTrue(best.get("is_profitable"), f"Trade size ${amt} must be marked is_profitable=True")
+        orig_cid = config.CHAIN_ID
+        try:
+            config.set_active_chain(8453)
+            for amt in [0.05, 0.10, 0.50, 1.0, 5.0]:
+                market = arbitrage.analyze_market(custom_amount=amt)
+                self.assertIsNotNone(market, f"Market analysis must return data for trade amount {amt}")
+                best = market.get("best_route")
+                self.assertIsNotNone(best, f"Best route must be found for trade amount {amt}")
+                if best.get("spread_pct", 0) > 0.60:  # If spread covers swap fees (0.3% x 2)
+                    self.assertGreater(
+                        best.get("net_profit_usdt", 0),
+                        0.0,
+                        f"Net profit must be positive for ${amt} trade on a {best.get('spread_pct')}% spread, got {best.get('net_profit_usdt')}"
+                    )
+                    self.assertTrue(best.get("is_profitable"), f"Trade size ${amt} must be marked is_profitable=True")
+        finally:
+            config.set_active_chain(orig_cid)
 
 
 if __name__ == "__main__":
