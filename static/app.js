@@ -1642,7 +1642,11 @@ const CLIENT_TOKEN_ADDRESSES = {
     },
     11155111: { // Sepolia Testnet
         USDC: { address: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", decimals: 6 },
+<<<<<<< HEAD
         USDT: { address: "0xaA8E23Fb1079EA71e0a56F48a2aA51851D8433D0", decimals: 6 },
+=======
+        USDT: { address: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", decimals: 6 },
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
         WETH: { address: "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9", decimals: 18 }
     }
 };

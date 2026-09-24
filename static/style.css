@@ -1068,11 +1068,19 @@ header {
     position: relative;
     padding: 0 2px;
     flex: 0 0 24px;
+<<<<<<< HEAD
     min-width: 24px;
 }
 
 .connector-line {
     width: 22px;
+=======
+    flex-shrink: 0;
+}
+
+.connector-line {
+    width: 20px;
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     height: 2px;
     background: rgba(56, 189, 248, 0.25);
     position: relative;
@@ -1086,7 +1094,15 @@ header {
     left: 0;
     width: 10px;
     height: 100%;
+<<<<<<< HEAD
     background: linear-gradient(90deg, transparent, #00f2fe, transparent);
+=======
+    background: linear-gradient(90deg, transparent, #00f2fe, #00f59b, transparent);
+    animation: flowParticle 1.4s infinite cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pulse-particle.reverse {
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     animation: flowParticle 1.4s infinite 0.7s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -1120,12 +1136,17 @@ header {
 
 .opp-details-grid {
     display: grid;
+<<<<<<< HEAD
     grid-template-columns: repeat(2, minmax(0, 1fr));
+=======
+    grid-template-columns: repeat(2, 1fr);
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     gap: 10px;
 }
 
 .opp-details-grid div {
     background: rgba(15, 23, 42, 0.6);
+<<<<<<< HEAD
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
     padding: 10px 12px;
@@ -1139,20 +1160,48 @@ header {
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.5px;
+=======
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.opp-details-grid span {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 }
 
 .opp-details-grid strong {
     font-family: var(--font-mono);
+<<<<<<< HEAD
     font-size: 13px;
     color: var(--text-bright);
 }
 
 /* --- TRADE SIZING BUTTONS --- */
+=======
+    font-size: 14px;
+    color: var(--text-bright);
+    margin-top: 2px;
+}
+
+/* --- TRADE SIZING BUTTONS & PILLS --- */
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 .size-btn-group {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+<<<<<<< HEAD
     margin-top: 12px;
+=======
+    margin-bottom: 12px;
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 }
 
 .size-btn {
@@ -1161,6 +1210,7 @@ header {
     border-radius: var(--radius-sm);
     color: var(--text-main);
     padding: 6px 12px;
+<<<<<<< HEAD
     font-size: 11px;
     font-weight: 700;
     cursor: pointer;
@@ -1170,10 +1220,25 @@ header {
 .size-btn:hover {
     background: rgba(22, 34, 60, 0.95);
     border-color: var(--border-hover);
+=======
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    transition: all 0.15s ease;
+    outline: none;
+}
+
+.size-btn:hover {
+    background: rgba(22, 34, 60, 0.9);
+    border-color: var(--border-hover);
+    color: #ffffff;
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 }
 
 .size-btn.active {
     background: rgba(14, 165, 233, 0.2);
+<<<<<<< HEAD
     border-color: rgba(56, 189, 248, 0.5);
     color: #38bdf8;
     box-shadow: 0 0 12px rgba(14, 165, 233, 0.15);
@@ -1209,6 +1274,45 @@ header {
 }
 
 /* --- EXECUTION PLAN & STEP FLOW --- */
+=======
+    border-color: #0284c7;
+    color: #38bdf8;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.25);
+}
+
+.size-pct-pill {
+    border-color: rgba(56, 189, 248, 0.35) !important;
+    color: #38bdf8 !important;
+}
+
+.size-pct-pill:hover, .size-pct-pill.active {
+    background: rgba(56, 189, 248, 0.2) !important;
+    border-color: #38bdf8 !important;
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.3) !important;
+    color: #ffffff !important;
+}
+
+.btn-max-safe {
+    background: rgba(245, 158, 11, 0.12) !important;
+    border-color: rgba(245, 158, 11, 0.35) !important;
+    color: #f59e0b !important;
+}
+
+.btn-max-safe:hover, .btn-max-safe.active {
+    background: rgba(245, 158, 11, 0.25) !important;
+    border-color: #f59e0b !important;
+    box-shadow: 0 0 14px rgba(245, 158, 11, 0.3) !important;
+    color: #ffffff !important;
+}
+
+/* --- EXECUTION PLAN (ARBITRAGE TAB) --- */
+.arb-terminal-grid {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 20px;
+}
+
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 .execution-plan-box {
     background: rgba(15, 23, 42, 0.85);
     border: 1px solid var(--border-color);
@@ -1242,12 +1346,20 @@ header {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+<<<<<<< HEAD
     background: rgba(15, 23, 42, 0.75);
+=======
+    background: rgba(15, 23, 42, 0.7);
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     color: var(--text-secondary);
     border: 1px solid var(--border-color);
     border-radius: 6px;
     padding: 4px 10px;
     cursor: pointer;
+<<<<<<< HEAD
+=======
+    font-size: 11px;
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     transition: all 0.15s ease;
     outline: none;
 }
@@ -1270,10 +1382,17 @@ header {
     background: rgba(15, 23, 42, 0.5) !important;
 }
 
+<<<<<<< HEAD
 /* --- POOLS CARDS --- */
 .pools-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+=======
+/* --- POOL CARDS (PRICES TAB) --- */
+.pools-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     gap: 18px;
 }
 
@@ -1324,7 +1443,11 @@ header {
     font-weight: 700;
 }
 
+<<<<<<< HEAD
 /* --- DATA TABLES --- */
+=======
+/* --- DATA TABLES (TRADES AUDIT LOG) --- */
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 .table-responsive {
     overflow-x: auto;
     border-radius: var(--radius-md);
@@ -1361,7 +1484,11 @@ header {
 /* --- FORM CONTROLS & SETTINGS --- */
 .settings-grid {
     display: grid;
+<<<<<<< HEAD
     grid-template-columns: repeat(2, minmax(0, 1fr));
+=======
+    grid-template-columns: repeat(2, 1fr);
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     gap: 20px;
 }
 
@@ -1501,7 +1628,11 @@ header {
     align-items: center;
     width: 100%;
     padding: 6px 10px;
+<<<<<<< HEAD
     background: rgba(15, 23, 42, 0.7);
+=======
+    background: rgba(15, 23, 42, 0.6);
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
     color: var(--text-main);
@@ -1511,8 +1642,13 @@ header {
 }
 
 .dropdown-net-card.active {
+<<<<<<< HEAD
     background: rgba(14, 165, 233, 0.12);
     border-color: rgba(56, 189, 248, 0.4);
+=======
+    background: rgba(14, 165, 233, 0.2);
+    border-color: #0284c7;
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     color: #38bdf8;
 }
 
@@ -1566,7 +1702,11 @@ header {
     cursor: pointer;
     top: 0; left: 0; right: 0; bottom: 0;
     background-color: #334155;
+<<<<<<< HEAD
     transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+=======
+    transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     border-radius: 20px;
 }
 
@@ -1578,7 +1718,11 @@ header {
     left: 3px;
     bottom: 3px;
     background-color: white;
+<<<<<<< HEAD
     transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+=======
+    transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     border-radius: 50%;
 }
 
@@ -1591,7 +1735,11 @@ input:checked + .slider:before {
     transform: translateX(18px);
 }
 
+<<<<<<< HEAD
 /* --- TAB CONTENT --- */
+=======
+/* --- TAB CONTROL --- */
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 .tab-content {
     display: none !important;
 }
@@ -1606,7 +1754,11 @@ input:checked + .slider:before {
     to { opacity: 1; transform: translateY(0); }
 }
 
+<<<<<<< HEAD
 /* --- MODALS & TOASTS --- */
+=======
+/* --- MODALS --- */
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 .exec-modal {
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
@@ -1616,7 +1768,11 @@ input:checked + .slider:before {
     display: flex;
     align-items: center;
     justify-content: center;
+<<<<<<< HEAD
     z-index: 99999;
+=======
+    z-index: 999999;
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     animation: fadeIn 0.15s ease-out;
 }
 
@@ -1625,11 +1781,16 @@ input:checked + .slider:before {
     to { opacity: 1; }
 }
 
+<<<<<<< HEAD
+=======
+/* --- COLOR UTILITIES --- */
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 .text-profit { color: var(--profit-color) !important; }
 .text-loss { color: var(--loss-color) !important; }
 .text-blue { color: var(--accent-blue) !important; }
 .text-yellow { color: var(--accent-gold) !important; }
 
+<<<<<<< HEAD
 @media (max-width: 1360px) {
     .chart-layout {
         grid-template-columns: 1fr;
@@ -1711,12 +1872,40 @@ input:checked + .slider:before {
 }
 
 /* --- EXECUTION STEPPER --- */
+=======
+/* --- RESPONSIVE MEDIA QUERIES --- */
+@media (max-width: 1360px) {
+    .chart-layout { grid-template-columns: 1fr; }
+    .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    .dex-wallet-grid { grid-template-columns: repeat(2, 1fr); }
+    .pools-grid { grid-template-columns: 1fr; }
+    .arb-terminal-grid { grid-template-columns: 1fr; }
+    .settings-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 768px) {
+    .sidebar { width: 68px; padding: 12px 6px; }
+    .logo span, .sidebar nav a span, .bot-status span:not(.dot) { display: none; }
+    .sidebar nav a { justify-content: center; padding: 12px; }
+    .main { margin-left: 68px; width: calc(100vw - 68px); max-width: calc(100vw - 68px); padding: 12px; }
+    header { flex-direction: column; align-items: flex-start; }
+    .header-status-strip { width: 100%; justify-content: space-between; }
+    .kpi-grid { grid-template-columns: 1fr; }
+    .dex-wallet-grid { grid-template-columns: 1fr; }
+}
+
+/* --- EXECUTION STEPPER PIPELINE --- */
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 .exec-stepper {
     display: flex;
     justify-content: space-between;
     gap: 6px;
+<<<<<<< HEAD
     margin-top: 16px;
     margin-bottom: 12px;
+=======
+    margin-bottom: 16px;
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 }
 
 .step-pill {
@@ -1725,15 +1914,24 @@ input:checked + .slider:before {
     align-items: center;
     justify-content: center;
     gap: 5px;
+<<<<<<< HEAD
     padding: 6px 8px;
+=======
+    padding: 6px 4px;
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
     background: rgba(15, 23, 42, 0.8);
     border: 1px solid rgba(148, 163, 184, 0.2);
     border-radius: 6px;
     font-size: 10px;
     font-weight: 700;
     color: var(--text-muted);
+<<<<<<< HEAD
     text-transform: uppercase;
     transition: all 0.3s ease;
+=======
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 }
 
 .step-pill.active {
@@ -1747,6 +1945,10 @@ input:checked + .slider:before {
     background: rgba(0, 245, 155, 0.15);
     border-color: var(--accent-mint);
     color: var(--accent-mint);
+<<<<<<< HEAD
+=======
+    box-shadow: 0 0 10px rgba(0, 245, 155, 0.2);
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 }
 
 .step-pill.failed {
@@ -1766,20 +1968,39 @@ input:checked + .slider:before {
     font-size: 9px;
 }
 
+<<<<<<< HEAD
 .step-pill.completed .step-num,
 .step-pill.active .step-num {
     background: rgba(255, 255, 255, 0.14);
+=======
+.step-pill.completed .step-num {
+    background: var(--accent-mint);
+    color: #040811;
+}
+
+.step-pill.active .step-num {
+    background: var(--accent-cyan);
+    color: #040811;
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 }
 
 /* --- LIQUIDITY DEPTH BAR --- */
 .liquidity-depth-widget {
     background: rgba(15, 23, 42, 0.65);
     border-radius: 8px;
+<<<<<<< HEAD
     border: 1px solid var(--border-subtle);
     background-filter: blur(8px);
 }
 
 /* --- SLIPPAGE PRESETS --- */
+=======
+    border: 1px solid rgba(56, 189, 248, 0.18);
+    backdrop-filter: blur(8px);
+}
+
+/* --- SLIPPAGE PRESET BUTTONS --- */
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
 .slippage-btn.active {
     background: rgba(0, 245, 155, 0.2) !important;
     border-color: var(--accent-mint) !important;
@@ -1787,6 +2008,7 @@ input:checked + .slider:before {
     box-shadow: 0 0 8px rgba(0, 245, 155, 0.3) !important;
 }
 
+<<<<<<< HEAD
 /* --- FIXED CSS OVERFLOW/RESPONSIVE ERRORS --- */
 html, body {
     overflow-x: hidden;
@@ -1821,3 +2043,5 @@ html, body {
         grid-template-columns: 1fr;
     }
 }
+=======
+>>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
