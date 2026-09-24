@@ -1,8 +1,6 @@
-// ============================================================
-// 100% DECENTRALIZED ARBITRAGE TERMINAL JAVASCRIPT
+// =====================================================// 100% DECENTRALIZED ARBITRAGE TERMINAL JAVASCRIPT
 // Uniswap V2 & SushiSwap V2 Web3 Engine Interface
-// ============================================================
-
+// =====================================================
 // Suppress noisy internal browser extension EventEmitter & Tracking Prevention notices
 (function() {
     const filterTerms = [
@@ -151,10 +149,8 @@ function playTerminalSound(type) {
     }
 }
 
-// ============================================================
-// INITIALIZATION
-// ============================================================
-
+// =====================================================// INITIALIZATION
+// =====================================================
 document.addEventListener("DOMContentLoaded", () => {
     initChart();
     initTerminalAudio();
@@ -232,10 +228,8 @@ function startClock() {
     setInterval(updateTime, 1000);
 }
 
-// ============================================================
-// CHART.JS INITIALIZATION
-// ============================================================
-
+// =====================================================// CHART.JS INITIALIZATION
+// =====================================================
 function initChart() {
     const ctx = document.getElementById("liveChart");
     if (!ctx) return;
@@ -346,10 +340,8 @@ function updateChart(prices) {
     liveChart.update("none");
 }
 
-// ============================================================
-// MARKET DATA POLLING & UI UPDATE
-// ============================================================
-
+// =====================================================// MARKET DATA POLLING & UI UPDATE
+// =====================================================
 function startPolling() {
     fetchMarketData();
     setInterval(fetchMarketData, 1000);
@@ -700,10 +692,8 @@ function setText(id, text) {
     if (el) el.innerText = text;
 }
 
-// ============================================================
-// SIMULATION & ATOMIC EXECUTION ACTIONS
-// ============================================================
-
+// =====================================================// SIMULATION & ATOMIC EXECUTION ACTIONS
+// =====================================================
 function updateExecutionPlanForAmount(amount) {
     if (!amount || amount <= 0) return;
     setText("arbAmountIn", `$${Number(amount).toFixed(2)} USDT`);
@@ -1020,10 +1010,8 @@ function closeExecModal() {
     if (modal) modal.style.display = "none";
 }
 
-// ============================================================
-// AUTO TRADE & EMERGENCY STOP
-// ============================================================
-
+// =====================================================// AUTO TRADE & EMERGENCY STOP
+// =====================================================
 async function quickToggleAutoTrade(enabled) {
     try {
         const res = await fetch("/api/settings", {
@@ -1109,10 +1097,8 @@ function updateEmergencyStopUI(isActive) {
     }
 }
 
-// ============================================================
-// SETTINGS
-// ============================================================
-
+// =====================================================// SETTINGS
+// =====================================================
 async function loadSettings() {
     try {
         const res = await fetch("/api/settings");
@@ -1222,10 +1208,8 @@ async function testRpcEndpoint() {
     }
 }
 
-// ============================================================
-// TRADES AUDIT LOG
-// ============================================================
-
+// =====================================================// TRADES AUDIT LOG
+// =====================================================
 let currentTradeFilter = "LIVE";
 
 function setTradeFilter(mode) {
@@ -1351,10 +1335,8 @@ async function clearTradeHistory() {
     }
 }
 
-// ============================================================
-// TOAST NOTIFICATIONS
-// ============================================================
-
+// =====================================================// TOAST NOTIFICATIONS
+// =====================================================
 function showToast(message, type = "info") {
     const container = document.getElementById("toastContainer");
     if (!container) return;
@@ -1406,10 +1388,8 @@ function showToast(message, type = "info") {
     }, 4500);
 }
 
-// ============================================================
-// METAMASK WEB3 WALLET INTEGRATION (EIP-1193 & ETHERS.JS)
-// ============================================================
-
+// =====================================================// METAMASK WEB3 WALLET INTEGRATION (EIP-1193 & ETHERS.JS)
+// =====================================================
 let metamaskAccount = null;
 let metamaskChainId = null;
 let metamaskProvider = null;
@@ -1656,11 +1636,7 @@ const CLIENT_TOKEN_ADDRESSES = {
     },
     11155111: { // Sepolia Testnet
         USDC: { address: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", decimals: 6 },
-<<<<<<< HEAD
-        USDT: { address: "0xaA8E23Fb1079EA71e0a56F48a2aA51851D8433D0", decimals: 6 },
-=======
         USDT: { address: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", decimals: 6 },
->>>>>>> 14c81de (Fix Sepolia Pimlico USDT balance)
         WETH: { address: "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9", decimals: 18 }
     }
 };
@@ -2292,10 +2268,8 @@ function closeMetaMaskModal() {
 
 
 
-// ============================================================
-// ADVANCED FEATURE 2: MULTI-PAIR OPPORTUNITY SCANNER
-// ============================================================
-
+// =====================================================// ADVANCED FEATURE 2: MULTI-PAIR OPPORTUNITY SCANNER
+// =====================================================
 async function fetchMultiPairData() {
     const grid = document.getElementById("multiPairGrid");
     if (!grid) return;
@@ -2376,10 +2350,8 @@ async function quickSwitchPair(pair) {
     }
 }
 
-// ============================================================
-// ADVANCED FEATURE 3: 1-CLICK DIRECT METAMASK ON-CHAIN SWAP
-// ============================================================
-
+// =====================================================// ADVANCED FEATURE 3: 1-CLICK DIRECT METAMASK ON-CHAIN SWAP
+// =====================================================
 function selectSlippagePreset(val, event) {
     if (event) event.stopPropagation();
     document.querySelectorAll(".slippage-btn").forEach(b => b.classList.remove("active"));
@@ -2651,10 +2623,8 @@ async function executeMetaMaskOnChainTrade() {
 }
 
 
-// ============================================================
-// ADVANCED FEATURE 5: AUDIT LOG CSV & JSON EXPORT
-// ============================================================
-
+// =====================================================// ADVANCED FEATURE 5: AUDIT LOG CSV & JSON EXPORT
+// =====================================================
 function exportTradeHistory(format = "csv") {
     showToast(`Preparing ${format.toUpperCase()} export...`, "info");
     const currentFilter = document.querySelector("#tab-trades .btn[style*='background:#dc2626']") ? "LIVE" : "ALL";
