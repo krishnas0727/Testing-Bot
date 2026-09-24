@@ -1905,7 +1905,8 @@ async function preApproveTokens() {
         }
 
         const routerAddress = routers.Uniswap_V2 || Object.values(routers)[0];
-        const tokenContract = new ethers.Contract(tokenObj.address, CLIENT_ERC20_ABI, metamaskSigner);
+        const activeSigner = await getOrRefreshSigner(chainIdNum);
+        const tokenContract = new ethers.Contract(tokenObj.address, CLIENT_ERC20_ABI, activeSigner);
 
         showToast(`Checking allowance for ${tokenObj.symbol || 'USDC'} on DEX Router...`, "info");
         const currentAllowance = await tokenContract.allowance(metamaskAccount, routerAddress);
@@ -1921,7 +1922,7 @@ async function preApproveTokens() {
         await tx.wait(1);
         showToast("Token successfully approved for trading!", "success");
     } catch (err) {
-        if (err.code === "ACTION_REJECTED" || err.code === 4001) {
+        if (err.code === "ACTION_REJECTED" || err.code === 4001 || (err.message && err.message.toLowerCase().includes("rejected"))) {
             showToast("Approval signature rejected in MetaMask.", "warning");
         } else {
             showToast(`Approval error: ${err.message || err}`, "error");
@@ -2291,6 +2292,79 @@ async function disconnectMetaMask(event) {
     }
 }
 
+/**
+ * Obtains and verifies a fresh, transaction-capable ethers.Signer from MetaMask.
+ * Uses BrowserProvider(provider, "any") to handle dynamic network changes.
+ * Throws a descriptive error if the transaction runner is missing or read-only.
+ */
+async function getOrRefreshSigner(requiredChainId = null) {
+    const rawProvider = getMetaMaskProvider();
+    if (!rawProvider) {
+        throw new Error("No Web3 wallet provider detected. Please install or enable MetaMask.");
+    }
+
+    // 1. Verify or prompt account authorization
+    let accounts = [];
+    try {
+        accounts = await rawProvider.request({ method: "eth_accounts" });
+    } catch (e) {
+        accounts = [];
+    }
+
+    if (!accounts || accounts.length === 0) {
+        try {
+            accounts = await rawProvider.request({ method: "eth_requestAccounts" });
+        } catch (reqErr) {
+            if (reqErr.code === 4001 || (reqErr.message && reqErr.message.toLowerCase().includes("rejected"))) {
+                throw new Error("MetaMask account connection was rejected by the user.");
+            }
+            throw reqErr;
+        }
+    }
+
+    if (!accounts || accounts.length === 0) {
+        throw new Error("No authorized accounts in MetaMask. Please connect and unlock your wallet.");
+    }
+
+    metamaskAccount = accounts[0];
+
+    // 2. Network alignment verification
+    const currentChainHex = await rawProvider.request({ method: "eth_chainId" });
+    const currentChainId = parseInt(currentChainHex, 16);
+    metamaskChainId = currentChainHex;
+
+    if (requiredChainId && currentChainId !== Number(requiredChainId)) {
+        throw new Error(`Wallet is connected to Chain ID ${currentChainId}, but active trade requires Chain ID ${requiredChainId}. Please switch network in MetaMask.`);
+    }
+
+    // 3. Ensure ethers library is present
+    if (typeof ethers === "undefined") {
+        throw new Error("ethers.js library is not available in the browser window.");
+    }
+
+    // 4. Construct fresh BrowserProvider with 'any' network to handle dynamic network changes
+    if (ethers.BrowserProvider) {
+        metamaskProvider = new ethers.BrowserProvider(rawProvider, "any");
+        metamaskSigner = await metamaskProvider.getSigner(metamaskAccount);
+    } else if (ethers.providers && ethers.providers.Web3Provider) {
+        metamaskProvider = new ethers.providers.Web3Provider(rawProvider, "any");
+        metamaskSigner = metamaskProvider.getSigner(metamaskAccount);
+    } else {
+        throw new Error("Incompatible ethers.js version: BrowserProvider and Web3Provider missing.");
+    }
+
+    // 5. Strict Transaction Runner Capability Check
+    if (!metamaskSigner) {
+        throw new Error("Failed to obtain transaction signer from MetaMask provider.");
+    }
+
+    if (typeof metamaskSigner.sendTransaction !== "function") {
+        throw new Error("contract runner does not support sending transactions: obtained runner is read-only. Please reconnect MetaMask.");
+    }
+
+    return metamaskSigner;
+}
+
 async function initEthersProviderAndSigner() {
     const provider = getMetaMaskProvider();
     if (!provider) return;
@@ -2298,10 +2372,18 @@ async function initEthersProviderAndSigner() {
     try {
         if (typeof ethers !== "undefined") {
             if (ethers.BrowserProvider) {
-                metamaskProvider = new ethers.BrowserProvider(provider);
-                metamaskSigner = await metamaskProvider.getSigner();
+                metamaskProvider = new ethers.BrowserProvider(provider, "any");
+                if (metamaskAccount) {
+                    metamaskSigner = await metamaskProvider.getSigner(metamaskAccount);
+                } else {
+                    const accounts = await provider.request({ method: "eth_accounts" });
+                    if (accounts && accounts.length > 0) {
+                        metamaskAccount = accounts[0];
+                        metamaskSigner = await metamaskProvider.getSigner(metamaskAccount);
+                    }
+                }
             } else if (ethers.providers && ethers.providers.Web3Provider) {
-                metamaskProvider = new ethers.providers.Web3Provider(provider);
+                metamaskProvider = new ethers.providers.Web3Provider(provider, "any");
                 metamaskSigner = metamaskProvider.getSigner();
             }
             await initContractInstance();
@@ -2333,9 +2415,11 @@ async function initContractInstance(forceReload = false) {
                 console.log(`[Contract Read on Chain ${currentContractChainId}]: isPaused =`, paused);
             } catch (e) {}
 
-            // Signer contract for on-chain execution
-            if (metamaskSigner) {
+            // Signer contract for on-chain execution ONLY if signer is transaction-capable
+            if (metamaskSigner && typeof metamaskSigner.sendTransaction === "function") {
                 dexArbitrageContract = new ethers.Contract(dexContractAddress, dexContractABI, metamaskSigner);
+            } else {
+                dexArbitrageContract = null;
             }
         }
     } catch (e) {
@@ -2734,8 +2818,10 @@ async function executeMetaMaskOnChainTrade() {
     showExecModal("MetaMask Direct On-Chain Execution", `Checking wallet balances on ${targetChainInfo.name}...`, 1);
 
     try {
-        if (!metamaskSigner) {
-            await initEthersProviderAndSigner();
+        // Obtain and verify fresh, transaction-capable wallet signer for target chain
+        const activeSigner = await getOrRefreshSigner(targetChainId);
+        if (!activeSigner || typeof activeSigner.sendTransaction !== "function") {
+            throw new Error("contract runner does not support sending transactions: active signer lacks sendTransaction.");
         }
 
         // Native gas coin balance check (ETH / SepoliaETH / POL >= 0.0001)
@@ -2874,7 +2960,7 @@ async function executeMetaMaskOnChainTrade() {
 
         // Step 2: Verify and request ERC-20 token approval
         showExecModal("Verifying Token Allowance", `Checking ${tokenSymbol} allowance for ${routerName}...`, 2);
-        const tokenContract = new ethers.Contract(tokenInMeta.address, CLIENT_ERC20_ABI, metamaskSigner);
+        const tokenContract = new ethers.Contract(tokenInMeta.address, CLIENT_ERC20_ABI, activeSigner);
         const currentAllowance = await tokenContract.allowance(metamaskAccount, routerAddress);
 
         if (currentAllowance < parsedAmountIn) {
@@ -2891,7 +2977,11 @@ async function executeMetaMaskOnChainTrade() {
         showExecModal("Executing DEX Swap", `Submitting trade of $${tradeAmt.toFixed(4)} ${tokenSymbol} on ${routerName}... Confirm in MetaMask.`, 3);
         showToast("Please confirm Swap transaction in MetaMask...", "info");
 
-        const routerContract = new ethers.Contract(routerAddress, CLIENT_ROUTER_V2_ABI, metamaskSigner);
+        // Swap contract instance MUST use the transaction-capable activeSigner runner
+        const routerContract = new ethers.Contract(routerAddress, CLIENT_ROUTER_V2_ABI, activeSigner);
+        if (!routerContract.runner || typeof routerContract.runner.sendTransaction !== "function") {
+            throw new Error("Router contract runner does not support sending transactions. Wallet transaction aborted.");
+        }
         const deadline = Math.floor(Date.now() / 1000) + 1200; // 20 min
         const path = [tokenInMeta.address, tokenOutMeta.address];
 
@@ -2986,10 +3076,14 @@ async function executeMetaMaskOnChainTrade() {
         let userMsg = err?.message || String(err);
         let errStatus = "TRANSACTION_FAILED";
 
-        if (err.code === "ACTION_REJECTED" || err.code === 4001 || (err.message && err.message.toLowerCase().includes("user rejected"))) {
+        if (err.code === "ACTION_REJECTED" || err.code === 4001 || (err.message && err.message.toLowerCase().includes("user rejected")) || (err.message && err.message.toLowerCase().includes("rejected"))) {
             showToast("Transaction signature rejected by user in MetaMask.", "warning");
             closeExecModal();
             return;
+        } else if (err.code === "UNSUPPORTED_OPERATION" || (err.message && err.message.includes("contract runner does not support sending transactions"))) {
+            errStatus = "TRANSACTION_RUNNER_ERROR";
+            userMsg = "Transaction Runner Error: Wallet signer is not available or disconnected. Please reconnect MetaMask and try again.";
+            showToast(userMsg, "error");
         } else if (err.code === "INSUFFICIENT_FUNDS" || (err.message && err.message.toLowerCase().includes("insufficient funds"))) {
             errStatus = "INSUFFICIENT_FUNDS";
             userMsg = "Your connected wallet does not have enough native ETH to cover the blockchain network gas fee.";
