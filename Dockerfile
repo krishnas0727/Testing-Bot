@@ -19,5 +19,5 @@ COPY . /app/
 # Expose container port
 EXPOSE 80
 
-# Run Flask application using Gunicorn on Port 80
-CMD ["gunicorn", "--bind", "0.0.0.0:80", "--workers", "1", "--threads", "4", "app:app"]
+# Run Flask application using Gunicorn dynamically bound to $PORT
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-80} --workers 1 --threads 4 app:app"]
