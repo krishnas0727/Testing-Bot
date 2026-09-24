@@ -31,6 +31,28 @@
     };
 })();
 
+// Safe localStorage wrapper — prevents "safeStorage before initialization" errors
+// in browsers with strict privacy settings or MetaMask sandboxing
+const safeStorage = (function() {
+    try {
+        localStorage.setItem("__test__", "1");
+        localStorage.removeItem("__test__");
+        return {
+            getItem: (k) => { try { return localStorage.getItem(k); } catch(e) { return null; } },
+            setItem: (k, v) => { try { localStorage.setItem(k, v); } catch(e) {} },
+            removeItem: (k) => { try { localStorage.removeItem(k); } catch(e) {} }
+        };
+    } catch(e) {
+        // Fallback in-memory store for private/incognito/MetaMask sandboxed contexts
+        const mem = {};
+        return {
+            getItem: (k) => mem[k] !== undefined ? mem[k] : null,
+            setItem: (k, v) => { mem[k] = String(v); },
+            removeItem: (k) => { delete mem[k]; }
+        };
+    }
+})();
+
 let currentTab = "dashboard";
 let selectedTradeAmount = 5;
 let latestMarketData = null;
@@ -39,6 +61,7 @@ let priceSnapshots = [];
 const MAX_SNAPSHOTS = 30;
 let currentSelectedChainId = parseInt(safeStorage.getItem("userSelectedChainId") || "8453", 10);
 if (isNaN(currentSelectedChainId) || !currentSelectedChainId) currentSelectedChainId = 8453;
+
 
 // Web Audio API State & Synthesizer
 let terminalAudioCtx = null;
