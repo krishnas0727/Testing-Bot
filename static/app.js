@@ -157,8 +157,8 @@ const SUPPORTED_CHAINS = {
         hex: "0xaa36a7",
         rpcUrls: ["https://ethereum-sepolia-rpc.publicnode.com", "https://rpc.sepolia.org"],
         nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
-        defaultPair: "WETH/USDT",
-        pairs: ["WETH/USDT", "WETH/USDC"]
+        defaultPair: "WETH/USDC",
+        pairs: ["WETH/USDC", "WETH/USDT"]
     }
 };
 
@@ -226,6 +226,37 @@ const CLIENT_ROUTER_ADDRESSES = {
         SushiSwap_V2: "0x1662C4Ca803B6d5d42C85d552318b7625038923d"
     }
 };
+
+const CLIENT_FACTORY_ADDRESSES = {
+    8453: {
+        Uniswap_V2: "0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6",
+        SushiSwap_V2: "0x71524b4f93c58fcbf659783284e38825f0622859"
+    },
+    1: {
+        Uniswap_V2: "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
+        SushiSwap_V2: "0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac"
+    },
+    42161: {
+        Uniswap_V2: "0xf1D7CC64Fb4452F05c498126312eBE29f30Fbcf9",
+        SushiSwap_V2: "0xc35DADB65012eC5796536bD9864eD8773aBc74C4"
+    },
+    137: {
+        Uniswap_V2: "0x5757371414417b8C6CAad45bAeF941aBc7d3Ab32",
+        SushiSwap_V2: "0xc35DADB65012eC5796536bD9864eD8773aBc74C4"
+    },
+    11155111: {
+        Uniswap_V2: "0x7E0987E5b3a30e3f2828572Bb659A548460a3003",
+        SushiSwap_V2: "0x734583F62bB6acE3c9bA9Bd5a53143CA2CE8c55a"
+    },
+    84532: {
+        Uniswap_V2: "0xF62c03E08ada871A0bEb309762E260a7a6a880E6",
+        SushiSwap_V2: "0xF62c03E08ada871A0bEb309762E260a7a6a880E6"
+    }
+};
+
+const CLIENT_FACTORY_V2_ABI = [
+    "function getPair(address tokenA, address tokenB) external view returns (address pair)"
+];
 
 let currentTab = "dashboard";
 let selectedTradeAmount = 5;
@@ -3234,14 +3265,29 @@ async function executeMetaMaskOnChainTrade() {
                 tokenSymbol = "USDC";
             }
         } else if (targetChainId === 11155111) {
-            // Sepolia: Strictly prioritize Pimlico test USDT (0xd077A400968890Eacc75cdc901F0356c943e4fDb, decimals: 6)
-            tokenInMeta = tokens.USDT;
-            availStable = Number(clientWalletBalances.usdt || 0);
-            tokenSymbol = "USDT";
-            if (availStable <= 0 && (clientWalletBalances.usdc || 0) > 0 && tokens.USDC) {
+            // Sepolia: Select stable token from active trading symbol or wallet balances
+            const activePair = latestMarketData?.symbol || "WETH/USDC";
+            const quoteSymbol = activePair.split("/")[1] || "USDC";
+            if (quoteSymbol === "USDC" && tokens.USDC) {
                 tokenInMeta = tokens.USDC;
-                availStable = clientWalletBalances.usdc;
+                availStable = Number(clientWalletBalances.usdc || 0);
                 tokenSymbol = "USDC";
+            } else if (quoteSymbol === "USDT" && tokens.USDT) {
+                tokenInMeta = tokens.USDT;
+                availStable = Number(clientWalletBalances.usdt || 0);
+                tokenSymbol = "USDT";
+            } else if ((clientWalletBalances.usdc || 0) > 0 && tokens.USDC) {
+                tokenInMeta = tokens.USDC;
+                availStable = Number(clientWalletBalances.usdc || 0);
+                tokenSymbol = "USDC";
+            } else if ((clientWalletBalances.usdt || 0) > 0 && tokens.USDT) {
+                tokenInMeta = tokens.USDT;
+                availStable = Number(clientWalletBalances.usdt || 0);
+                tokenSymbol = "USDT";
+            } else {
+                tokenInMeta = tokens.USDC || tokens.USDT;
+                availStable = Number(clientWalletBalances.usdc || 0) + Number(clientWalletBalances.usdt || 0);
+                tokenSymbol = tokenInMeta === tokens.USDC ? "USDC" : "USDT";
             }
         } else {
             if ((clientWalletBalances.usdt || 0) > 0 && tokens.USDT) {
@@ -3330,7 +3376,30 @@ async function executeMetaMaskOnChainTrade() {
             return;
         }
 
-        // Step 2: Query DEX Router for fresh on-chain quote
+        // Step 2: Check pair existence and query DEX Router for fresh on-chain quote
+        const factories = CLIENT_FACTORY_ADDRESSES[targetChainId] || {};
+        const factoryAddress = factories[routerName] || Object.values(factories)[0];
+        if (factoryAddress) {
+            try {
+                const factoryContract = new ethers.Contract(factoryAddress, CLIENT_FACTORY_V2_ABI, activeSigner);
+                const pairAddr = await factoryContract.getPair(tokenInMeta.address, tokenOutMeta.address);
+                if (!pairAddr || pairAddr === "0x0000000000000000000000000000000000000000" || parseInt(pairAddr, 16) === 0) {
+                    const advice = (targetChainId === 11155111 && tokenSymbol !== "USDC") 
+                        ? ` On Sepolia testnet, the liquid DEX pool is WETH/USDC. Please switch trading pair to WETH/USDC.` 
+                        : "";
+                    renderExecutionResult({
+                        success: false,
+                        status: "PAIR_NOT_FOUND",
+                        message: `No liquidity pool found on ${routerName} for ${tokenSymbol}/WETH.${advice} Transaction was NOT sent to protect capital.`
+                    });
+                    showToast(`No pool for ${tokenSymbol}/WETH on ${routerName}.${advice}`, "error");
+                    return;
+                }
+            } catch (factErr) {
+                console.warn("[MetaMask Trade] Factory pair check warning:", factErr);
+            }
+        }
+
         const routerContract = new ethers.Contract(routerAddress, CLIENT_ROUTER_V2_ABI, activeSigner);
         if (!routerContract.runner || typeof routerContract.runner.sendTransaction !== "function") {
             throw new Error("Router contract runner does not support sending transactions. Wallet transaction aborted.");
@@ -3350,8 +3419,11 @@ async function executeMetaMaskOnChainTrade() {
             console.error("[MetaMask Trade] Quote query error:", quoteErr);
             const rawMsg = quoteErr.reason || quoteErr.data?.message || quoteErr.shortMessage || quoteErr.message || "Execution reverted during quote query";
             let friendlyMsg = rawMsg;
-            if (rawMsg.includes("INSUFFICIENT_LIQUIDITY") || rawMsg.includes("execution reverted")) {
-                friendlyMsg = `No active liquidity pool found for ${tokenSymbol}/WETH on ${routerName}.`;
+            if (rawMsg.includes("INSUFFICIENT_LIQUIDITY") || rawMsg.includes("execution reverted") || rawMsg.includes("missing revert data")) {
+                friendlyMsg = `No active liquidity in pool for ${tokenSymbol}/WETH on ${routerName}.`;
+                if (targetChainId === 11155111 && tokenSymbol !== "USDC") {
+                    friendlyMsg += ` (On Sepolia testnet, please select WETH/USDC for active DEX liquidity).`;
+                }
             }
             renderExecutionResult({
                 success: false,

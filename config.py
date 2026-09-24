@@ -255,8 +255,8 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
             "USDT": {"address": "0xd077A400968890Eacc75cdc901F0356c943e4fDb", "decimals": 6, "symbol": "USDT"},
             "USDC": {"address": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", "decimals": 6, "symbol": "USDC"},
         },
-        "pairs": ["WETH/USDT", "WETH/USDC"],
-        "default_symbol": "WETH/USDT",
+        "pairs": ["WETH/USDC", "WETH/USDT"],
+        "default_symbol": "WETH/USDC",
         "arbitrage_contract": os.getenv("SEPOLIA_ARBITRAGE_CONTRACT", os.getenv("ARBITRAGE_CONTRACT_ADDRESS", ""))
     },
     84532: {
@@ -321,10 +321,7 @@ def set_active_chain(chain_id: int) -> Dict[str, Any]:
     TOKEN_REGISTRY = _active_chain_info["tokens"]
     ARBITRAGE_CONTRACT_ADDRESS = os.getenv("ARBITRAGE_CONTRACT_ADDRESS") or _active_chain_info.get("arbitrage_contract", "")
     SUPPORTED_DEXES = list(_active_chain_info.get("dexes", ["Uniswap_V2", "SushiSwap_V2"]))
-    if chain_id in (8453, 84532):
-        SYMBOL = "WETH/USDC"
-    else:
-        SYMBOL = "WETH/USDT"
+    SYMBOL = _active_chain_info.get("default_symbol", "WETH/USDC" if chain_id in (8453, 84532, 11155111) else "WETH/USDT")
 
     # Invalidate decimals and gas cache
     try:
@@ -345,7 +342,7 @@ def is_chain_testnet(chain_id: Optional[int] = None) -> bool:
 
 
 # Default trading pair
-SYMBOL = os.getenv("TRADING_SYMBOL", "WETH/USDC" if CHAIN_ID == 8453 else "WETH/USDT")
+SYMBOL = os.getenv("TRADING_SYMBOL", _active_chain_info.get("default_symbol", "WETH/USDC"))
 
 
 # ============================================================

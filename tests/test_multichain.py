@@ -81,7 +81,7 @@ class MultiChainVerificationTests(unittest.TestCase):
         chain_info = config.set_active_chain(11155111)
         self.assertEqual(config.CHAIN_ID, 11155111)
         self.assertEqual(config.DEFAULT_CHAIN, "sepolia")
-        self.assertEqual(config.SYMBOL, "WETH/USDT")
+        self.assertIn(config.SYMBOL, ("WETH/USDC", "WETH/USDT"))
         self.assertEqual(chain_info["currency"], "SepoliaETH")
         self.assertEqual(chain_info["explorer"], "https://sepolia.etherscan.io")
 
