@@ -7,6 +7,7 @@ WORKDIR /app
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PIP_ROOT_USER_ACTION=ignore \
     PORT=80
 
 # Install dependencies
