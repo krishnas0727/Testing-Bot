@@ -2438,7 +2438,8 @@ input:checked + .slider:before {
     box-shadow: 0 0 8px rgba(0, 245, 155, 0.3) !important;
 }
 
-/* --- FIXED CSS OVERFLOW/RESPONSIVE ERRORS --- */
+
+1/* --- FIXED CSS OVERFLOW/RESPONSIVE ERRORS --- */
 html, body {
     overflow-x: hidden;
 }
