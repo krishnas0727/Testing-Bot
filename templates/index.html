@@ -104,6 +104,7 @@
                 <span class="toggle-label">Chain</span>
                 <select id="headerChainSelect" class="chain-dropdown" onchange="quickSwitchChain(this.value)" style="background:#0f172a; color:#38bdf8; border:1px solid #0284c7; border-radius:6px; font-weight:700; font-size:11px; padding:3px 8px; cursor:pointer; outline:none; box-shadow:0 0 10px rgba(56, 189, 248, 0.2); width:134px; min-width:134px; max-width:134px; box-sizing:border-box;">
                     <option value="8453" selected>🔵 Base L2</option>
+                    <option value="84532">🔵 Base Sepolia</option>
                     <option value="42161">Arbitrum One</option>
                     <option value="137">Polygon PoS</option>
                     <option value="1">Ethereum</option>
@@ -224,6 +225,13 @@
                                 <span>SepoliaETH</span>
                             </span>
                             <span id="menuBadgeSepolia" class="dropdown-net-status">SWITCH</span>
+                        </button>
+                        <button type="button" id="menuNetCardBaseSepolia" class="dropdown-net-card" onclick="selectNetwork(84532, event)">
+                            <span class="dropdown-net-left">
+                                <span style="font-size:14px;">🔵</span>
+                                <span>Base Sepolia</span>
+                            </span>
+                            <span id="menuBadgeBaseSepolia" class="dropdown-net-status">SWITCH</span>
                         </button>
                     </div>
                     <div class="wallet-menu-actions">
@@ -450,6 +458,26 @@
                         </div>
                         <div class="net-card-right">
                             <span id="badgeNetSepolia" class="net-status-badge">SELECT</span>
+                            <span class="net-arrow">&rarr;</span>
+                        </div>
+                    </button>
+
+                    <!-- 6. BASE SEPOLIA TESTNET NETWORK CARD -->
+                    <button type="button" id="netCardBaseSepolia" class="network-card" onclick="selectNetwork(84532, event)">
+                        <div class="net-card-left">
+                            <div class="net-icon net-icon-base">
+                                <svg viewBox="0 0 32 32" width="22" height="22">
+                                    <circle cx="16" cy="16" r="14" fill="#0052FF" />
+                                    <path d="M16 7C11.03 7 7 11.03 7 16C7 20.97 11.03 25 16 25C20.5 25 24.2 21.68 24.9 17.3H16V14.7H25C24.4 10.4 20.6 7 16 7Z" fill="#FFFFFF"/>
+                                </svg>
+                            </div>
+                            <div class="net-info">
+                                <div class="net-name">Base Sepolia</div>
+                                <div class="net-chain-id">Chain ID: <span>84532</span> <span class="net-meta-sep">•</span> <span class="net-fee-pill">Testnet (Free)</span></div>
+                            </div>
+                        </div>
+                        <div class="net-card-right">
+                            <span id="badgeNetBaseSepolia" class="net-status-badge">SELECT</span>
                             <span class="net-arrow">&rarr;</span>
                         </div>
                     </button>
@@ -1060,9 +1088,28 @@
                                         <span class="net-arrow">&rarr;</span>
                                     </div>
                                 </button>
+                                <button type="button" id="settingsNetCardBaseSepolia" class="network-card" onclick="selectNetwork(84532, event)" style="width:100%; min-width:0; max-width:100%;">
+                                    <div class="net-card-left">
+                                        <div class="net-icon net-icon-base">
+                                            <svg viewBox="0 0 32 32" width="22" height="22">
+                                                <circle cx="16" cy="16" r="14" fill="#0052FF" />
+                                                <path d="M16 7C11.03 7 7 11.03 7 16C7 20.97 11.03 25 16 25C20.5 25 24.2 21.68 24.9 17.3H16V14.7H25C24.4 10.4 20.6 7 16 7Z" fill="#FFFFFF"/>
+                                            </svg>
+                                        </div>
+                                        <div class="net-info">
+                                            <div class="net-name">Base Sepolia</div>
+                                            <div class="net-chain-id">Chain ID: <span>84532</span> • <span class="net-fee-pill">Testnet (Free)</span></div>
+                                        </div>
+                                    </div>
+                                    <div class="net-card-right">
+                                        <span id="settingsBadgeNetBaseSepolia" class="net-status-badge">SELECT</span>
+                                        <span class="net-arrow">&rarr;</span>
+                                    </div>
+                                </button>
                             </div>
                             <select id="cfgChainId" class="form-control" onchange="quickSwitchChain(this.value)">
                                 <option value="8453">Base L2 Mainnet (Sub-Cent Fees ~$0.004 - 95%+ Profit Retention)</option>
+                                <option value="84532">Base Sepolia Testnet (ETH)</option>
                                 <option value="42161">Arbitrum One</option>
                                 <option value="137">Polygon PoS</option>
                                 <option value="1">Ethereum Mainnet</option>

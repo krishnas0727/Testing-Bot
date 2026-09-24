@@ -317,6 +317,23 @@ def index_page():
 @app.route("/api/market", methods=["GET"])
 def market_api():
     try:
+        # Synchronize client passed address and chain_id across all workers before analyzing market
+        client_addr = (request.args.get("address") or "").strip()
+        client_chain_id = request.args.get("chain_id")
+        if client_chain_id:
+            try:
+                cid = int(client_chain_id)
+                if cid in config.CHAIN_REGISTRY and cid != config.CHAIN_ID:
+                    config.set_active_chain(cid)
+                    save_bot_setting("chain_id", cid)
+            except (ValueError, TypeError):
+                pass
+
+        if client_addr and client_addr.startswith("0x") and len(client_addr) == 42:
+            if config.WALLET_ADDRESS != client_addr:
+                config.WALLET_ADDRESS = client_addr
+                save_bot_setting("wallet_address", client_addr)
+
         custom_amount = request.args.get("amount") or request.args.get("trade_amount")
         parsed_amount = None
         if custom_amount:
@@ -333,23 +350,6 @@ def market_api():
             }), 503
 
         market["timestamp"] = time.time() * 1000
-
-        # Synchronize client passed address and chain_id across all workers
-        client_addr = (request.args.get("address") or "").strip()
-        client_chain_id = request.args.get("chain_id")
-        if client_chain_id:
-            try:
-                cid = int(client_chain_id)
-                if cid in config.CHAIN_REGISTRY and cid != config.CHAIN_ID:
-                    config.set_active_chain(cid)
-                    save_bot_setting("chain_id", cid)
-            except (ValueError, TypeError):
-                pass
-
-        if client_addr and client_addr.startswith("0x") and len(client_addr) == 42:
-            if config.WALLET_ADDRESS != client_addr:
-                config.WALLET_ADDRESS = client_addr
-                save_bot_setting("wallet_address", client_addr)
 
         # Calculate live wallet equity
         prices = market.get("prices", {})

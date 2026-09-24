@@ -1647,6 +1647,14 @@ const SUPPORTED_CHAINS = {
         rpcUrls: ["https://ethereum-sepolia-rpc.publicnode.com", "https://rpc.sepolia.org"],
         nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 }
     },
+    84532: {
+        name: "Base Sepolia Testnet",
+        short: "Base Sepolia",
+        explorer: "https://sepolia.basescan.org",
+        hex: "0x14a34",
+        rpcUrls: ["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"],
+        nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 }
+    },
 };
 
 function updateNetworkCardsVisual(activeChainId) {
@@ -1654,6 +1662,7 @@ function updateNetworkCardsVisual(activeChainId) {
 
     const chainMap = [
         { id: 8453, cardId: "netCardBase", badgeId: "badgeNetBase", setCardId: "settingsNetCardBase", setBadgeId: "settingsBadgeNetBase", menuCardId: "menuNetCardBase", menuBadgeId: "menuBadgeBase" },
+        { id: 84532, cardId: "netCardBaseSepolia", badgeId: "badgeNetBaseSepolia", setCardId: "settingsNetCardBaseSepolia", setBadgeId: "settingsBadgeNetBaseSepolia", menuCardId: "menuNetCardBaseSepolia", menuBadgeId: "menuBadgeBaseSepolia" },
         { id: 137, cardId: "netCardPolygon", badgeId: "badgeNetPolygon", setCardId: "settingsNetCardPolygon", setBadgeId: "settingsBadgeNetPolygon", menuCardId: "menuNetCardPolygon", menuBadgeId: "menuBadgePolygon" },
         { id: 42161, cardId: "netCardArbitrum", badgeId: "badgeNetArbitrum", setCardId: "settingsNetCardArbitrum", setBadgeId: "settingsBadgeNetArbitrum", menuCardId: "menuNetCardArbitrum", menuBadgeId: "menuBadgeArbitrum" },
         { id: 1, cardId: "netCardEthereum", badgeId: "badgeNetEthereum", setCardId: "settingsNetCardEthereum", setBadgeId: "settingsBadgeNetEthereum", menuCardId: "menuNetCardEthereum", menuBadgeId: "menuBadgeEthereum" },
@@ -1809,6 +1818,11 @@ const CLIENT_TOKEN_ADDRESSES = {
         USDC: { address: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", decimals: 6 },
         USDT: { address: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", decimals: 6 },
         WETH: { address: "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9", decimals: 18 }
+    },
+    84532: { // Base Sepolia Testnet
+        USDC: { address: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", decimals: 6 },
+        USDT: { address: "0x0a1e4ff477ff2099307c87c06eb73cbeec0678eb", decimals: 6 },
+        WETH: { address: "0x4200000000000000000000000000000000000006", decimals: 18 }
     }
 };
 
@@ -1831,6 +1845,10 @@ const CLIENT_ROUTER_ADDRESSES = {
     },
     11155111: { // Sepolia Testnet
         Uniswap_V2: "0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008"
+    },
+    84532: { // Base Sepolia Testnet
+        Uniswap_V2: "0x1662C4Ca803B6d5d42C85d552318b7625038923d",
+        SushiSwap_V2: "0x1662C4Ca803B6d5d42C85d552318b7625038923d"
     }
 };
 
@@ -1868,11 +1886,15 @@ async function preApproveTokens() {
 
         const chainIdHex = metamaskChainId || (await provider.request({ method: "eth_chainId" }));
         const chainIdNum = parseInt(chainIdHex, 16);
-        const tokens = CLIENT_TOKEN_ADDRESSES[chainIdNum] || CLIENT_TOKEN_ADDRESSES[8453];
-        const routers = CLIENT_ROUTER_ADDRESSES[chainIdNum] || CLIENT_ROUTER_ADDRESSES[8453];
+        if (!SUPPORTED_CHAINS[chainIdNum]) {
+            showToast(`Current network (Chain ID: ${chainIdNum}) is not supported. Please switch to a supported network.`, "error");
+            return;
+        }
+        const tokens = CLIENT_TOKEN_ADDRESSES[chainIdNum];
+        const routers = CLIENT_ROUTER_ADDRESSES[chainIdNum];
 
         if (!tokens || !routers) {
-            showToast("No router or token definitions found for current network.", "error");
+            showToast(`No router or token definitions found for Chain ID ${chainIdNum}.`, "error");
             return;
         }
 
@@ -2096,6 +2118,38 @@ async function connectMetaMask() {
     }
 }
 
+function handleUnsupportedChain(chainId) {
+    console.warn(`[Unsupported Network]: Connected to chain ID ${chainId}`);
+    const supportedList = Object.entries(SUPPORTED_CHAINS).map(([id, info]) => `${info.short} (${id})`).join(", ");
+    showToast(`⚠️ Unsupported Network (Chain ID: ${chainId}). Supported networks: ${supportedList}`, "error");
+
+    // Clear network cards active highlight since current connected network is not supported
+    document.querySelectorAll(".network-card, .dropdown-net-card").forEach(el => el.classList.remove("active"));
+    document.querySelectorAll(".net-status-badge").forEach(el => {
+        el.innerText = "SELECT";
+        el.classList.remove("badge-active");
+    });
+
+    // Update wallet badges to alert user
+    const dot = document.getElementById("walletNetworkIndicator");
+    if (dot) {
+        dot.className = "network-dot dot-red";
+        dot.title = `Unsupported Network! Connected to Chain ID ${chainId}. Please switch to a supported network.`;
+    }
+    const netText = document.getElementById("menuNetworkText");
+    if (netText) netText.innerText = `Unsupported (ID: ${chainId})`;
+    const netDot = document.getElementById("menuNetworkDot");
+    if (netDot) netDot.className = "network-dot dot-red";
+    const netBadge = document.getElementById("menuNetworkBadge");
+    if (netBadge) netBadge.className = "network-name-badge wrong-network";
+    const portBadge = document.getElementById("walletAddressBadge");
+    if (portBadge && metamaskAccount) {
+        const shortAddr = metamaskAccount.slice(0, 6) + "..." + metamaskAccount.slice(-4);
+        portBadge.innerText = `${shortAddr} (Unsupported Chain: ${chainId})`;
+        portBadge.className = "badge badge-red";
+    }
+}
+
 async function handleAccountsChanged(accounts, notifyUser = true) {
     if (!accounts || accounts.length === 0) {
         disconnectMetaMask();
@@ -2112,10 +2166,33 @@ async function handleAccountsChanged(accounts, notifyUser = true) {
         metamaskChainId = null;
     }
 
-    const activeCid = metamaskChainId ? parseInt(metamaskChainId, 16) : 8453;
+    let activeCid = metamaskChainId ? parseInt(metamaskChainId, 16) : currentSelectedChainId;
+
+    // Auto-detect MetaMask chain and switch bot configuration if supported
+    if (metamaskChainId) {
+        const mmCid = parseInt(metamaskChainId, 16);
+        if (SUPPORTED_CHAINS[mmCid]) {
+            activeCid = mmCid;
+            currentSelectedChainId = mmCid;
+            safeStorage.setItem("userSelectedChainId", mmCid);
+            updateNetworkCardsVisual(mmCid);
+            try {
+                await fetch("/api/chain/switch", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ chain_id: mmCid })
+                });
+            } catch (err) {
+                console.warn("[MetaMask auto-switch error]:", err);
+            }
+        } else {
+            handleUnsupportedChain(mmCid);
+        }
+    }
 
     // Setup ethers Provider & Signer architecture
     await initEthersProviderAndSigner();
+    await initContractInstance(true);
 
     // Update UI elements immediately
     updateWalletUIConnected(metamaskAccount, metamaskChainId);
@@ -2139,7 +2216,8 @@ async function handleAccountsChanged(accounts, notifyUser = true) {
         if (data.success) {
             if (notifyUser) {
                 const short = metamaskAccount.slice(0, 6) + "..." + metamaskAccount.slice(-4);
-                showToast(`MetaMask Connected: ${short}`, "success");
+                const chainName = SUPPORTED_CHAINS[activeCid]?.short || `Chain ${activeCid}`;
+                showToast(`MetaMask Connected: ${short} on ${chainName}`, "success");
             }
             fetchMarketData();
         }
@@ -2157,24 +2235,33 @@ async function handleChainChanged(chainIdHex) {
     // Preserve metamaskAccount! Network switching must not lose wallet connection
     if (metamaskAccount) {
         updateWalletUIConnected(metamaskAccount, chainIdHex);
-        if (typeof fetchClientWalletBalances === "function") {
-            fetchClientWalletBalances(metamaskAccount, newChainId);
-        }
     }
 
     // Synchronize network cards and backend config if chain is supported
     if (SUPPORTED_CHAINS[newChainId]) {
+        currentSelectedChainId = newChainId;
+        safeStorage.setItem("userSelectedChainId", newChainId);
         updateNetworkCardsVisual(newChainId);
         try {
-            await fetch("/api/chain/switch", {
+            const res = await fetch("/api/chain/switch", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ chain_id: newChainId })
             });
+            const data = await res.json();
+            if (data.success) {
+                showToast(`Switched bot to ${SUPPORTED_CHAINS[newChainId].name}`, "info");
+            }
         } catch (e) {
             console.warn("[Chain sync to backend error]:", e);
         }
+        await initContractInstance(true);
+        if (metamaskAccount && typeof fetchClientWalletBalances === "function") {
+            fetchClientWalletBalances(metamaskAccount, newChainId);
+        }
         fetchMarketData();
+    } else {
+        handleUnsupportedChain(newChainId);
     }
 }
 
@@ -2224,15 +2311,18 @@ async function initEthersProviderAndSigner() {
     }
 }
 
-async function initContractInstance() {
+let currentContractChainId = null;
+
+async function initContractInstance(forceReload = false) {
     if (!metamaskProvider) return;
     try {
-        if (!dexContractABI || !dexContractAddress) {
+        if (forceReload || !dexContractABI || !dexContractAddress || currentContractChainId !== currentSelectedChainId) {
             const res = await fetch("/api/contract");
             const data = await res.json();
             if (data.success) {
                 dexContractAddress = data.contract_address;
                 dexContractABI = data.abi;
+                currentContractChainId = data.chain_id;
             }
         }
         if (dexContractAddress && dexContractABI && typeof ethers !== "undefined") {
@@ -2240,7 +2330,7 @@ async function initContractInstance() {
             const readContract = new ethers.Contract(dexContractAddress, dexContractABI, metamaskProvider);
             try {
                 const paused = await readContract.isPaused();
-                console.log("[Contract Read]: isPaused =", paused);
+                console.log(`[Contract Read on Chain ${currentContractChainId}]: isPaused =`, paused);
             } catch (e) {}
 
             // Signer contract for on-chain execution
@@ -2258,7 +2348,8 @@ function updateWalletUIConnected(address, chainIdHex) {
     const shortAddr = address.slice(0, 6) + "..." + address.slice(-4);
     const targetChainId = currentSelectedChainId;
     const currentChainId = chainIdHex ? parseInt(chainIdHex, 16) : targetChainId;
-    const isCorrectChain = (currentChainId === targetChainId);
+    const isSupported = Boolean(SUPPORTED_CHAINS[currentChainId]);
+    const isCorrectChain = isSupported && (currentChainId === targetChainId);
 
     // Header buttons
     const btnConnect = document.getElementById("btnConnectWallet");
@@ -2272,11 +2363,11 @@ function updateWalletUIConnected(address, chainIdHex) {
 
     // Network status styling
     const targetChainInfo = SUPPORTED_CHAINS[targetChainId] || { name: `Chain ${targetChainId}`, short: `Chain ${targetChainId}`, explorer: "https://etherscan.io" };
-    const currentChainInfo = SUPPORTED_CHAINS[currentChainId] || { name: `Chain ${currentChainId}`, short: `Chain ${currentChainId}`, explorer: "https://etherscan.io" };
+    const currentChainInfo = SUPPORTED_CHAINS[currentChainId] || { name: `Unsupported Chain (${currentChainId})`, short: `ID ${currentChainId}`, explorer: "https://etherscan.io" };
 
     if (dot) {
         dot.className = "network-dot " + (isCorrectChain ? "dot-green" : "dot-red");
-        dot.title = isCorrectChain ? `Connected to ${targetChainInfo.name}` : `Wrong Network! Connected to ${currentChainInfo.name}. Click to switch to ${targetChainInfo.name}`;
+        dot.title = isCorrectChain ? `Connected to ${targetChainInfo.name}` : (!isSupported ? `Unsupported Network (${currentChainId})` : `Wrong Network! Connected to ${currentChainInfo.name}. Click to switch to ${targetChainInfo.name}`);
     }
 
     // Dropdown details
@@ -2287,7 +2378,7 @@ function updateWalletUIConnected(address, chainIdHex) {
     const btnSwitch = document.getElementById("btnSwitchNetwork");
     const btnExplorer = document.getElementById("btnViewExplorer");
 
-    if (netText) netText.innerText = isCorrectChain ? targetChainInfo.name : `Wrong Network (${currentChainInfo.short})`;
+    if (netText) netText.innerText = isCorrectChain ? targetChainInfo.name : (!isSupported ? `Unsupported Chain (${currentChainId})` : `Wrong Network (${currentChainInfo.short})`);
     if (netDot) netDot.className = "network-dot " + (isCorrectChain ? "dot-green" : "dot-red");
     if (netBadge) {
         netBadge.className = "network-name-badge " + (isCorrectChain ? "" : "wrong-network");
@@ -2302,7 +2393,7 @@ function updateWalletUIConnected(address, chainIdHex) {
     }
 
     // Synchronize network cards visual state
-    if (typeof updateNetworkCardsVisual === "function") {
+    if (isSupported && typeof updateNetworkCardsVisual === "function") {
         updateNetworkCardsVisual(targetChainId);
     }
 
@@ -2312,6 +2403,9 @@ function updateWalletUIConnected(address, chainIdHex) {
         if (isCorrectChain) {
             portBadge.innerText = `${shortAddr} (${targetChainInfo.short})`;
             portBadge.className = "badge badge-green";
+        } else if (!isSupported) {
+            portBadge.innerText = `${shortAddr} (Unsupported Chain: ${currentChainId})`;
+            portBadge.className = "badge badge-red";
         } else {
             portBadge.innerText = `${shortAddr} (Wrong Network: ${currentChainInfo.short})`;
             portBadge.className = "badge badge-red";
@@ -2591,10 +2685,29 @@ async function executeMetaMaskOnChainTrade() {
         return;
     }
 
-    // Guard 3: Network Synchronization Check
+    // Guard 3: Network Synchronization & Unsupported Chain Check
     const targetChainId = currentSelectedChainId;
     const currentChainId = metamaskChainId ? parseInt(metamaskChainId, 16) : null;
-    const targetChainInfo = SUPPORTED_CHAINS[targetChainId] || { name: `Chain ${targetChainId}`, short: `Chain ${targetChainId}` };
+
+    if (currentChainId && !SUPPORTED_CHAINS[currentChainId]) {
+        renderExecutionResult({
+            success: false,
+            status: "UNSUPPORTED_CHAIN",
+            message: `Unsupported blockchain network (Chain ID: ${currentChainId}). Please switch MetaMask to a supported network (Base L2, Base Sepolia, Sepolia, Arbitrum, Polygon, Ethereum) before trading.`
+        });
+        showToast(`Unsupported network (Chain ID: ${currentChainId}). Trade execution blocked.`, "error");
+        return;
+    }
+
+    const targetChainInfo = SUPPORTED_CHAINS[targetChainId];
+    if (!targetChainInfo) {
+        renderExecutionResult({
+            success: false,
+            status: "UNSUPPORTED_CHAIN",
+            message: `Selected chain ID ${targetChainId} is not supported.`
+        });
+        return;
+    }
 
     if (currentChainId !== targetChainId) {
         const currentChainInfo = SUPPORTED_CHAINS[currentChainId] || { short: `Chain ${currentChainId}` };
@@ -2654,21 +2767,7 @@ async function executeMetaMaskOnChainTrade() {
         let availStable = 0;
         let tokenSymbol = "USDT";
 
-        if (targetChainId === 11155111 || targetChainId === 1 || targetChainId === 42161 || targetChainId === 137) {
-            if ((clientWalletBalances.usdt || 0) > 0 && tokens.USDT) {
-                tokenInMeta = tokens.USDT;
-                availStable = clientWalletBalances.usdt;
-                tokenSymbol = "USDT";
-            } else if ((clientWalletBalances.usdc || 0) > 0 && tokens.USDC) {
-                tokenInMeta = tokens.USDC;
-                availStable = clientWalletBalances.usdc;
-                tokenSymbol = "USDC";
-            } else {
-                tokenInMeta = tokens.USDT || tokens.USDC;
-                availStable = (clientWalletBalances.usdt || 0) + (clientWalletBalances.usdc || 0);
-                tokenSymbol = tokens.USDT ? "USDT" : "USDC";
-            }
-        } else { // Base L2 (8453)
+        if (targetChainId === 8453 || targetChainId === 84532) {
             if ((clientWalletBalances.usdc || 0) > 0 && tokens.USDC) {
                 tokenInMeta = tokens.USDC;
                 availStable = clientWalletBalances.usdc;
@@ -2685,6 +2784,20 @@ async function executeMetaMaskOnChainTrade() {
                 tokenInMeta = tokens.USDC || tokens.USDbC || tokens.USDT;
                 availStable = 0;
                 tokenSymbol = "USDC";
+            }
+        } else {
+            if ((clientWalletBalances.usdt || 0) > 0 && tokens.USDT) {
+                tokenInMeta = tokens.USDT;
+                availStable = clientWalletBalances.usdt;
+                tokenSymbol = "USDT";
+            } else if ((clientWalletBalances.usdc || 0) > 0 && tokens.USDC) {
+                tokenInMeta = tokens.USDC;
+                availStable = clientWalletBalances.usdc;
+                tokenSymbol = "USDC";
+            } else {
+                tokenInMeta = tokens.USDT || tokens.USDC;
+                availStable = (clientWalletBalances.usdt || 0) + (clientWalletBalances.usdc || 0);
+                tokenSymbol = tokens.USDT ? "USDT" : "USDC";
             }
         }
 

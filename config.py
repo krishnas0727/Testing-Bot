@@ -83,6 +83,12 @@ PUBLIC_RPC_FALLBACKS = {
         "https://ethereum-sepolia-rpc.publicnode.com",
         "https://rpc.sepolia.org",
     ],
+    84532: [
+        "https://sepolia.base.org",
+        "https://base-sepolia-rpc.publicnode.com",
+        "https://base-sepolia.blockpi.network/v1/rpc/public",
+        "https://1rpc.io/base-sepolia",
+    ],
 }
 
 
@@ -121,7 +127,8 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
             "USDT": {"address": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", "decimals": 6, "symbol": "USDT"},
             "DAI": {"address": "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb", "decimals": 18, "symbol": "DAI"},
             "USDbC": {"address": "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA", "decimals": 6, "symbol": "USDbC"},
-        }
+        },
+        "arbitrage_contract": os.getenv("BASE_ARBITRAGE_CONTRACT", os.getenv("ARBITRAGE_CONTRACT_ADDRESS", ""))
     },
     1: {
         "name": "ethereum",
@@ -152,7 +159,8 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
             "USDC": {"address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "decimals": 6, "symbol": "USDC"},
             "WBTC": {"address": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599", "decimals": 8, "symbol": "WBTC"},
             "DAI": {"address": "0x6B175474E89094C44Da98b954EedeAC495271d0F", "decimals": 18, "symbol": "DAI"},
-        }
+        },
+        "arbitrage_contract": os.getenv("ETH_ARBITRAGE_CONTRACT", os.getenv("ARBITRAGE_CONTRACT_ADDRESS", ""))
     },
     42161: {
         "name": "arbitrum",
@@ -178,7 +186,8 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
             "WETH": {"address": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", "decimals": 18, "symbol": "WETH"},
             "USDT": {"address": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", "decimals": 6, "symbol": "USDT"},
             "USDC": {"address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", "decimals": 6, "symbol": "USDC"},
-        }
+        },
+        "arbitrage_contract": os.getenv("ARB_ARBITRAGE_CONTRACT", os.getenv("ARBITRAGE_CONTRACT_ADDRESS", ""))
     },
     137: {
         "name": "polygon",
@@ -204,7 +213,8 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
             "WETH": {"address": "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619", "decimals": 18, "symbol": "WETH"},
             "USDT": {"address": "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", "decimals": 6, "symbol": "USDT"},
             "USDC": {"address": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", "decimals": 6, "symbol": "USDC"},
-        }
+        },
+        "arbitrage_contract": os.getenv("POLYGON_ARBITRAGE_CONTRACT", os.getenv("ARBITRAGE_CONTRACT_ADDRESS", ""))
     },
     11155111: {
         "name": "sepolia",
@@ -231,7 +241,37 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
             "WETH": {"address": "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9", "decimals": 18, "symbol": "WETH"},
             "USDT": {"address": "0xd077A400968890Eacc75cdc901F0356c943e4fDb", "decimals": 6, "symbol": "USDT"},
             "USDC": {"address": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", "decimals": 6, "symbol": "USDC"},
-        }
+        },
+        "arbitrage_contract": os.getenv("SEPOLIA_ARBITRAGE_CONTRACT", os.getenv("ARBITRAGE_CONTRACT_ADDRESS", ""))
+    },
+    84532: {
+        "name": "base_sepolia",
+        "label": "Base Sepolia Testnet (ETH)",
+        "chain_id": 84532,
+        "currency": "ETH",
+        "explorer": "https://sepolia.basescan.org",
+        "rpc_url": "https://sepolia.base.org",
+        "fallbacks": [
+            "https://sepolia.base.org",
+            "https://base-sepolia-rpc.publicnode.com",
+            "https://base-sepolia.blockpi.network/v1/rpc/public",
+            "https://1rpc.io/base-sepolia",
+        ],
+        "dexes": ["Uniswap_V2", "SushiSwap_V2"],
+        "routers": {
+            "Uniswap_V2": "0x1662C4Ca803B6d5d42C85d552318b7625038923d",
+            "SushiSwap_V2": "0x1662C4Ca803B6d5d42C85d552318b7625038923d",
+        },
+        "factories": {
+            "Uniswap_V2": "0xF62c03E08ada871A0bEb309762E260a7a6a880E6",
+            "SushiSwap_V2": "0xF62c03E08ada871A0bEb309762E260a7a6a880E6",
+        },
+        "tokens": {
+            "WETH": {"address": "0x4200000000000000000000000000000000000006", "decimals": 18, "symbol": "WETH"},
+            "USDC": {"address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e", "decimals": 6, "symbol": "USDC"},
+            "USDT": {"address": "0x0a1e4ff477ff2099307c87c06eb73cbeec0678eb", "decimals": 6, "symbol": "USDT"},
+        },
+        "arbitrage_contract": os.getenv("BASE_SEPOLIA_ARBITRAGE_CONTRACT", os.getenv("ARBITRAGE_CONTRACT_ADDRESS", ""))
     }
 }
 
@@ -245,11 +285,13 @@ _active_chain_info = CHAIN_REGISTRY.get(CHAIN_ID, CHAIN_REGISTRY[8453])
 DEX_ROUTERS: Dict[str, str] = _active_chain_info["routers"]
 DEX_FACTORIES: Dict[str, str] = _active_chain_info["factories"]
 TOKEN_REGISTRY: Dict[str, Dict[str, Any]] = _active_chain_info["tokens"]
+ARBITRAGE_CONTRACT_ADDRESS: str = os.getenv("ARBITRAGE_CONTRACT_ADDRESS") or _active_chain_info.get("arbitrage_contract", "")
+SUPPORTED_DEXES = list(_active_chain_info.get("dexes", ["Uniswap_V2", "SushiSwap_V2"]))
 
 
 def set_active_chain(chain_id: int) -> Dict[str, Any]:
     """Switch active blockchain configuration dynamically across the application."""
-    global CHAIN_ID, DEFAULT_CHAIN, RPC_URL, DEX_ROUTERS, DEX_FACTORIES, TOKEN_REGISTRY, _active_chain_info, SYMBOL
+    global CHAIN_ID, DEFAULT_CHAIN, RPC_URL, DEX_ROUTERS, DEX_FACTORIES, TOKEN_REGISTRY, _active_chain_info, SYMBOL, ARBITRAGE_CONTRACT_ADDRESS, SUPPORTED_DEXES
     if chain_id not in CHAIN_REGISTRY:
         raise ValueError(f"Unsupported chain ID: {chain_id}")
     _active_chain_info = CHAIN_REGISTRY[chain_id]
@@ -259,10 +301,22 @@ def set_active_chain(chain_id: int) -> Dict[str, Any]:
     DEX_ROUTERS = _active_chain_info["routers"]
     DEX_FACTORIES = _active_chain_info["factories"]
     TOKEN_REGISTRY = _active_chain_info["tokens"]
-    if chain_id == 8453:
+    ARBITRAGE_CONTRACT_ADDRESS = os.getenv("ARBITRAGE_CONTRACT_ADDRESS") or _active_chain_info.get("arbitrage_contract", "")
+    SUPPORTED_DEXES = list(_active_chain_info.get("dexes", ["Uniswap_V2", "SushiSwap_V2"]))
+    if chain_id in (8453, 84532):
         SYMBOL = "WETH/USDC"
     else:
         SYMBOL = "WETH/USDT"
+
+    # Invalidate decimals and gas cache
+    try:
+        import dex_engine
+        dex_engine._token_decimals_cache.clear()
+        dex_engine._last_known_gas_wei = dex_engine._default_gas_wei()
+        dex_engine._last_gas_fetch_time = 0.0
+    except Exception:
+        pass
+
     return _active_chain_info
 
 # Default trading pair

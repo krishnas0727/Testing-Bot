@@ -152,10 +152,12 @@ def get_block_number() -> int:
 
 def _default_gas_wei() -> int:
     cid = getattr(config, "CHAIN_ID", 8453)
-    if cid in (8453, 42161):
-        return 6_000_000  # 0.006 Gwei on Base L2 / Arbitrum
+    if cid in (8453, 84532, 42161):
+        return 6_000_000  # 0.006 Gwei on Base L2 / Base Sepolia / Arbitrum
     if cid == 137:
         return 30_000_000_000  # 30 Gwei on Polygon
+    if cid == 11155111:
+        return 2_000_000_000  # 2.0 Gwei on Sepolia
     return 1_000_000_000  # 1.0 Gwei on Ethereum
 
 
