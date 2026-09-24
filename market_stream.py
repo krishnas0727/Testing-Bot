@@ -6,7 +6,7 @@ Zero centralized exchange dependencies.
 """
 import threading
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 import config
 from dex_engine import get_dex_reserves, calculate_amount_out

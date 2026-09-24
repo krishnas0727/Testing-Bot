@@ -16,7 +16,7 @@ os.makedirs(os.path.dirname(DATABASE_NAME), exist_ok=True)
 
 
 def get_connection():
-    conn = sqlite3.connect(DATABASE_NAME)
+    conn = sqlite3.connect(DATABASE_NAME, timeout=30.0)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -24,6 +24,10 @@ def get_connection():
 def create_database():
     conn = get_connection()
     cursor = conn.cursor()
+    try:
+        cursor.execute("PRAGMA journal_mode=WAL")
+    except Exception:
+        pass
 
     # DEX Trades Table
     cursor.execute("""

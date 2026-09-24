@@ -13,7 +13,7 @@ services:
       - key: TRADING_MODE
         value: MOCK
       - key: DEFAULT_CHAIN
-        value: Base
+        value: base
       - key: CHAIN_ID
         value: 8453
       - key: AUTO_TRADE_ENABLED
