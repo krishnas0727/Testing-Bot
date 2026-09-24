@@ -417,15 +417,30 @@ def execution_logs_api():
 
 @app.route("/api/prices", methods=["GET"])
 def prices_api():
-    """Return live prices and reserves for all supported DEXes."""
+    """Return live prices and reserves for all supported DEXes on the selected chain."""
     try:
+        client_chain_id = request.args.get("chain_id")
+        if client_chain_id:
+            try:
+                cid = int(client_chain_id)
+                if cid in config.CHAIN_REGISTRY and cid != config.CHAIN_ID:
+                    config.set_active_chain(cid)
+                    save_bot_setting("chain_id", cid)
+            except (ValueError, TypeError):
+                pass
+
         from dex_engine import get_all_dex_quotes
         parts = config.SYMBOL.split("/")
         base_sym = parts[0] if len(parts) > 0 else "WETH"
         quote_sym = parts[1] if len(parts) > 1 else "USDT"
         quotes = get_all_dex_quotes(config.DEFAULT_TRADE_AMOUNT, base_sym, quote_sym)
+        active_chain_id = getattr(config, "CHAIN_ID", 8453)
+        chain_info = config.CHAIN_REGISTRY.get(active_chain_id, {})
         return jsonify({
             "success": True,
+            "chain_id": active_chain_id,
+            "chain_name": chain_info.get("name", "base"),
+            "chain_label": chain_info.get("label", "Base L2 Mainnet"),
             "symbol": config.SYMBOL,
             "quotes": quotes,
             "prices": {dex: q["spot_price"] for dex, q in quotes.items()},
@@ -1067,19 +1082,20 @@ def pnl_api():
 def all_pairs_api():
     """Scan all liquid pairs on the active blockchain and identify the highest spread."""
     try:
+        client_chain_id = request.args.get("chain_id")
+        if client_chain_id:
+            try:
+                cid = int(client_chain_id)
+                if cid in config.CHAIN_REGISTRY and cid != config.CHAIN_ID:
+                    config.set_active_chain(cid)
+                    save_bot_setting("chain_id", cid)
+            except (ValueError, TypeError):
+                pass
+
         active_chain_id = getattr(config, "CHAIN_ID", 8453)
         chain_info = config.CHAIN_REGISTRY.get(active_chain_id, {})
         tokens = chain_info.get("tokens", {})
-
-        target_pairs = []
-        if active_chain_id == 8453:  # Base L2
-            target_pairs = ["WETH/USDC", "WETH/USDT", "WETH/DAI"]
-        elif active_chain_id == 1:   # Ethereum
-            target_pairs = ["WETH/USDT", "WETH/USDC", "WETH/DAI"]
-        elif active_chain_id == 42161: # Arbitrum
-            target_pairs = ["WETH/USDC", "WETH/USDT"]
-        else:
-            target_pairs = [getattr(config, "SYMBOL", "WETH/USDC")]
+        target_pairs = list(chain_info.get("pairs", ["WETH/USDC", "WETH/USDT"]))
 
         results = []
         best_overall = None
@@ -1108,6 +1124,8 @@ def all_pairs_api():
                 spread_pct = (spread_val / buy_p) * 100.0 if buy_p > 0 else 0.0
                 return {
                     "pair": pair_str,
+                    "chain_id": active_chain_id,
+                    "chain_name": chain_info.get("name", "base"),
                     "base": base_sym,
                     "quote": quote_sym,
                     "buy_dex": min_dex,
@@ -1135,6 +1153,8 @@ def all_pairs_api():
         return jsonify({
             "success": True,
             "chain_id": active_chain_id,
+            "chain_name": chain_info.get("name", "base"),
+            "chain_label": chain_info.get("label", "Base L2 Mainnet"),
             "pairs": results,
             "best_pair": best_overall,
             "timestamp": time.time() * 1000

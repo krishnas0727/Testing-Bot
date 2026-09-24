@@ -128,6 +128,8 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
             "DAI": {"address": "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb", "decimals": 18, "symbol": "DAI"},
             "USDbC": {"address": "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA", "decimals": 6, "symbol": "USDbC"},
         },
+        "pairs": ["WETH/USDC", "WETH/USDT", "WETH/DAI"],
+        "default_symbol": "WETH/USDC",
         "arbitrage_contract": os.getenv("BASE_ARBITRAGE_CONTRACT", os.getenv("ARBITRAGE_CONTRACT_ADDRESS", ""))
     },
     1: {
@@ -160,6 +162,8 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
             "WBTC": {"address": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599", "decimals": 8, "symbol": "WBTC"},
             "DAI": {"address": "0x6B175474E89094C44Da98b954EedeAC495271d0F", "decimals": 18, "symbol": "DAI"},
         },
+        "pairs": ["WETH/USDT", "WETH/USDC", "WETH/DAI"],
+        "default_symbol": "WETH/USDT",
         "arbitrage_contract": os.getenv("ETH_ARBITRAGE_CONTRACT", os.getenv("ARBITRAGE_CONTRACT_ADDRESS", ""))
     },
     42161: {
@@ -187,6 +191,8 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
             "USDT": {"address": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", "decimals": 6, "symbol": "USDT"},
             "USDC": {"address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", "decimals": 6, "symbol": "USDC"},
         },
+        "pairs": ["WETH/USDC", "WETH/USDT"],
+        "default_symbol": "WETH/USDC",
         "arbitrage_contract": os.getenv("ARB_ARBITRAGE_CONTRACT", os.getenv("ARBITRAGE_CONTRACT_ADDRESS", ""))
     },
     137: {
@@ -214,6 +220,8 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
             "USDT": {"address": "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", "decimals": 6, "symbol": "USDT"},
             "USDC": {"address": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", "decimals": 6, "symbol": "USDC"},
         },
+        "pairs": ["WETH/USDT", "WETH/USDC"],
+        "default_symbol": "WETH/USDT",
         "arbitrage_contract": os.getenv("POLYGON_ARBITRAGE_CONTRACT", os.getenv("ARBITRAGE_CONTRACT_ADDRESS", ""))
     },
     11155111: {
@@ -242,6 +250,8 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
             "USDT": {"address": "0xd077A400968890Eacc75cdc901F0356c943e4fDb", "decimals": 6, "symbol": "USDT"},
             "USDC": {"address": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", "decimals": 6, "symbol": "USDC"},
         },
+        "pairs": ["WETH/USDT", "WETH/USDC"],
+        "default_symbol": "WETH/USDT",
         "arbitrage_contract": os.getenv("SEPOLIA_ARBITRAGE_CONTRACT", os.getenv("ARBITRAGE_CONTRACT_ADDRESS", ""))
     },
     84532: {
@@ -271,6 +281,8 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
             "USDC": {"address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e", "decimals": 6, "symbol": "USDC"},
             "USDT": {"address": "0x0a1e4ff477ff2099307c87c06eb73cbeec0678eb", "decimals": 6, "symbol": "USDT"},
         },
+        "pairs": ["WETH/USDC", "WETH/USDT"],
+        "default_symbol": "WETH/USDC",
         "arbitrage_contract": os.getenv("BASE_SEPOLIA_ARBITRAGE_CONTRACT", os.getenv("ARBITRAGE_CONTRACT_ADDRESS", ""))
     }
 }

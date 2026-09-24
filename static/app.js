@@ -70,14 +70,283 @@ const safeStorage = {
     }
 };
 
+// ============================================================
+// CENTRALIZED MULTI-CHAIN SPECIFICATIONS & TOKEN REGISTRY
+// Single Source of Truth for Global Selected-Chain State
+// ============================================================
+
+const SUPPORTED_CHAINS = {
+    8453: {
+        id: 8453,
+        name: "Base L2 Mainnet",
+        short: "Base L2",
+        currency: "ETH",
+        decimals: 18,
+        explorer: "https://basescan.org",
+        hex: "0x2105",
+        rpcUrls: ["https://mainnet.base.org", "https://base-rpc.publicnode.com"],
+        nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+        defaultPair: "WETH/USDC",
+        pairs: ["WETH/USDC", "WETH/USDT", "WETH/DAI"]
+    },
+    84532: {
+        id: 84532,
+        name: "Base Sepolia Testnet",
+        short: "Base Sepolia",
+        currency: "ETH",
+        decimals: 18,
+        explorer: "https://sepolia.basescan.org",
+        hex: "0x14a34",
+        rpcUrls: ["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"],
+        nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
+        defaultPair: "WETH/USDC",
+        pairs: ["WETH/USDC", "WETH/USDT"]
+    },
+    137: {
+        id: 137,
+        name: "Polygon PoS",
+        short: "Polygon",
+        currency: "POL",
+        decimals: 18,
+        explorer: "https://polygonscan.com",
+        hex: "0x89",
+        rpcUrls: ["https://polygon-bor-rpc.publicnode.com", "https://polygon-rpc.com"],
+        nativeCurrency: { name: "POL", symbol: "POL", decimals: 18 },
+        defaultPair: "WETH/USDT",
+        pairs: ["WETH/USDT", "WETH/USDC"]
+    },
+    42161: {
+        id: 42161,
+        name: "Arbitrum One",
+        short: "Arbitrum",
+        currency: "ETH",
+        decimals: 18,
+        explorer: "https://arbiscan.io",
+        hex: "0xa4b1",
+        rpcUrls: ["https://arbitrum-one-rpc.publicnode.com"],
+        nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+        defaultPair: "WETH/USDC",
+        pairs: ["WETH/USDC", "WETH/USDT"]
+    },
+    1: {
+        id: 1,
+        name: "Ethereum Mainnet",
+        short: "Ethereum",
+        currency: "ETH",
+        decimals: 18,
+        explorer: "https://etherscan.io",
+        hex: "0x1",
+        rpcUrls: ["https://eth.llamarpc.com"],
+        nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+        defaultPair: "WETH/USDT",
+        pairs: ["WETH/USDT", "WETH/USDC", "WETH/DAI"]
+    },
+    11155111: {
+        id: 11155111,
+        name: "Sepolia Testnet",
+        short: "SepoliaETH",
+        currency: "SepoliaETH",
+        decimals: 18,
+        explorer: "https://sepolia.etherscan.io",
+        hex: "0xaa36a7",
+        rpcUrls: ["https://ethereum-sepolia-rpc.publicnode.com", "https://rpc.sepolia.org"],
+        nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
+        defaultPair: "WETH/USDT",
+        pairs: ["WETH/USDT", "WETH/USDC"]
+    }
+};
+
+const CLIENT_TOKEN_ADDRESSES = {
+    8453: { // Base L2
+        USDC: { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6 },
+        USDbC: { address: "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA", decimals: 6 },
+        USDT: { address: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", decimals: 6 },
+        DAI: { address: "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb", decimals: 18 },
+        WETH: { address: "0x4200000000000000000000000000000000000006", decimals: 18 }
+    },
+    1: { // Ethereum Mainnet
+        USDT: { address: "0xdAC17F958D2ee523a2206206994597C13D831ec7", decimals: 6 },
+        USDC: { address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", decimals: 6 },
+        DAI: { address: "0x6B175474E89094C44Da98b954EedeAC495271d0F", decimals: 18 },
+        WBTC: { address: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599", decimals: 8 },
+        WETH: { address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", decimals: 18 }
+    },
+    42161: { // Arbitrum One
+        USDC: { address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", decimals: 6 },
+        USDT: { address: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", decimals: 6 },
+        WETH: { address: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", decimals: 18 }
+    },
+    137: { // Polygon PoS
+        USDT: { address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", decimals: 6 },
+        USDC: { address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", decimals: 6 },
+        WETH: { address: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619", decimals: 18 }
+    },
+    11155111: { // Sepolia Testnet
+        USDC: { address: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", decimals: 6 },
+        USDT: { address: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", decimals: 6 },
+        WETH: { address: "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9", decimals: 18 }
+    },
+    84532: { // Base Sepolia Testnet
+        USDC: { address: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", decimals: 6 },
+        USDT: { address: "0x0a1e4ff477ff2099307c87c06eb73cbeec0678eb", decimals: 6 },
+        WETH: { address: "0x4200000000000000000000000000000000000006", decimals: 18 }
+    }
+};
+
+const CLIENT_ROUTER_ADDRESSES = {
+    8453: { // Base L2
+        Uniswap_V2: "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24",
+        SushiSwap_V2: "0x6BDED42c6DA8FBf0d2bA55B2fa120C5e0c8D7891"
+    },
+    1: { // Ethereum
+        Uniswap_V2: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+        SushiSwap_V2: "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F"
+    },
+    42161: { // Arbitrum One
+        Uniswap_V2: "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24",
+        SushiSwap_V2: "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506"
+    },
+    137: { // Polygon PoS
+        Uniswap_V2: "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff",
+        QuickSwap: "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff",
+        SushiSwap_V2: "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506"
+    },
+    11155111: { // Sepolia Testnet
+        Uniswap_V2: "0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008",
+        SushiSwap_V2: "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506"
+    },
+    84532: { // Base Sepolia Testnet
+        Uniswap_V2: "0x1662C4Ca803B6d5d42C85d552318b7625038923d",
+        SushiSwap_V2: "0x1662C4Ca803B6d5d42C85d552318b7625038923d"
+    }
+};
+
 let currentTab = "dashboard";
 let selectedTradeAmount = 5;
 let latestMarketData = null;
 let liveChart = null;
 let priceSnapshots = [];
 const MAX_SNAPSHOTS = 30;
+
+let currentChainEpoch = 0;
 let currentSelectedChainId = parseInt(safeStorage.getItem("userSelectedChainId") || "8453", 10);
-if (isNaN(currentSelectedChainId) || !currentSelectedChainId) currentSelectedChainId = 8453;
+if (isNaN(currentSelectedChainId) || !SUPPORTED_CHAINS[currentSelectedChainId]) currentSelectedChainId = 8453;
+
+function getSelectedChain() {
+    return SUPPORTED_CHAINS[currentSelectedChainId] || SUPPORTED_CHAINS[8453];
+}
+
+function invalidateAndResetChainUI(newChainId) {
+    const chainIdNum = Number(newChainId);
+    if (!SUPPORTED_CHAINS[chainIdNum]) return;
+
+    currentChainEpoch++;
+    currentSelectedChainId = chainIdNum;
+    safeStorage.setItem("userSelectedChainId", chainIdNum);
+    latestMarketData = null;
+
+    const chainInfo = SUPPORTED_CHAINS[chainIdNum];
+    const shortUpper = (chainInfo.short || chainInfo.name).toUpperCase();
+
+    // 1. Invalidate live ticker prices & gas
+    setText("tickerUniswap", "--");
+    setText("tickerSushiSwap", "--");
+    setText("tickerSpread", "Switching network...");
+    setText("tickerGasPrice", "--");
+    const sym = chainInfo.defaultPair || (chainIdNum === 8453 || chainIdNum === 84532 ? "WETH/USDC" : "WETH/USDT");
+    setText("tickerUniLabel", `Uniswap V2 ${sym}`);
+    setText("tickerSushiLabel", `SushiSwap V2 ${sym}`);
+
+    // 2. Invalidate Pools tab spot prices and reserves
+    setText("uniSpotPrice", "--");
+    setText("sushiSpotPrice", "--");
+    setText("uniResBase", "--");
+    setText("uniResQuote", "--");
+    setText("sushiResBase", "--");
+    setText("sushiResQuote", "--");
+    setText("uniChainLabel", `(${chainInfo.short || chainInfo.name})`);
+    setText("sushiChainLabel", `(${chainInfo.short || chainInfo.name})`);
+
+    // 3. Clear Chart snapshots and update dataset labels
+    priceSnapshots = [];
+    if (liveChart) {
+        liveChart.data.labels = [];
+        liveChart.data.datasets[0].data = [];
+        liveChart.data.datasets[1].data = [];
+        liveChart.data.datasets[0].label = `Uniswap V2 (${chainInfo.short || chainInfo.name})`;
+        liveChart.data.datasets[1].label = `SushiSwap V2 (${chainInfo.short || chainInfo.name})`;
+        liveChart.update();
+    }
+
+    // 4. Invalidate Best DEX Route panel
+    setText("oppBuyDex", "Scanning...");
+    setText("oppBuyPrice", "$0.00");
+    setText("oppSellDex", "Scanning...");
+    setText("oppSellPrice", "$0.00");
+    setText("oppSpread", "$0.00 (0.00%)");
+    setText("oppNetProfit", "$0.00");
+    setText("oppImpact", "0.00%");
+    setText("oppGas", "$0.00");
+    setText("flowInputToken", sym.split("/")[1] || "USDT");
+    setText("flowOutputToken", sym.split("/")[1] || "USDT");
+    setText("flowBridgeAsset", `${sym.split("/")[0] || "WETH"} BRIDGE`);
+    setText("flowOutputProfit", "+$0.00 (+0.00%)");
+    const oppBadge = document.getElementById("oppBadge");
+    if (oppBadge) {
+        oppBadge.innerText = "SCANNING";
+        oppBadge.className = "badge badge-yellow";
+    }
+    const oppDiagReason = document.getElementById("oppDiagReason");
+    if (oppDiagReason) {
+        oppDiagReason.innerText = `Scanning liquidity pools on ${chainInfo.name}...`;
+        oppDiagReason.style.color = "var(--text-secondary)";
+    }
+    const oppDiagBadge = document.getElementById("oppDiagBadge");
+    if (oppDiagBadge) {
+        oppDiagBadge.innerText = "SWITCHING";
+        oppDiagBadge.className = "badge badge-blue";
+    }
+    const bestRouteTimestamp = document.getElementById("bestRouteTimestamp");
+    if (bestRouteTimestamp) bestRouteTimestamp.innerText = "";
+
+    // 5. Invalidate Multi-Pair Heatmap grid
+    const grid = document.getElementById("multiPairGrid");
+    if (grid) {
+        grid.innerHTML = `<div id="multiPairPlaceholder" style="color:var(--text-muted); font-size:12px; padding:15px;">Scanning ${chainInfo.name} pairs...</div>`;
+    }
+
+    // 6. Invalidate wallet balances
+    clientWalletBalances = { eth: 0, weth: 0, usdt: 0, usdc: 0, usdbc: 0, updated: 0 };
+    setText("kpiBalance", "--");
+    setText("balETH", "--");
+    setText("balETHusd", "--");
+    setText("balWETH", "--");
+    setText("balWETHusd", "--");
+    setText("balUSDT", "--");
+    setText("balUSDC", "--");
+
+    // 7. Update all prominent visual badges
+    setText("globalNetworkText", `NETWORK: ${shortUpper}`);
+    setText("heatmapChainLabel", `(${chainInfo.short || chainInfo.name})`);
+    setText("bestRouteChainBadge", shortUpper);
+    setText("bestRouteChainName", chainInfo.name);
+    setText("networkSpeedLabel", `${chainInfo.short} Speed`);
+
+    // 8. Update network selector cards & dropdowns
+    if (typeof updateNetworkCardsVisual === "function") {
+        updateNetworkCardsVisual(chainIdNum);
+    }
+
+    // 9. Cancel any in-progress transaction modal
+    if (typeof closeExecModal === "function") {
+        closeExecModal();
+    }
+
+    // 10. Revalidate MetaMask wallet reconciliation
+    if (metamaskAccount && typeof updateWalletUIConnected === "function") {
+        updateWalletUIConnected(metamaskAccount, metamaskChainId);
+    }
+}
 
 // Web Audio API State & Synthesizer
 let terminalAudioCtx = null;
@@ -393,25 +662,39 @@ function startPolling() {
 }
 
 async function fetchMarketData() {
+    const thisEpoch = currentChainEpoch;
+    const thisChainId = currentSelectedChainId;
     const t0 = performance.now();
     try {
         const params = new URLSearchParams();
         if (selectedTradeAmount) params.append("amount", selectedTradeAmount);
         if (metamaskAccount) params.append("address", metamaskAccount);
         // Always pass user's explicitly selected network ID
-        params.append("chain_id", currentSelectedChainId);
+        params.append("chain_id", thisChainId);
 
         const qs = params.toString();
         const url = `/api/market?${qs}`;
         const res = await fetch(url);
         const json = await res.json();
+
+        // Strict Race Condition & Epoch Guard:
+        if (thisEpoch !== currentChainEpoch || thisChainId !== currentSelectedChainId) {
+            return;
+        }
+        if (!json.success || !json.data) return;
+
+        // Verify response belongs to currentSelectedChainId
+        const respChainId = Number(json.data.chain_id || json.settings?.chain_id || json.wallet?.chain_id || thisChainId);
+        if (respChainId !== currentSelectedChainId) {
+            return;
+        }
+
         const elapsed = Math.round(performance.now() - t0);
         const badge = document.getElementById("latencyBadge");
         if (badge) {
             badge.innerText = `⚡ ${elapsed}ms`;
             badge.style.color = elapsed < 150 ? "#22c55e" : (elapsed < 400 ? "#38bdf8" : "#f59e0b");
         }
-        if (!json.success || !json.data) return;
 
         latestMarketData = {
             ...json.data,
@@ -422,7 +705,7 @@ async function fetchMarketData() {
             settings: json.settings || {},
             trading_mode: json.summary?.trading_mode || json.settings?.trading_mode || "MOCK",
             has_private_key: Boolean(json.settings?.has_private_key),
-            chain_id: json.wallet?.chain_id || json.settings?.chain_id || currentSelectedChainId,
+            chain_id: respChainId,
             best_route: json.data?.best_route || null
         };
         updateDashboardUI(json);
@@ -644,12 +927,17 @@ function updateDashboardUI(payload) {
             walletBadge.className = "badge badge-yellow";
         }
     }
-    setText("balETH", `${dispEth.toFixed(4)} ETH`);
-    setText("balETHusd", `≈ $${(dispEth * ethPrice).toFixed(2)} USDT`);
-    setText("balWETH", `${dispWeth.toFixed(4)} WETH`);
-    setText("balWETHusd", `≈ $${(dispWeth * ethPrice).toFixed(2)} USDT`);
+    const targetChainInfo = SUPPORTED_CHAINS[activeChainId] || SUPPORTED_CHAINS[8453];
+    const nativeSym = targetChainInfo.currency || (targetChainInfo.nativeCurrency ? targetChainInfo.nativeCurrency.symbol : "ETH");
+    const [baseSym, quoteSym] = (sym && sym.includes("/")) ? sym.split("/") : ["WETH", (activeChainId === 8453 ? "USDC" : "USDT")];
+
+    setText("balETH", `${dispEth.toFixed(4)} ${nativeSym}`);
+    setText("balETHusd", `≈ $${(dispEth * ethPrice).toFixed(2)} ${quoteSym}`);
+    setText("balWETH", `${dispWeth.toFixed(4)} ${baseSym}`);
+    setText("balWETHusd", `≈ $${(dispWeth * ethPrice).toFixed(2)} ${quoteSym}`);
     setText("balUSDT", `$${dispUsdt.toLocaleString("en-US", { minimumFractionDigits: 2 })} USDT`);
     setText("balUSDC", `$${dispUsdc.toLocaleString("en-US", { minimumFractionDigits: 2 })} USDC`);
+    setText("balETHBadge", nativeSym);
 
     // 5. Best Opportunity card & Multi-Hop Flow Diagram
     if (best.buy_dex) {
@@ -660,17 +948,20 @@ function updateDashboardUI(payload) {
         const spreadSign = best.spread_usdt >= 0 ? "+" : "";
         setText("oppSpread", `${spreadSign}$${best.spread_usdt.toFixed(2)} (${spreadSign}${best.spread_pct.toFixed(2)}%)`);
         setText("oppImpact", `${Number(best.max_price_impact_pct || 0).toFixed(2)}%`);
-        setText("oppGas", `$${Number(best.gas_cost_usdt || 0).toFixed(4)} USDT`);
+        setText("oppGas", `$${Number(best.gas_cost_usdt || 0).toFixed(4)} ${quoteSym}`);
         
         const oppNetProfSign = (best.net_profit_usdt || 0) >= 0 ? "+" : "";
-        setText("oppNetProfit", `${oppNetProfSign}$${Number(best.net_profit_usdt || 0).toFixed(4)} USDT (${oppNetProfSign}${Number(best.net_profit_percent || 0).toFixed(2)}%)`);
+        setText("oppNetProfit", `${oppNetProfSign}$${Number(best.net_profit_usdt || 0).toFixed(4)} ${quoteSym} (${oppNetProfSign}${Number(best.net_profit_percent || 0).toFixed(2)}%)`);
         const oppNetProfEl = document.getElementById("oppNetProfit");
         if (oppNetProfEl) {
             oppNetProfEl.style.color = (best.net_profit_usdt || 0) >= 0 ? "var(--profit-color)" : "var(--loss-color)";
         }
 
         // Multi-Hop Flow Nodes
-        setText("flowInputAmount", `$${Number(best.amount_in || selectedTradeAmount).toFixed(2)} USDT`);
+        setText("flowInputToken", quoteSym);
+        setText("flowOutputToken", quoteSym);
+        setText("flowBridgeAsset", `${baseSym} BRIDGE`);
+        setText("flowInputAmount", `$${Number(best.amount_in || selectedTradeAmount).toFixed(2)} ${quoteSym}`);
         setText("flowImpactSub", `Impact: ${Number(best.max_price_impact_pct || 0.01).toFixed(2)}%`);
         setText("flowOutputProfit", `${oppNetProfSign}$${Number(best.net_profit_usdt || 0).toFixed(4)} (${oppNetProfSign}${Number(best.net_profit_percent || 0).toFixed(2)}%)`);
 
@@ -678,6 +969,17 @@ function updateDashboardUI(payload) {
         if (oppBadge) {
             oppBadge.innerText = best.is_profitable ? "PROFITABLE" : "LOW PROFIT";
             oppBadge.className = "badge " + (best.is_profitable ? "badge-green" : "badge-yellow");
+        }
+
+        // Update Best Route dynamic chain badge and timestamp
+        setText("bestRouteChainBadge", (targetChainInfo.short || targetChainInfo.name).toUpperCase());
+        setText("bestRouteChainName", targetChainInfo.name);
+        const bestRouteTimestamp = document.getElementById("bestRouteTimestamp");
+        if (bestRouteTimestamp) {
+            if (data.timestamp || payload.timestamp) {
+                const d = new Date((data.timestamp || payload.timestamp) * 1000);
+                bestRouteTimestamp.innerText = `Updated ${d.toLocaleTimeString()}`;
+            }
         }
 
         // Web Audio chime for new profitable opportunities (throttled)
@@ -700,12 +1002,12 @@ function updateDashboardUI(payload) {
     setText("sushiChainLabel", `(${activeChainInfo.short})`);
 
     setText("uniSpotPrice", uniP > 0 ? `$${uniP.toFixed(2)}` : "--");
-    setText("uniResBase", `${Number(uniRes.base_reserve || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })} WETH`);
-    setText("uniResQuote", `$${Number(uniRes.quote_reserve || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })} USDT`);
+    setText("uniResBase", `${Number(uniRes.base_reserve || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })} ${baseSym}`);
+    setText("uniResQuote", `$${Number(uniRes.quote_reserve || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })} ${quoteSym}`);
 
     setText("sushiSpotPrice", sushiP > 0 ? `$${sushiP.toFixed(2)}` : "--");
-    setText("sushiResBase", `${Number(sushiRes.base_reserve || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })} WETH`);
-    setText("sushiResQuote", `$${Number(sushiRes.quote_reserve || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })} USDT`);
+    setText("sushiResBase", `${Number(sushiRes.base_reserve || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })} ${baseSym}`);
+    setText("sushiResQuote", `$${Number(sushiRes.quote_reserve || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })} ${quoteSym}`);
 
     // Live Pool Depth Ratio Gauge
     const uniQuote = Number(uniRes.quote_reserve || 0);
@@ -729,15 +1031,15 @@ function updateDashboardUI(payload) {
     // 7. Arbitrage tab breakdown
     if (best.buy_dex) {
         setText("arbRouteText", `${best.buy_dex.replace("_", " ")} ➔ ${best.sell_dex.replace("_", " ")}`);
-        setText("arbAmountIn", `$${Number(best.amount_in || selectedTradeAmount).toFixed(2)} USDT`);
-        setText("arbAmountOut", `$${Number(best.gross_return_usdt || best.amount_in || selectedTradeAmount).toFixed(4)} USDT`);
+        setText("arbAmountIn", `$${Number(best.amount_in || selectedTradeAmount).toFixed(2)} ${quoteSym}`);
+        setText("arbAmountOut", `$${Number(best.gross_return_usdt || best.amount_in || selectedTradeAmount).toFixed(4)} ${quoteSym}`);
         setText("arbPriceImpact", `${Number(best.max_price_impact_pct || 0.01).toFixed(2)}%`);
-        setText("arbGasCost", `$${Number(best.gas_cost_usdt || 0.005).toFixed(4)} USDT`);
+        setText("arbGasCost", `$${Number(best.gas_cost_usdt || 0.005).toFixed(4)} ${quoteSym}`);
 
         const netProfEl = document.getElementById("arbNetProfit");
         if (netProfEl) {
             const sign = (best.net_profit_usdt || 0) >= 0 ? "+" : "";
-            netProfEl.innerText = `${sign}$${Number(best.net_profit_usdt || 0).toFixed(4)} USDT (${sign}${Number(best.net_profit_percent || 0).toFixed(2)}%)`;
+            netProfEl.innerText = `${sign}$${Number(best.net_profit_usdt || 0).toFixed(4)} ${quoteSym} (${sign}${Number(best.net_profit_percent || 0).toFixed(2)}%)`;
             netProfEl.style.color = (best.net_profit_usdt || 0) >= 0 ? "var(--profit-color)" : "var(--loss-color)";
         }
 
@@ -1606,57 +1908,6 @@ let dexContractAddress = "";
 let dexContractABI = null;
 let dexArbitrageContract = null;
 
-const SUPPORTED_CHAINS = {
-    8453: {
-        name: "Base",
-        short: "Base L2",
-        explorer: "https://basescan.org",
-        hex: "0x2105",
-        rpcUrls: ["https://mainnet.base.org", "https://base-rpc.publicnode.com"],
-        nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 }
-    },
-    1: {
-        name: "Ethereum Mainnet",
-        short: "Ethereum",
-        explorer: "https://etherscan.io",
-        hex: "0x1",
-        rpcUrls: ["https://eth.llamarpc.com"],
-        nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 }
-    },
-    42161: {
-        name: "Arbitrum One",
-        short: "Arbitrum",
-        explorer: "https://arbiscan.io",
-        hex: "0xa4b1",
-        rpcUrls: ["https://arbitrum-one-rpc.publicnode.com"],
-        nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 }
-    },
-    137: {
-        name: "Polygon Mainnet",
-        short: "Polygon",
-        explorer: "https://polygonscan.com",
-        hex: "0x89",
-        rpcUrls: ["https://polygon-bor-rpc.publicnode.com", "https://polygon-rpc.com"],
-        nativeCurrency: { name: "POL", symbol: "POL", decimals: 18 }
-    },
-    11155111: {
-        name: "Sepolia Testnet",
-        short: "SepoliaETH",
-        explorer: "https://sepolia.etherscan.io",
-        hex: "0xaa36a7",
-        rpcUrls: ["https://ethereum-sepolia-rpc.publicnode.com", "https://rpc.sepolia.org"],
-        nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 }
-    },
-    84532: {
-        name: "Base Sepolia Testnet",
-        short: "Base Sepolia",
-        explorer: "https://sepolia.basescan.org",
-        hex: "0x14a34",
-        rpcUrls: ["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"],
-        nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 }
-    },
-};
-
 function updateNetworkCardsVisual(activeChainId) {
     const chainIdNum = Number(activeChainId);
 
@@ -1710,6 +1961,17 @@ function updateNetworkCardsVisual(activeChainId) {
     if (chainSelect && chainSelect.value != activeChainId) chainSelect.value = activeChainId;
     const cfgChain = document.getElementById("cfgChainId");
     if (cfgChain && cfgChain.value != activeChainId) cfgChain.value = activeChainId;
+
+    // 5. Update global UI labels
+    const activeInfo = SUPPORTED_CHAINS[chainIdNum] || { name: `Chain ${chainIdNum}`, short: `ID ${chainIdNum}` };
+    const shortUpper = (activeInfo.short || activeInfo.name).toUpperCase();
+    setText("globalNetworkText", `NETWORK: ${shortUpper}`);
+    setText("heatmapChainLabel", `(${activeInfo.short || activeInfo.name})`);
+    setText("bestRouteChainBadge", shortUpper);
+    setText("bestRouteChainName", activeInfo.name);
+    setText("uniChainLabel", `(${activeInfo.short || activeInfo.name})`);
+    setText("sushiChainLabel", `(${activeInfo.short || activeInfo.name})`);
+    setText("networkSpeedLabel", `${activeInfo.short} Speed`);
 }
 
 async function selectNetwork(chainId, event) {
@@ -1720,15 +1982,12 @@ async function selectNetwork(chainId, event) {
     const id = Number(chainId);
     if (!SUPPORTED_CHAINS[id]) return;
 
-    currentSelectedChainId = id;
-    safeStorage.setItem("userSelectedChainId", id);
-
-    // 1. Instantly update visual active state across all cards
-    updateNetworkCardsVisual(id);
+    // 1. Immediately invalidate and clear stale data from previous chain
+    invalidateAndResetChainUI(id);
+    const thisEpoch = currentChainEpoch;
 
     // 2. If MetaMask is connected, check & prompt network alignment
     if (metamaskAccount) {
-        updateWalletUIConnected(metamaskAccount, metamaskChainId);
         try {
             const currentMmCid = metamaskChainId ? parseInt(metamaskChainId, 16) : null;
             if (currentMmCid !== id) {
@@ -1747,21 +2006,26 @@ async function selectNetwork(chainId, event) {
             body: JSON.stringify({ chain_id: id })
         });
         const json = await res.json();
+        if (thisEpoch !== currentChainEpoch) return; // Superseded by rapid switch!
+
         if (json.success) {
             showToast(`Selected Network: ${json.chain.label}`, "success");
             setValue("headerChainSelect", id);
             setValue("cfgChainId", id);
             if (json.chain.rpc_url) setValue("cfgRpcUrl", json.chain.rpc_url);
-            fetchMarketData();
-            if (metamaskAccount && typeof fetchClientWalletBalances === "function") {
-                fetchClientWalletBalances(metamaskAccount, id);
-            }
             if (typeof loadSettings === "function") loadSettings();
         } else {
             showToast(json.message || "Failed to switch chain", "error");
         }
     } catch (err) {
         console.error("Backend chain switch error:", err);
+    }
+
+    // 4. Fetch fresh data for newly selected chain
+    fetchMarketData();
+    fetchMultiPairData();
+    if (metamaskAccount && typeof fetchClientWalletBalances === "function") {
+        fetchClientWalletBalances(metamaskAccount, id);
     }
 }
 
@@ -1791,66 +2055,6 @@ function getMetaMaskProvider() {
     }
     return window.ethereum;
 }
-
-const CLIENT_TOKEN_ADDRESSES = {
-    8453: { // Base L2
-        USDC: { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6 },
-        USDbC: { address: "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA", decimals: 6 },
-        USDT: { address: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", decimals: 6 },
-        WETH: { address: "0x4200000000000000000000000000000000000006", decimals: 18 }
-    },
-    1: { // Ethereum Mainnet
-        USDT: { address: "0xdAC17F958D2ee523a2206206994597C13D831ec7", decimals: 6 },
-        USDC: { address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", decimals: 6 },
-        WETH: { address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", decimals: 18 }
-    },
-    42161: { // Arbitrum One
-        USDC: { address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", decimals: 6 },
-        USDT: { address: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", decimals: 6 },
-        WETH: { address: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", decimals: 18 }
-    },
-    137: { // Polygon PoS
-        USDT: { address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", decimals: 6 },
-        USDC: { address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", decimals: 6 },
-        WETH: { address: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619", decimals: 18 }
-    },
-    11155111: { // Sepolia Testnet
-        USDC: { address: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", decimals: 6 },
-        USDT: { address: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", decimals: 6 },
-        WETH: { address: "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9", decimals: 18 }
-    },
-    84532: { // Base Sepolia Testnet
-        USDC: { address: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", decimals: 6 },
-        USDT: { address: "0x0a1e4ff477ff2099307c87c06eb73cbeec0678eb", decimals: 6 },
-        WETH: { address: "0x4200000000000000000000000000000000000006", decimals: 18 }
-    }
-};
-
-const CLIENT_ROUTER_ADDRESSES = {
-    8453: { // Base L2
-        Uniswap_V2: "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24",
-        SushiSwap_V2: "0x6BDED42c6DA8FBf0d2bA55B2fa120C5e0c8D7891"
-    },
-    1: { // Ethereum
-        Uniswap_V2: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
-        SushiSwap_V2: "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F"
-    },
-    42161: { // Arbitrum One
-        SushiSwap_V2: "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506",
-        Uniswap_V2: "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24"
-    },
-    137: { // Polygon PoS
-        SushiSwap_V2: "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506",
-        QuickSwap: "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff"
-    },
-    11155111: { // Sepolia Testnet
-        Uniswap_V2: "0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008"
-    },
-    84532: { // Base Sepolia Testnet
-        Uniswap_V2: "0x1662C4Ca803B6d5d42C85d552318b7625038923d",
-        SushiSwap_V2: "0x1662C4Ca803B6d5d42C85d552318b7625038923d"
-    }
-};
 
 const CLIENT_ERC20_ABI = [
     "function allowance(address owner, address spender) view returns (uint256)",
@@ -1886,6 +2090,15 @@ async function preApproveTokens() {
 
         const chainIdHex = metamaskChainId || (await provider.request({ method: "eth_chainId" }));
         const chainIdNum = parseInt(chainIdHex, 16);
+        const targetChainId = currentSelectedChainId;
+
+        if (chainIdNum !== targetChainId) {
+            const targetInfo = SUPPORTED_CHAINS[targetChainId] || { short: `Chain ${targetChainId}` };
+            showToast(`MetaMask is on a different network. Switching to ${targetInfo.short}...`, "warning");
+            await requestSwitchNetwork(targetChainId);
+            return;
+        }
+
         if (!SUPPORTED_CHAINS[chainIdNum]) {
             showToast(`Current network (Chain ID: ${chainIdNum}) is not supported. Please switch to a supported network.`, "error");
             return;
@@ -1944,6 +2157,26 @@ async function fetchClientWalletBalances(account, chainIdNum) {
     if (!provider || !account) return;
 
     const targetId = Number(chainIdNum || currentSelectedChainId);
+
+    // Verify if MetaMask is currently connected to targetId
+    let currentMmId = null;
+    try {
+        const hex = metamaskChainId || (await provider.request({ method: "eth_chainId" }));
+        if (hex) currentMmId = parseInt(hex, 16);
+    } catch (e) {}
+
+    if (currentMmId && currentMmId !== targetId) {
+        // MetaMask is on a different chain than the selected source of truth
+        clientWalletBalances = { eth: 0, weth: 0, usdt: 0, usdc: 0, usdbc: 0, updated: Date.now() };
+        setText("balETH", "--");
+        setText("balETHusd", "--");
+        setText("balWETH", "--");
+        setText("balWETHusd", "--");
+        setText("balUSDT", "--");
+        setText("balUSDC", "--");
+        setText("kpiBalance", "--");
+        return;
+    }
 
     // Reset balances for the target query to avoid cross-chain state pollution
     clientWalletBalances = {
@@ -2005,13 +2238,14 @@ async function fetchClientWalletBalances(account, chainIdNum) {
 function renderClientWalletBalances() {
     if (!metamaskAccount) return;
     const ethPrice = latestMarketData && latestMarketData.summary && latestMarketData.summary.eth_price_usdt ? Number(latestMarketData.summary.eth_price_usdt) : 3000;
-    const chainConfig = SUPPORTED_CHAINS[currentSelectedChainId] || { short: "ETH", nativeCurrency: { symbol: "ETH" } };
-    const nativeSym = chainConfig.short || (chainConfig.nativeCurrency ? chainConfig.nativeCurrency.symbol : "ETH");
+    const chainConfig = SUPPORTED_CHAINS[currentSelectedChainId] || { short: "ETH", currency: "ETH", nativeCurrency: { symbol: "ETH" } };
+    const nativeSym = chainConfig.currency || (chainConfig.nativeCurrency ? chainConfig.nativeCurrency.symbol : "ETH");
+    const quoteSym = (chainConfig.defaultPair && chainConfig.defaultPair.split("/")[1]) || (currentSelectedChainId === 8453 ? "USDC" : "USDT");
 
     setText("balETH", `${Number(clientWalletBalances.eth || 0).toFixed(4)} ${nativeSym}`);
-    setText("balETHusd", `≈ $${(Number(clientWalletBalances.eth || 0) * ethPrice).toFixed(2)} USDT`);
+    setText("balETHusd", `≈ $${(Number(clientWalletBalances.eth || 0) * ethPrice).toFixed(2)} ${quoteSym}`);
     setText("balWETH", `${Number(clientWalletBalances.weth || 0).toFixed(4)} WETH`);
-    setText("balWETHusd", `≈ $${(Number(clientWalletBalances.weth || 0) * ethPrice).toFixed(2)} USDT`);
+    setText("balWETHusd", `≈ $${(Number(clientWalletBalances.weth || 0) * ethPrice).toFixed(2)} ${quoteSym}`);
     setText("balUSDT", `$${Number(clientWalletBalances.usdt || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} USDT`);
 
     const effectiveUsdc = (clientWalletBalances.usdc || 0) + (clientWalletBalances.usdbc || 0);
@@ -2022,6 +2256,7 @@ function renderClientWalletBalances() {
     const totalEthEquity = ((clientWalletBalances.eth || 0) + (clientWalletBalances.weth || 0)) * ethPrice;
     const totalEquity = totalStable + totalEthEquity;
     setText("kpiBalance", `$${totalEquity.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+    setText("balETHBadge", nativeSym);
 }
 
 let metaMaskListenersAttached = false;
@@ -2240,9 +2475,7 @@ async function handleChainChanged(chainIdHex) {
 
     // Synchronize network cards and backend config if chain is supported
     if (SUPPORTED_CHAINS[newChainId]) {
-        currentSelectedChainId = newChainId;
-        safeStorage.setItem("userSelectedChainId", newChainId);
-        updateNetworkCardsVisual(newChainId);
+        invalidateAndResetChainUI(newChainId);
         try {
             const res = await fetch("/api/chain/switch", {
                 method: "POST",
@@ -2261,6 +2494,7 @@ async function handleChainChanged(chainIdHex) {
             fetchClientWalletBalances(metamaskAccount, newChainId);
         }
         fetchMarketData();
+        fetchMultiPairData();
     } else {
         handleUnsupportedChain(newChainId);
     }
@@ -2622,21 +2856,40 @@ function closeMetaMaskModal() {
 // ============================================================
 
 async function fetchMultiPairData() {
+    const thisEpoch = currentChainEpoch;
+    const thisChainId = currentSelectedChainId;
     const grid = document.getElementById("multiPairGrid");
     if (!grid) return;
 
     try {
-        const res = await fetch("/api/market/all-pairs");
+        const res = await fetch(`/api/market/all-pairs?chain_id=${thisChainId}`);
         const data = await res.json();
-        if (!data.success || !data.pairs || data.pairs.length === 0) return;
 
-        // Remove initial placeholder if present
-        const placeholder = document.getElementById("multiPairPlaceholder");
-        if (placeholder) placeholder.remove();
+        // Strict Race Condition & Epoch Guard:
+        if (thisEpoch !== currentChainEpoch || thisChainId !== currentSelectedChainId) {
+            return;
+        }
+        if (!data.success || !data.pairs) return;
+
+        // Verify response belongs to currentSelectedChainId
+        const respChainId = Number(data.chain_id || thisChainId);
+        if (respChainId !== currentSelectedChainId) {
+            return;
+        }
+
+        const chainInfo = SUPPORTED_CHAINS[thisChainId] || { name: `Chain ${thisChainId}`, short: "DEX" };
+        setText("heatmapChainLabel", `(${chainInfo.short})`);
+
+        if (data.pairs.length === 0) {
+            grid.innerHTML = `<div id="multiPairPlaceholder" style="color:var(--text-muted); font-size:12px; padding:15px;">No active pools found for ${chainInfo.name}.</div>`;
+            return;
+        }
+
+        // Clean grid of any previous chain cards
+        grid.innerHTML = "";
 
         data.pairs.forEach(p => {
             const cardId = "pair_card_" + p.pair.replace("/", "_");
-            let card = document.getElementById(cardId);
             const isBest = data.best_pair && data.best_pair.pair === p.pair;
             const spreadSign = p.spread_val >= 0 ? "+" : "";
             const borderColor = p.is_active ? "var(--action-color)" : (isBest ? "var(--profit-color)" : "var(--border)");
@@ -2644,36 +2897,34 @@ async function fetchMultiPairData() {
                 ? '<span class="badge badge-blue" style="position:absolute; top:8px; right:8px; font-size:10px;">ACTIVE PAIR</span>' 
                 : (isBest ? '<span class="badge badge-green" style="position:absolute; top:8px; right:8px; font-size:10px;">TOP SPREAD</span>' : '');
 
-            const cardContent = `
+            const card = document.createElement("div");
+            card.id = cardId;
+            card.className = "dex-wallet-item";
+            card.style.position = "relative";
+            card.style.cursor = "pointer";
+            card.style.minHeight = "130px";
+            card.style.borderColor = borderColor;
+            card.onclick = () => quickSwitchPair(p.pair);
+
+            card.innerHTML = `
                 ${badgeHtml}
-                <span class="token-name" style="font-size:14px; font-weight:700; color:var(--text-bright);">${p.pair}</span>
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="token-name" style="font-size:14px; font-weight:700; color:var(--text-bright);">${p.pair}</span>
+                    <span style="font-size:10px; color:var(--text-muted); background:rgba(255,255,255,0.06); padding:1px 5px; border-radius:4px;">${chainInfo.short}</span>
+                </div>
                 <div style="margin: 8px 0;">
-                    <div style="font-size:11px; color:var(--text-muted);">Buy: ${p.buy_dex.replace("_", " ")} ($${p.buy_price.toFixed(2)})</div>
-                    <div style="font-size:11px; color:var(--text-muted);">Sell: ${p.sell_dex.replace("_", " ")} ($${p.sell_price.toFixed(2)})</div>
+                    <div style="font-size:11px; color:var(--text-muted);">Buy: ${p.buy_dex.replace("_", " ")} ($${Number(p.buy_price || 0).toFixed(2)})</div>
+                    <div style="font-size:11px; color:var(--text-muted);">Sell: ${p.sell_dex.replace("_", " ")} ($${Number(p.sell_price || 0).toFixed(2)})</div>
                 </div>
                 <h3 style="font-size:16px; color:${p.spread_val >= 0 ? "var(--profit-color)" : "var(--loss-color)"}; margin-bottom:4px; font-variant-numeric:tabular-nums;">
-                    ${spreadSign}$${p.spread_val.toFixed(2)} (${spreadSign}${p.spread_pct.toFixed(2)}%)
+                    ${spreadSign}$${Number(p.spread_val || 0).toFixed(2)} (${spreadSign}${Number(p.spread_pct || 0).toFixed(2)}%)
                 </h3>
                 <button class="btn btn-secondary" style="width:100%; font-size:11px; padding:4px; margin-top:6px;">
                     ${p.is_active ? "Active" : "Switch to " + p.pair}
                 </button>
             `;
 
-            if (!card) {
-                card = document.createElement("div");
-                card.id = cardId;
-                card.className = "dex-wallet-item";
-                card.style.position = "relative";
-                card.style.cursor = "pointer";
-                card.style.minHeight = "130px";
-                card.onclick = () => quickSwitchPair(p.pair);
-                grid.appendChild(card);
-            }
-
-            card.style.borderColor = borderColor;
-            if (card.innerHTML !== cardContent) {
-                card.innerHTML = cardContent;
-            }
+            grid.appendChild(card);
         });
     } catch (err) {
         console.warn("[Multi-Pair Fetch Error]:", err);

@@ -91,7 +91,7 @@ def calculate_dynamic_trade_amount(
 # MARKET SCANNER & PROFITABILITY GATES
 # ============================================================
 
-def analyze_market(custom_amount: Optional[float] = None) -> Optional[Dict[str, Any]]:
+def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
     """Scan all supported DEX pools for executable arbitrage routes.
     
     Models exact token outputs, price impacts, DEX swap fees (0.3% + 0.3%),
@@ -119,8 +119,15 @@ def analyze_market(custom_amount: Optional[float] = None) -> Optional[Dict[str, 
     trade_amount = max(trade_amount, float(getattr(config, "MIN_TRADE_AMOUNT", 0.0001)))
     trade_amount = min(trade_amount, float(getattr(config, "MAX_TRADE_AMOUNT", 5000.0)))
 
+    # Resolve chain-specific symbol
+    chain_id_val = int(chain_id) if chain_id is not None else getattr(config, "CHAIN_ID", 8453)
+    chain_entry = config.CHAIN_REGISTRY.get(chain_id_val, {})
+    chain_name_val = chain_entry.get("name", getattr(config, "DEFAULT_CHAIN", "base"))
+    chain_label_val = chain_entry.get("label", "Base L2 Mainnet")
+    active_symbol = chain_entry.get("default_symbol", config.SYMBOL) if chain_id is not None else config.SYMBOL
+
     # Parse symbol (e.g. WETH/USDT)
-    parts = config.SYMBOL.split("/")
+    parts = active_symbol.split("/")
     base_sym = parts[0] if len(parts) > 0 else "WETH"
     quote_sym = parts[1] if len(parts) > 1 else "USDT"
 
@@ -230,7 +237,10 @@ def analyze_market(custom_amount: Optional[float] = None) -> Optional[Dict[str, 
             opp = {
                 "buy_dex": buy_dex,
                 "sell_dex": sell_dex,
-                "token_pair": config.SYMBOL,
+                "token_pair": active_symbol,
+                "chain_id": chain_id_val,
+                "chain_name": chain_name_val,
+                "chain_label": chain_label_val,
                 "amount_in": trade_amount,
                 "weth_amount": round(weth_bought, 6),
                 "buy_price": round(buy_spot, 2),
@@ -253,6 +263,7 @@ def analyze_market(custom_amount: Optional[float] = None) -> Optional[Dict[str, 
                 "min_profit_threshold": round(min_profit_threshold, 6),
                 "is_gas_acceptable": gas_info.get("is_gas_acceptable", True),
                 "is_profitable": is_profitable,
+                "timestamp": time.time() * 1000,
             }
             opportunities.append(opp)
 
@@ -269,6 +280,9 @@ def analyze_market(custom_amount: Optional[float] = None) -> Optional[Dict[str, 
         "prices": prices,
         "reserves": reserves,
         "trade_amount": trade_amount,
+        "chain_id": best["chain_id"],
+        "chain_name": best["chain_name"],
+        "chain_label": best["chain_label"],
         "buy_dex": best["buy_dex"],
         "sell_dex": best["sell_dex"],
         "buy_price": best["buy_price"],

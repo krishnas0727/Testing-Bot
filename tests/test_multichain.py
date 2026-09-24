@@ -164,6 +164,71 @@ class MultiChainVerificationTests(unittest.TestCase):
         self.assertEqual(config.CHAIN_ID, 84532)
         self.assertEqual(config.WALLET_ADDRESS, "0x1bcea3bc88cd89f3a5de9c07a5c7b6f2b4f501b4")
 
+    def test_api_market_all_pairs_chain_context(self):
+        """Verify /api/market/all-pairs respects chain_id parameter and isolates pairs."""
+        # 1. Test Polygon (137)
+        res_poly = self.client.get("/api/market/all-pairs?chain_id=137")
+        self.assertEqual(res_poly.status_code, 200)
+        data_poly = json.loads(res_poly.data)
+        self.assertTrue(data_poly["success"])
+        self.assertEqual(data_poly["chain_id"], 137)
+        self.assertEqual(data_poly["chain_name"], "polygon")
+        self.assertEqual(data_poly["chain_label"], "Polygon (PoS)")
+        poly_pairs = [p["pair"] for p in data_poly["pairs"]]
+        self.assertIn("WETH/USDT", poly_pairs)
+        self.assertIn("WETH/USDC", poly_pairs)
+        for p in data_poly["pairs"]:
+            self.assertEqual(p["chain_id"], 137)
+            self.assertEqual(p["chain_name"], "polygon")
+
+        # 2. Test Base (8453)
+        res_base = self.client.get("/api/market/all-pairs?chain_id=8453")
+        self.assertEqual(res_base.status_code, 200)
+        data_base = json.loads(res_base.data)
+        self.assertTrue(data_base["success"])
+        self.assertEqual(data_base["chain_id"], 8453)
+        self.assertEqual(data_base["chain_name"], "base")
+        self.assertEqual(data_base["chain_label"], "Base L2 Mainnet")
+        base_pairs = [p["pair"] for p in data_base["pairs"]]
+        self.assertIn("WETH/USDC", base_pairs)
+        self.assertIn("WETH/USDT", base_pairs)
+        self.assertIn("WETH/DAI", base_pairs)
+        for p in data_base["pairs"]:
+            self.assertEqual(p["chain_id"], 8453)
+            self.assertEqual(p["chain_name"], "base")
+
+        # 3. Test Arbitrum (42161)
+        res_arb = self.client.get("/api/market/all-pairs?chain_id=42161")
+        self.assertEqual(res_arb.status_code, 200)
+        data_arb = json.loads(res_arb.data)
+        self.assertTrue(data_arb["success"])
+        self.assertEqual(data_arb["chain_id"], 42161)
+        self.assertEqual(data_arb["chain_name"], "arbitrum")
+        self.assertEqual(data_arb["chain_label"], "Arbitrum One")
+
+    def test_api_prices_chain_context(self):
+        """Verify /api/prices returns prices tagged with the requested chain_id."""
+        res = self.client.get("/api/prices?chain_id=137")
+        self.assertEqual(res.status_code, 200)
+        data = json.loads(res.data)
+        self.assertTrue(data["success"])
+        self.assertEqual(data["chain_id"], 137)
+        self.assertEqual(data["chain_name"], "polygon")
+        self.assertEqual(data["chain_label"], "Polygon (PoS)")
+
+    def test_arbitrage_market_analysis_chain_tagging(self):
+        """Verify arbitrage.analyze_market tags opportunities with chain context."""
+        import arbitrage
+        analysis_poly = arbitrage.analyze_market(chain_id=137)
+        self.assertEqual(analysis_poly["chain_id"], 137)
+        self.assertEqual(analysis_poly["chain_name"], "polygon")
+        self.assertEqual(analysis_poly["chain_label"], "Polygon (PoS)")
+        if analysis_poly.get("opportunities"):
+            for opp in analysis_poly["opportunities"]:
+                self.assertEqual(opp["chain_id"], 137)
+                self.assertEqual(opp["chain_name"], "polygon")
+
 
 if __name__ == "__main__":
     unittest.main()
+

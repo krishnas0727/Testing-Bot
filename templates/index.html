@@ -144,7 +144,11 @@
             <span class="second-header-dot"></span>
             <span class="second-header-title">SECURITY & WEB3 EXECUTION DOCK</span>
             <span class="second-header-sep">•</span>
-            <span class="second-header-desc">Non-custodial smart contract guard & wallet connection</span>
+            <span id="globalNetworkBadge" class="global-network-badge" style="background:rgba(56, 189, 248, 0.12); border:1px solid #0284c7; color:#38bdf8; font-weight:800; font-size:11px; padding:3px 10px; border-radius:20px; letter-spacing:0.5px; display:inline-flex; align-items:center; gap:6px;">
+                <span class="network-dot dot-green" id="globalNetworkDot"></span>
+                <span id="globalNetworkText">NETWORK: BASE L2</span>
+            </span>
+            <span class="second-header-sep">•</span>
             <span class="badge-mev-shield" title="Sequencer protected from public mempool front-running bots">🛡️ MEV SHIELD ACTIVE</span>
         </div>
         <div class="second-header-right">
@@ -511,7 +515,7 @@
                 <div class="dex-wallet-item" style="border-left:3px solid #a855f7;">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
                         <span class="token-name">Native Gas</span>
-                        <span style="font-size:10px; font-weight:800; color:#c084fc; background:rgba(168,85,247,0.2); padding:2px 6px; border-radius:4px; font-family:var(--font-mono);">ETH</span>
+                        <span id="balETHBadge" style="font-size:10px; font-weight:800; color:#c084fc; background:rgba(168,85,247,0.2); padding:2px 6px; border-radius:4px; font-family:var(--font-mono);">ETH</span>
                     </div>
                     <h3 id="balETH">0.0000 ETH</h3>
                     <small id="balETHusd" style="color:var(--text-muted);">≈ $0.00 USDT</small>
@@ -553,8 +557,8 @@
                 <div>
                     <div class="panel-header">
                         <div>
-                            <h2>Best DEX Route</h2>
-                            <p>Calculated with pool depth, gas, and price impact</p>
+                            <h2>Best DEX Route <span id="bestRouteChainBadge" class="badge badge-blue" style="font-size:11px; margin-left:6px; font-weight:700;">BASE L2</span></h2>
+                            <p>Calculated with pool depth, gas, and price impact on <span id="bestRouteChainName">Base L2</span> <span id="bestRouteTimestamp" style="color:var(--text-muted); font-size:11px; margin-left:8px;"></span></p>
                         </div>
                         <span id="oppBadge" class="badge badge-yellow">SCANNING</span>
                     </div>
@@ -716,14 +720,14 @@
         <div class="panel" style="margin-top:20px;">
             <div class="panel-header">
                 <div>
-                    <h2>Multi-Pair Opportunity Heatmap (Base L2)</h2>
+                    <h2>Multi-Pair Opportunity Heatmap <span id="heatmapChainLabel" class="badge badge-blue" style="font-size:11px; margin-left:6px; font-weight:700;">(Base L2)</span></h2>
                     <p>Live cross-pair scanning to detect the highest DEX-to-DEX arbitrage spreads across liquidity pools</p>
                 </div>
                 <button class="btn btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="fetchMultiPairData()">🔄 Refresh Pairs</button>
             </div>
             <div class="dex-wallet-grid" id="multiPairGrid">
                 <!-- Dynamically populated via fetchMultiPairData() -->
-                <div id="multiPairPlaceholder" style="color:var(--text-muted); font-size:12px; padding:15px;">Scanning Base L2 pairs...</div>
+                <div id="multiPairPlaceholder" style="color:var(--text-muted); font-size:12px; padding:15px;">Scanning pairs...</div>
             </div>
         </div>
 
