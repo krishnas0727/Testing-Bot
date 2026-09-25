@@ -525,6 +525,20 @@ def get_recent_latency_audits(limit: int = 50) -> List[Dict[str, Any]]:
         return []
 
 
+def clear_latency_audits() -> bool:
+    """Clear all records from latency_audits table."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM latency_audits")
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as exc:
+        print(f"⚠️ Error clearing latency audits: {exc}", flush=True)
+        return False
+
+
 def get_live_pnl_summary(mode: Optional[str] = None) -> Dict[str, Any]:
     create_database()
     conn = get_connection()

@@ -1392,6 +1392,20 @@ def latency_audit_api():
         return jsonify({"success": False, "message": str(exc)}), 500
 
 
+@app.route("/api/latency-audit/clear", methods=["POST"])
+def clear_latency_audit_api():
+    """Clear all latency audit telemetry records from the database."""
+    try:
+        from database import clear_latency_audits
+        clear_latency_audits()
+        return jsonify({
+            "success": True,
+            "message": "Latency audit history cleared successfully.",
+        })
+    except Exception as exc:
+        return jsonify({"success": False, "message": str(exc)}), 500
+
+
 @app.route("/api/trades/clear", methods=["POST"])
 @app.route("/api/clear-trades", methods=["POST"])
 def clear_trades_api():
