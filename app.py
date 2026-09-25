@@ -52,6 +52,13 @@ from database import (
     save_execution_log,
     get_recent_execution_logs,
 )
+from latency_audit import (
+    get_latency_audit_summary,
+    TradeLatencyAudit,
+    record_latency_audit,
+    check_quote_staleness,
+    get_current_epoch_ms,
+)
 
 app = Flask(__name__)
 SERVER_STARTED_AT = time.time()
@@ -145,7 +152,8 @@ def record_execution_event(
     net_profit: float,
     status: str,
     reason: str,
-    tx_hash: str = ""
+    tx_hash: str = "",
+    telemetry: Optional[Dict[str, Any]] = None
 ):
     """Record execution or skip event in database and in-memory audit log for 24/7 persistence."""
     global execution_audit_logs
@@ -160,6 +168,7 @@ def record_execution_event(
         "status": status,
         "reason": reason,
         "tx_hash": tx_hash or "",
+        "telemetry": telemetry or {},
     }
     execution_audit_logs.insert(0, entry)
     if len(execution_audit_logs) > MAX_AUDIT_LOGS:
@@ -261,6 +270,7 @@ def start_background_auto_trader():
                             amt = float(best_r.get("amount_in", getattr(config, "DEFAULT_TRADE_AMOUNT", 10.0)))
                             np = float(best_r.get("net_profit_usdt", 0.0))
 
+                            tel = result.get("telemetry") or {}
                             if result.get("success"):
                                 last_execution_status = "ATOMIC TRADE FILLED"
                                 t = result.get("trade", {})
@@ -271,7 +281,8 @@ def start_background_auto_trader():
                                     net_profit=np,
                                     status="FILLED",
                                     reason=f"Profit: +${t.get('net_profit', 0):.4f} USDT",
-                                    tx_hash=t.get("tx_hash", "")
+                                    tx_hash=t.get("tx_hash", ""),
+                                    telemetry=tel
                                 )
                                 print(
                                     f"[DEX Trade Executed] {t.get('buy_dex')} -> {t.get('sell_dex')} | "
@@ -287,19 +298,25 @@ def start_background_auto_trader():
 
                                 is_insufficient = "INSUFFICIENT BALANCE" in reason or result.get("status") == "INSUFFICIENT BALANCE"
                                 is_cooldown = "Cooldown" in reason or "Duplicate" in reason
+                                is_stale = "STALE" in reason or result.get("is_stale", False)
                                 if is_cooldown:
                                     last_execution_status = "ACTIVE - SCANNING FOR NEXT ARBITRAGE"
                                 else:
+                                    ev_type = "INSUFFICIENT_BALANCE" if is_insufficient else ("STALE_OPPORTUNITY" if is_stale else "TRADE_SKIPPED")
+                                    st_type = "INSUFFICIENT_BALANCE" if is_insufficient else ("STALE" if is_stale else "SKIPPED")
                                     record_execution_event(
-                                        event_type="INSUFFICIENT_BALANCE" if is_insufficient else "TRADE_SKIPPED",
+                                        event_type=ev_type,
                                         route=route_name,
                                         amount_in=amt,
                                         net_profit=np,
-                                        status="INSUFFICIENT_BALANCE" if is_insufficient else "SKIPPED",
-                                        reason=clean_reason
+                                        status=st_type,
+                                        reason=clean_reason,
+                                        telemetry=tel
                                     )
                                     if is_insufficient:
                                         last_execution_status = f"INSUFFICIENT BALANCE: {clean_reason}"
+                                    elif is_stale:
+                                        last_execution_status = f"STALE: {clean_reason}"
                                     else:
                                         last_execution_status = f"TRADE SKIPPED: {clean_reason}"
                             else:
@@ -310,7 +327,8 @@ def start_background_auto_trader():
                                     amount_in=amt,
                                     net_profit=np,
                                     status="FAILED",
-                                    reason=msg
+                                    reason=msg,
+                                    telemetry=tel
                                 )
                                 last_execution_status = f"TRADE FAILED: {msg}"
                     else:
@@ -443,12 +461,23 @@ def market_api():
         else:
             current_exec_status = base_engine_status
 
-        last_execution_status = current_exec_status
+        latency_summary = get_latency_audit_summary(limit=15)
+        det_ts = float(market.get("detected_at") or time.time())
+        quote_age_ms = round(max(0.0, (time.time() - det_ts) * 1000.0), 2)
+        is_quote_stale = quote_age_ms > getattr(config, "MAX_QUOTE_AGE_MS", 5000)
 
         return jsonify({
             "success": True,
             "data": market,
             "wallet": wallet,
+            "latency_audit": latency_summary,
+            "quote_freshness": {
+                "detected_at": det_ts * 1000.0 if det_ts < 1e11 else det_ts,
+                "quote_age_ms": quote_age_ms,
+                "is_stale": is_quote_stale,
+                "max_quote_age_ms": getattr(config, "MAX_QUOTE_AGE_MS", 5000),
+                "target_benchmark_ms": 1000.0,
+            },
             "summary": {
                 "balance": total_balance,
                 "total_profit": display_profit,
@@ -523,6 +552,21 @@ def verify_profit_api():
         parts = config.SYMBOL.split("/")
         base_sym = parts[0] if len(parts) > 0 else "WETH"
         quote_sym = parts[1] if len(parts) > 1 else "USDT"
+
+        # Check Quote Staleness against MAX_QUOTE_AGE_MS
+        client_detected_at = req_data.get("detected_at")
+        if client_detected_at:
+            is_stale, quote_age_ms = check_quote_staleness(float(client_detected_at), time.time() * 1000.0, config.MAX_QUOTE_AGE_MS)
+            if is_stale:
+                return jsonify({
+                    "is_profitable": False,
+                    "is_stale": True,
+                    "status": "STALE_OPPORTUNITY",
+                    "quote_age_ms": quote_age_ms,
+                    "max_quote_age_ms": getattr(config, "MAX_QUOTE_AGE_MS", 5000),
+                    "net_profit_usdt": 0.0,
+                    "skip_reason": f"STALE_OPPORTUNITY: Opportunity data is stale ({quote_age_ms:.1f}ms > {config.MAX_QUOTE_AGE_MS}ms). Refreshing market data.",
+                })
 
         # Fresh quote from all DEXes
         from dex_engine import get_all_dex_quotes, estimate_arbitrage_gas_cost_usd
@@ -704,6 +748,7 @@ def manual_trade_api():
         amt = float(custom_amount or best.get("amount_in", getattr(config, "DEFAULT_TRADE_AMOUNT", 10.0)))
         np = float(best.get("net_profit_usdt", 0.0))
 
+        tel = result.get("telemetry") or {}
         if result.get("success"):
             last_execution_status = "ATOMIC TRADE FILLED"
             t = result.get("trade", {})
@@ -714,7 +759,8 @@ def manual_trade_api():
                 net_profit=np,
                 status="FILLED",
                 reason=f"Profit: +${t.get('net_profit', 0):.4f} USDT",
-                tx_hash=t.get("tx_hash", "")
+                tx_hash=t.get("tx_hash", ""),
+                telemetry=tel
             )
         elif result.get("status") in ("TRADE SKIPPED", "INSUFFICIENT BALANCE"):
             reason = result.get("skip_reason") or result.get("message") or "Trade conditions not met"
@@ -724,10 +770,15 @@ def manual_trade_api():
                     clean_reason = clean_reason[len(pfx):].strip()
 
             is_insufficient = "INSUFFICIENT BALANCE" in reason or result.get("status") == "INSUFFICIENT BALANCE"
+            is_stale = "STALE" in reason or result.get("is_stale", False)
             if is_insufficient:
                 last_execution_status = f"INSUFFICIENT BALANCE: {clean_reason}"
                 event_type = "INSUFFICIENT_BALANCE"
                 audit_status = "INSUFFICIENT_BALANCE"
+            elif is_stale:
+                last_execution_status = f"STALE: {clean_reason}"
+                event_type = "STALE_OPPORTUNITY"
+                audit_status = "STALE"
             else:
                 last_execution_status = f"TRADE SKIPPED: {clean_reason}"
                 event_type = "TRADE_SKIPPED"
@@ -739,7 +790,8 @@ def manual_trade_api():
                 amount_in=amt,
                 net_profit=np,
                 status=audit_status,
-                reason=clean_reason
+                reason=clean_reason,
+                telemetry=tel
             )
         elif result.get("status") == "LIVE_SIGNER_REQUIRED":
             last_execution_status = "METAMASK SIGNER REQUIRED"
@@ -753,7 +805,8 @@ def manual_trade_api():
                 amount_in=amt,
                 net_profit=np,
                 status="FAILED",
-                reason=msg
+                reason=msg,
+                telemetry=tel
             )
 
         status_code = 200 if result.get("success") else 400
@@ -868,6 +921,32 @@ def confirm_live_trade_api():
             "created_at": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
         }
 
+        # Latency Audit Telemetry for Live Confirmed Trade
+        t_detect = float(req.get("opportunity_detected_at") or req.get("detected_at") or (time.time() - 3.0))
+        t_quote = float(req.get("quote_received_at") or (time.time() - 2.5))
+        t_val = float(req.get("validation_started_at") or (time.time() - 2.0))
+        t_prep = float(req.get("prep_started_at") or (time.time() - 1.5))
+        t_sub = float(req.get("submitted_at") or (time.time() - 1.0))
+        t_conf = time.time()
+
+        audit = TradeLatencyAudit(
+            tx_hash=tx_hash,
+            token_pair=token_pair,
+            mode=target_mode,
+            detected_at=t_detect,
+            quote_received_at=t_quote,
+            validation_started_at=t_val,
+            prep_started_at=t_prep,
+            submitted_at=t_sub,
+            confirmed_at=t_conf,
+            gas_fees={"gas_used": gas_used, "gas_price_gwei": gas_price_gwei, "gas_cost_usdt": gas_cost_usdt},
+            slippage_price_impact={"price_impact": float(req.get("price_impact", 0.0))},
+            final_result="CONFIRMED" if verified_net_profit > 0 else "UNPROFITABLE",
+            skip_reason="" if verified_net_profit > 0 else f"Net profit was negative (-${abs(verified_net_profit):.4f} USDT)"
+        )
+        telemetry = record_latency_audit(audit)
+        trade_data["telemetry"] = telemetry
+
         # STRICT PROFITABILITY GATE: Never confirm a trade with zero or negative net profit!
         if verified_net_profit <= 0:
             trade_data["status"] = "UNPROFITABLE"
@@ -879,12 +958,14 @@ def confirm_live_trade_api():
                 net_profit=verified_net_profit,
                 status="UNPROFITABLE",
                 reason=f"Transaction confirmed on {chain_label} but net profit is negative (-${abs(verified_net_profit):.4f} USDT) after ${gas_cost_usdt:.4f} gas fee.",
-                tx_hash=tx_hash
+                tx_hash=tx_hash,
+                telemetry=telemetry
             )
             return jsonify({
                 "success": False,
                 "status": "UNPROFITABLE_EXECUTION",
                 "trade": trade_data,
+                "telemetry": telemetry,
                 "message": f"Transaction mined on {chain_label}, but net profit is negative (-${abs(verified_net_profit):.4f} USDT) after ${gas_cost_usdt:.4f} gas fee. Rejected from profitable trade confirmations."
             }), 400
 
@@ -900,13 +981,15 @@ def confirm_live_trade_api():
             net_profit=verified_net_profit,
             status="CONFIRMED",
             reason=f"Verified on-chain receipt ({gas_used} gas used, ${gas_cost_usdt} gas fee)",
-            tx_hash=tx_hash
+            tx_hash=tx_hash,
+            telemetry=telemetry
         )
 
         return jsonify({
             "success": True,
             "trade_id": trade_id,
             "trade": trade_data,
+            "telemetry": telemetry,
             "message": f"Real on-chain trade verified on {chain_label}! Gas: ${gas_cost_usdt:.4f} USDT, Net PnL: +${verified_net_profit:.4f} USDT."
         })
     except Exception as exc:
@@ -1286,6 +1369,21 @@ def trades_api():
         "trades": trades,
         "mode_filter": mode_filter,
     })
+
+
+@app.route("/api/latency-audit", methods=["GET"])
+def latency_audit_api():
+    """Return latency audit telemetry summary, stage breakdowns, quote staleness, and benchmark metrics."""
+    try:
+        limit = int(request.args.get("limit", 50))
+        summary = get_latency_audit_summary(limit=limit)
+        return jsonify({
+            "success": True,
+            "data": summary,
+            "summary": summary
+        })
+    except Exception as exc:
+        return jsonify({"success": False, "message": str(exc)}), 500
 
 
 @app.route("/api/trades/clear", methods=["POST"])

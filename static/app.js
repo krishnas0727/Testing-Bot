@@ -553,6 +553,7 @@ document.addEventListener("DOMContentLoaded", () => {
     startPolling();
     loadSettings();
     loadTrades();
+    loadLatencyAudits();
     initMetaMask();
     fetchMultiPairData();
     setInterval(fetchMultiPairData, 3500);
@@ -608,6 +609,7 @@ function switchTab(event, tabName) {
     if (tabName === "trades") {
         loadTrades();
         loadExecutionLogs();
+        loadLatencyAudits();
     }
     if (tabName === "settings") loadSettings();
 }
@@ -1222,6 +1224,52 @@ function updateDashboardUI(payload) {
         }
     }
 
+    // Live Quote Freshness & Latency Audit strip on Opportunity Card
+    const qFresh = payload.quote_freshness || data.quote_freshness;
+    const lSummary = payload.latency_audit || data.latency_audit;
+    if (qFresh) {
+        const qAge = Number(qFresh.quote_age_ms || 0);
+        setText("oppQuoteAge", `${qAge.toFixed(0)} ms`);
+        const qBadge = document.getElementById("oppQuoteBadge");
+        if (qBadge) {
+            if (qFresh.is_stale) {
+                qBadge.className = "badge badge-red";
+                qBadge.innerText = "STALE (> 5000ms)";
+            } else {
+                qBadge.className = "badge badge-green";
+                qBadge.innerText = "FRESH";
+            }
+        }
+
+        if (qFresh.is_stale) {
+            const oppDiagBadge = document.getElementById("oppDiagBadge");
+            const oppDiagReason = document.getElementById("oppDiagReason");
+            if (oppDiagBadge && oppDiagReason) {
+                oppDiagBadge.className = "badge badge-red";
+                oppDiagBadge.innerText = "STALE DATA";
+                oppDiagReason.innerText = `Quote age (${qAge.toFixed(0)}ms) exceeded 5000ms threshold. Invalidation guard active.`;
+                oppDiagReason.style.color = "var(--loss-color)";
+            }
+        }
+    }
+    if (lSummary && lSummary.latest) {
+        const lastMs = Number(lSummary.latest?.intervals_ms?.total_elapsed_ms || 0);
+        setText("oppLastLatency", `${lastMs.toFixed(1)} ms`);
+        const targetBadge = document.getElementById("oppTargetBenchmarkBadge");
+        if (targetBadge) {
+            if (lastMs <= 1000) {
+                targetBadge.className = "badge badge-green";
+                targetBadge.innerText = "Target Met (< 1000ms)";
+            } else {
+                targetBadge.className = "badge badge-yellow";
+                targetBadge.innerText = `Measured: ${(lastMs / 1000).toFixed(2)}s`;
+            }
+        }
+    } else if (lSummary && lSummary.averages && lSummary.averages.total_elapsed_ms > 0) {
+        const avgMs = Number(lSummary.averages.total_elapsed_ms);
+        setText("oppLastLatency", `${avgMs.toFixed(1)} ms`);
+    }
+
     // 6. Prices Tab pool cards & Liquidity Depth Ratio Gauge
     const uniRes = reserves["Uniswap_V2"] || {};
     const sushiRes = reserves["SushiSwap_V2"] || {};
@@ -1494,10 +1542,23 @@ async function executeCurrentTrade() {
         return;
     }
 
+    // Safety Guard: Quote Staleness Check (Target < 1000ms, Invalidate if > 5000ms)
+    const quoteFreshness = latestMarketData?.quote_freshness;
+    if (quoteFreshness && quoteFreshness.is_stale) {
+        const ageMs = Number(quoteFreshness.quote_age_ms || 0).toFixed(0);
+        showToast(`Execution blocked: Quote is stale (${ageMs}ms > 5000ms). Refreshing market data for fresh route...`, "warning");
+        renderExecutionResult({
+            success: false,
+            status: "STALE_OPPORTUNITY",
+            message: `Execution prevented: Quote age (${ageMs}ms) exceeded 5000ms freshness threshold. Market prices shift rapidly; re-scanning liquidity pools for fresh quotes.`
+        });
+        await fetchMarketData();
+        return;
+    }
+
     const currentMode = latestMarketData?.trading_mode || latestMarketData?.settings?.trading_mode || "MOCK";
     const isLiveOrTestnet = (currentMode === "LIVE" || currentMode === "TESTNET");
     const hasServerSigner = latestMarketData && Boolean(latestMarketData.has_private_key);
-    const bestRoute = latestMarketData?.best_route || latestMarketData?.data?.best_route;
 
     // Strict pre-check: Never submit if latest net profit is not strictly positive (> 0)
     if (bestRoute && Number(bestRoute.net_profit_usdt || 0) <= 0) {
@@ -1555,12 +1616,14 @@ async function executeCurrentTrade() {
                 tradeAmtToSend = Math.max(0.0001, Math.floor(avail * 0.95 * 10000) / 10000);
             }
         }
+        const detectedAt = latestMarketData?.quote_freshness?.detected_at || latestMarketData?.data?.detected_at || Date.now();
         const res = await fetch("/api/trade", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 trade_amount: tradeAmtToSend,
-                wallet_address: metamaskAccount
+                wallet_address: metamaskAccount,
+                detected_at: detectedAt
             })
         });
         const json = await res.json();
@@ -1576,6 +1639,7 @@ async function executeCurrentTrade() {
         fetchMarketData();
         loadTrades();
         loadExecutionLogs();
+        loadLatencyAudits();
     } catch (err) {
         showToast("Execution error: " + err, "error");
     }
@@ -1684,6 +1748,46 @@ function renderExecutionResult(json) {
                 ` : ""}
             </div>
         ` : ""}
+        ${(json.telemetry || (json.trade && json.trade.telemetry)) ? (() => {
+            const tel = json.telemetry || json.trade.telemetry;
+            const inter = tel.intervals_ms || {};
+            const totalMs = Number(inter.total_elapsed_ms || 0);
+            const isTargetMet = totalMs <= 1000;
+            return `
+                <div style="margin-top:10px; padding:10px 12px; background:rgba(15,23,42,0.9); border-radius:6px; border:1px solid rgba(56,189,248,0.25); font-family:var(--font-mono); font-size:11px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; border-bottom:1px solid rgba(148,163,184,0.15); padding-bottom:5px;">
+                        <span style="font-weight:700; color:var(--accent-cyan); text-transform:uppercase; letter-spacing:0.5px;">⏱️ Latency & Staleness Telemetry</span>
+                        <span class="badge ${isTargetMet ? 'badge-green' : 'badge-yellow'}" style="font-size:10px;">${tel.benchmark_status || (isTargetMet ? 'TARGET MET (< 1000ms)' : 'TARGET EXCEEDED')}</span>
+                    </div>
+                    <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:6px; margin-bottom:6px;">
+                        <div>
+                            <span style="color:var(--text-muted);">1. Det → Prep:</span>
+                            <span style="color:#38bdf8; font-weight:700; margin-left:4px;">${Number(inter.detection_to_prep_ms || 0).toFixed(1)} ms</span>
+                        </div>
+                        <div>
+                            <span style="color:var(--text-muted);">2. Prep → Submit:</span>
+                            <span style="color:#f59e0b; font-weight:700; margin-left:4px;">${Number(inter.prep_to_submit_ms || 0).toFixed(1)} ms</span>
+                        </div>
+                        <div>
+                            <span style="color:var(--text-muted);">3. Sub → Confirm:</span>
+                            <span style="color:#a855f7; font-weight:700; margin-left:4px;">${Number(inter.submit_to_confirm_ms || 0).toFixed(1)} ms</span>
+                        </div>
+                        <div>
+                            <span style="color:var(--text-muted);">Total Elapsed:</span>
+                            <span style="color:${isTargetMet ? 'var(--profit-color)' : '#f59e0b'}; font-weight:700; margin-left:4px;">${totalMs.toFixed(1)} ms</span>
+                        </div>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:3px; font-size:10.5px;">
+                        <span style="color:var(--text-muted);">Quote Age at Validation:</span>
+                        <span style="color:${tel.is_stale ? 'var(--loss-color)' : 'var(--profit-color)'}; font-weight:700;">${Number(tel.quote_age_ms || 0).toFixed(1)} ms ${tel.is_stale ? '(STALE)' : '(FRESH)'}</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; font-size:10.5px;">
+                        <span style="color:var(--text-muted);">Pipeline Bottleneck:</span>
+                        <span style="color:#f59e0b; font-weight:600;">${tel.bottleneck_stage || 'None'}</span>
+                    </div>
+                </div>
+            `;
+        })() : ""}
         ${isInsufficient ? `
             <div style="margin-top:14px; text-align:center;">
                 <button class="btn btn-primary" style="width:100%; padding:10px; font-weight:700; justify-content:center; background:linear-gradient(135deg, #00f2fe 0%, #4facfe 100%); color:#000; font-size:13px;" onclick="switchToMockAndExecute()">
@@ -2245,8 +2349,119 @@ async function loadTrades() {
         }).join("");
 
         loadExecutionLogs();
+        loadLatencyAudits();
     } catch (err) {
         console.warn("Trades load error:", err);
+    }
+}
+
+async function loadLatencyAudits() {
+    const tbody = document.getElementById("latencyAuditsTableBody");
+    try {
+        const res = await fetch("/api/latency-audit?limit=25");
+        const json = await res.json();
+        const summary = json.data || json.summary || {};
+        const averages = summary.averages || {};
+        const compliance = summary.benchmark_compliance || {};
+        const latest = summary.latest || {};
+        const audits = summary.recent_audits || [];
+
+        // 1. Update 4 KPI timing cards
+        setText("kpiDetToPrep", (averages.detection_to_prep_ms !== undefined && summary.total_audited > 0) ? `${Number(averages.detection_to_prep_ms).toFixed(1)} ms` : "-- ms");
+        setText("kpiPrepToSub", (averages.prep_to_submit_ms !== undefined && summary.total_audited > 0) ? `${Number(averages.prep_to_submit_ms).toFixed(1)} ms` : "-- ms");
+        setText("kpiSubToConf", (averages.submit_to_confirm_ms !== undefined && summary.total_audited > 0) ? `${Number(averages.submit_to_confirm_ms).toFixed(1)} ms` : "-- ms");
+        setText("kpiTotalElapsed", (averages.total_elapsed_ms !== undefined && summary.total_audited > 0) ? `${Number(averages.total_elapsed_ms).toFixed(1)} ms` : "-- ms");
+
+        const kpiDesc = document.getElementById("kpiBenchmarkDesc");
+        if (kpiDesc) {
+            if (summary.total_audited === 0) {
+                kpiDesc.innerText = "Benchmark Target: < 1000ms";
+                kpiDesc.style.color = "var(--text-muted)";
+            } else if (averages.total_elapsed_ms <= 1000) {
+                kpiDesc.innerText = `Target Met (< 1000ms) • ${compliance.compliance_pct ?? 100}% Compliance`;
+                kpiDesc.style.color = "var(--profit-color)";
+            } else {
+                const sec = (averages.total_elapsed_ms / 1000).toFixed(2);
+                kpiDesc.innerText = `Target Exceeded (${sec}s avg) • ${compliance.compliance_pct ?? 0}% Compliance`;
+                kpiDesc.style.color = "#f59e0b";
+            }
+        }
+
+        // 2. Latency Bottleneck Stage Card
+        const bottleneckEl = document.getElementById("latencyBottleneckText");
+        if (bottleneckEl) {
+            bottleneckEl.innerText = summary.total_audited > 0 ? (summary.primary_bottleneck || "None") : "Analyzing pipeline...";
+        }
+
+        // 3. Quote Staleness Guard Card
+        setText("latencyQuoteAge", (averages.quote_age_ms !== undefined && summary.total_audited > 0) ? `${Number(averages.quote_age_ms).toFixed(1)} ms` : "-- ms");
+        const stalenessBadge = document.getElementById("latencyStalenessStatus");
+        if (stalenessBadge) {
+            const isStale = Boolean(latest?.is_stale);
+            if (summary.total_audited > 0 && isStale) {
+                stalenessBadge.className = "badge badge-red";
+                stalenessBadge.innerText = "STALE (> 5000ms)";
+            } else {
+                stalenessBadge.className = "badge badge-green";
+                stalenessBadge.innerText = "FRESH";
+            }
+        }
+
+        // 4. Price Drift Tracker Card
+        const prices = latest?.prices || {};
+        const pDet = prices.price_at_detection?.buy_price || prices.price_at_detection?.spot_price || 0;
+        const pVal = prices.price_at_validation?.buy_price || prices.price_at_validation?.spot_price || 0;
+        setText("driftPriceDet", pDet > 0 ? `$${Number(pDet).toFixed(2)}` : "--");
+        setText("driftPriceVal", pVal > 0 ? `$${Number(pVal).toFixed(2)}` : "--");
+        const driftPct = Number(prices.price_drift_pct || 0);
+        const driftEl = document.getElementById("driftPriceDrift");
+        if (driftEl) {
+            const sign = driftPct > 0 ? "+" : "";
+            driftEl.innerText = summary.total_audited > 0 ? `${sign}${driftPct.toFixed(4)}%` : "0.00%";
+            driftEl.style.color = Math.abs(driftPct) < 0.2 ? "var(--profit-color)" : (driftPct > 0 ? "#f59e0b" : "var(--loss-color)");
+        }
+
+        // 5. Recent Latency Audit Records Table
+        if (tbody) {
+            if (!audits || audits.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:var(--text-muted); padding:20px;">No latency audit measurements recorded yet.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = audits.map(a => {
+                const isConfirmed = a.final_result === "CONFIRMED";
+                const isStale = Boolean(a.is_stale);
+                const intervals = a.intervals_ms || {};
+                const totalMs = Number(intervals.total_elapsed_ms || 0);
+                const isUnder1s = totalMs <= 1000;
+                const benchBadgeClass = isUnder1s ? "badge-green" : "badge-yellow";
+                const benchLabel = isUnder1s ? "TARGET MET" : `EXCEEDED (${(totalMs / 1000).toFixed(2)}s)`;
+
+                const mode = a.mode || "MOCK";
+                const modeBadgeClass = mode === "LIVE" ? "badge-red" : (mode === "TESTNET" ? "badge-yellow" : "badge-blue");
+
+                const shortHash = a.tx_hash ? (a.tx_hash.slice(0, 10) + "...") : "TRACE-SIM";
+                const resBadgeClass = isConfirmed ? "badge-green" : (a.final_result === "STALE_OPPORTUNITY" ? "badge-yellow" : "badge-red");
+
+                return `
+                    <tr>
+                        <td style="font-size:11px; color:var(--text-muted); white-space:nowrap;">${formatLogTime(a.created_at || a.timestamps?.confirmed_at)}</td>
+                        <td style="font-family:var(--font-mono); font-size:11px; color:var(--accent-cyan);">${shortHash}</td>
+                        <td><span class="badge ${modeBadgeClass}">${mode}</span></td>
+                        <td style="font-family:var(--font-mono); font-weight:700; color:${isUnder1s ? 'var(--profit-color)' : '#f59e0b'};">${totalMs.toFixed(1)} ms</td>
+                        <td style="font-family:var(--font-mono);">${Number(intervals.detection_to_prep_ms || 0).toFixed(1)} ms</td>
+                        <td style="font-family:var(--font-mono);">${Number(intervals.prep_to_submit_ms || 0).toFixed(1)} ms</td>
+                        <td style="font-family:var(--font-mono);">${Number(intervals.submit_to_confirm_ms || 0).toFixed(1)} ms</td>
+                        <td style="font-family:var(--font-mono); color:${isStale ? 'var(--loss-color)' : 'var(--accent-cyan)'};">${Number(a.quote_age_ms || 0).toFixed(1)} ms</td>
+                        <td style="font-size:11px; color:var(--text-secondary);">${a.bottleneck_stage || "-"}</td>
+                        <td><span class="badge ${benchBadgeClass}">${benchLabel}</span></td>
+                        <td><span class="badge ${resBadgeClass}">${a.final_result}</span></td>
+                    </tr>
+                `;
+            }).join("");
+        }
+    } catch (err) {
+        console.warn("Latency audits load error:", err);
     }
 }
 
@@ -3450,12 +3665,14 @@ async function executeMockPipelineTrade(route, targetChainInfo) {
     await new Promise(r => setTimeout(r, 450));
 
     try {
+        const detectedAt = latestMarketData?.quote_freshness?.detected_at || latestMarketData?.data?.detected_at || Date.now();
         const res = await fetch("/api/trade", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 trade_amount: tradeAmt,
-                wallet_address: metamaskAccount || "0x9cb6b2c1205a16ba947b783ed99569234decfcc0"
+                wallet_address: metamaskAccount || "0x9cb6b2c1205a16ba947b783ed99569234decfcc0",
+                detected_at: detectedAt
             })
         });
         const json = await res.json();
@@ -3463,6 +3680,7 @@ async function executeMockPipelineTrade(route, targetChainInfo) {
         fetchMarketData();
         loadTrades();
         loadExecutionLogs();
+        loadLatencyAudits();
     } catch (err) {
         showToast("Execution error: " + err, "error");
     }
@@ -3521,6 +3739,23 @@ async function executeMetaMaskOnChainTrade(options = {}) {
     const bestRoute = options?.freshRoute || latestMarketData?.best_route || latestMarketData?.data?.best_route;
     if (!latestMarketData || !bestRoute) {
         showToast("Scanning DEX liquidity... Please wait for a route quote.", "warning");
+        return;
+    }
+
+    const tDetect = latestMarketData?.quote_freshness?.detected_at || latestMarketData?.data?.detected_at || Date.now();
+    const tQuote = Date.now();
+
+    // Safety Guard: Quote Staleness Check (Target < 1000ms, Invalidate if > 5000ms)
+    const quoteFreshness = latestMarketData?.quote_freshness;
+    if (quoteFreshness && quoteFreshness.is_stale) {
+        const ageMs = Number(quoteFreshness.quote_age_ms || 0).toFixed(0);
+        showToast(`Execution blocked: Quote is stale (${ageMs}ms > 5000ms). Refreshing market data for fresh route...`, "warning");
+        renderExecutionResult({
+            success: false,
+            status: "STALE_OPPORTUNITY",
+            message: `Execution prevented: Quote age (${ageMs}ms) exceeded 5000ms freshness threshold. Market prices shift rapidly; re-scanning liquidity pools for fresh quotes.`
+        });
+        await fetchMarketData();
         return;
     }
 
@@ -3673,6 +3908,7 @@ async function executeMetaMaskOnChainTrade(options = {}) {
         // NEVER submit or sign a trade unless recalculated netProfit > 0 AFTER gas, DEX fees and slippage!
         // ============================================================
         showExecModal("Verifying Net Profitability", `Recalculating fresh quote, gas, fees and slippage on ${targetChainInfo.name}...`, 1);
+        const tValidate = Date.now();
         let verifyProfitData;
         try {
             const verifyProfitRes = await fetch("/api/trade/verify-profit", {
@@ -3681,7 +3917,8 @@ async function executeMetaMaskOnChainTrade(options = {}) {
                 body: JSON.stringify({
                     trade_amount: tradeAmt,
                     chain_id: targetChainId,
-                    wallet_address: metamaskAccount
+                    wallet_address: metamaskAccount,
+                    detected_at: tDetect
                 })
             });
             verifyProfitData = await verifyProfitRes.json();
@@ -3691,6 +3928,17 @@ async function executeMetaMaskOnChainTrade(options = {}) {
                 status: "VERIFICATION_FAILED",
                 message: `Pre-flight profitability check failed: ${vpErr.message || vpErr}. Aborted before transaction submission.`
             });
+            return;
+        }
+
+        if (verifyProfitData?.is_stale) {
+            renderExecutionResult({
+                success: false,
+                status: "STALE_OPPORTUNITY",
+                message: "Market quote expired (> 5000ms) before trade validation point. Re-scanning liquidity pools for fresh quotes."
+            });
+            showToast("Quote expired during validation. Fresh quote required.", "warning");
+            await fetchMarketData();
             return;
         }
 
@@ -3828,6 +4076,7 @@ async function executeMetaMaskOnChainTrade(options = {}) {
         const amountOutMin = (expectedOut * (10000n - slippageBps)) / 10000n;
 
         // Step 3: Verify and request ERC-20 token approval
+        const tPrep = Date.now();
         showExecModal("Verifying Token Allowance", `Checking ${tokenSymbol} allowance for ${routerName}...`, 2);
         const tokenContract = new ethers.Contract(tokenInMeta.address, CLIENT_ERC20_ABI, activeSigner);
         const currentAllowance = await tokenContract.allowance(metamaskAccount, routerAddress);
@@ -3879,6 +4128,7 @@ async function executeMetaMaskOnChainTrade(options = {}) {
         showExecModal("Executing DEX Swap", `Submitting trade of $${tradeAmt.toFixed(4)} ${tokenSymbol} on ${routerName}... Confirm in MetaMask.`, 3);
         showToast("Please confirm Swap transaction in MetaMask...", "info");
 
+        const tSubmit = Date.now();
         const txResponse = await routerContract.swapExactTokensForTokens(
             parsedAmountIn,
             amountOutMin,
@@ -3892,6 +4142,7 @@ async function executeMetaMaskOnChainTrade(options = {}) {
         showExecModal("Mining Transaction", `Swap broadcasted! Hash: ${txResponse.hash.slice(0, 10)}... Waiting for block receipt...`, 4);
         showToast(`Transaction Broadcasted: ${txResponse.hash.slice(0, 10)}...`, "info");
         const receipt = await txResponse.wait(1);
+        const tConfirm = Date.now();
 
         if (!receipt || (receipt.status !== 1 && receipt.status !== "0x1")) {
             renderExecutionResult({
@@ -3918,7 +4169,13 @@ async function executeMetaMaskOnChainTrade(options = {}) {
                 amount_in: tradeAmt,
                 expected_profit: route.net_profit_usdt || 0.0,
                 gross_profit: route.gross_profit_usdt || 0.0,
-                mode: tradeMode
+                mode: tradeMode,
+                opportunity_detected_at: tDetect,
+                quote_received_at: tQuote,
+                validation_started_at: tValidate,
+                prep_started_at: tPrep,
+                submitted_at: tSubmit,
+                confirmed_at: tConfirm
             })
         });
         const confirmData = await confirmRes.json();
@@ -3929,7 +4186,8 @@ async function executeMetaMaskOnChainTrade(options = {}) {
                 status: "TRANSACTION_CONFIRMED",
                 message: `Trade verified on-chain! Net PnL: +$${Number(confirmData.trade.net_profit || 0).toFixed(4)} USDT`,
                 tx_hash: txResponse.hash,
-                trade: confirmData.trade
+                trade: confirmData.trade,
+                telemetry: confirmData.telemetry || confirmData.trade?.telemetry
             });
             showToast("Live trade verified and committed to database!", "success");
         } else {
@@ -3937,7 +4195,8 @@ async function executeMetaMaskOnChainTrade(options = {}) {
                 success: false,
                 status: "RECEIPT_VERIFICATION_FAILED",
                 message: confirmData.message || `Receipt verification returned an issue on ${targetChainInfo.name}`,
-                tx_hash: txResponse.hash
+                tx_hash: txResponse.hash,
+                telemetry: confirmData.telemetry
             });
         }
 
@@ -3945,6 +4204,7 @@ async function executeMetaMaskOnChainTrade(options = {}) {
         fetchMarketData();
         loadTrades();
         loadExecutionLogs();
+        loadLatencyAudits();
     } catch (err) {
         if (err && err.message === "LIVE_CONFIRMATION_CANCELLED") {
             return;

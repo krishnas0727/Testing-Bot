@@ -114,9 +114,47 @@ def create_database():
             status TEXT NOT NULL,
             reason TEXT DEFAULT '',
             tx_hash TEXT DEFAULT '',
+            telemetry TEXT DEFAULT '',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # Trade Latency Telemetry Audit Table (6 timestamps, 4 intervals, quote staleness, benchmarks)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS latency_audits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tx_hash TEXT DEFAULT '',
+            token_pair TEXT DEFAULT 'WETH/USDC',
+            mode TEXT DEFAULT 'MOCK',
+            opportunity_detected_at REAL DEFAULT 0.0,
+            quote_received_at REAL DEFAULT 0.0,
+            validation_started_at REAL DEFAULT 0.0,
+            prep_started_at REAL DEFAULT 0.0,
+            submitted_at REAL DEFAULT 0.0,
+            confirmed_at REAL DEFAULT 0.0,
+            quote_age_ms REAL DEFAULT 0.0,
+            detection_to_prep_ms REAL DEFAULT 0.0,
+            prep_to_submit_ms REAL DEFAULT 0.0,
+            submit_to_confirm_ms REAL DEFAULT 0.0,
+            total_elapsed_ms REAL DEFAULT 0.0,
+            bottleneck_stage TEXT DEFAULT '',
+            benchmark_status TEXT DEFAULT '',
+            final_result TEXT DEFAULT 'CONFIRMED',
+            skip_reason TEXT DEFAULT '',
+            telemetry_json TEXT DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Dynamic migrations for telemetry columns
+    try:
+        cursor.execute("ALTER TABLE trades ADD COLUMN telemetry TEXT DEFAULT ''")
+    except Exception:
+        pass
+    try:
+        cursor.execute("ALTER TABLE execution_logs ADD COLUMN telemetry TEXT DEFAULT ''")
+    except Exception:
+        pass
 
     conn.commit()
     conn.close()
@@ -171,13 +209,16 @@ def save_trade(trade_data: Dict[str, Any]) -> int:
     conn = get_connection()
     cursor = conn.cursor()
 
+    telemetry_val = trade_data.get("telemetry")
+    telemetry_str = json.dumps(telemetry_val) if isinstance(telemetry_val, dict) else str(telemetry_val or "")
+
     cursor.execute("""
         INSERT INTO trades (
             tx_hash, chain_id, buy_dex, sell_dex, token_pair,
             amount_in, amount_out, gross_profit, net_profit,
             gas_used, gas_price_gwei, gas_cost_usdt, price_impact, slippage,
-            status, mode, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            status, mode, created_at, telemetry
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         trade_data.get("tx_hash", ""),
         int(trade_data.get("chain_id", 1)),
@@ -195,7 +236,8 @@ def save_trade(trade_data: Dict[str, Any]) -> int:
         float(trade_data.get("slippage", 0.0)),
         trade_data.get("status", "CONFIRMED"),
         trade_data.get("mode", "MOCK"),
-        trade_data.get("created_at") or datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        trade_data.get("created_at") or datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+        telemetry_str
     ))
 
     trade_id = cursor.lastrowid
@@ -228,7 +270,16 @@ def get_all_trades(limit: int = 100, mode: Optional[str] = None) -> List[Dict[st
         cursor.execute("SELECT * FROM trades ORDER BY id DESC LIMIT ?", (limit,))
     rows = cursor.fetchall()
     conn.close()
-    return [dict(row) for row in rows]
+    res = []
+    for row in rows:
+        d = dict(row)
+        if d.get("telemetry"):
+            try:
+                d["telemetry"] = json.loads(d["telemetry"])
+            except Exception:
+                pass
+        res.append(d)
+    return res
 
 
 get_trades = get_all_trades
@@ -245,7 +296,15 @@ def get_latest_trade(mode: Optional[str] = None) -> Optional[Dict[str, Any]]:
         cursor.execute("SELECT * FROM trades ORDER BY id DESC LIMIT 1")
     row = cursor.fetchone()
     conn.close()
-    return dict(row) if row else None
+    if not row:
+        return None
+    d = dict(row)
+    if d.get("telemetry"):
+        try:
+            d["telemetry"] = json.loads(d["telemetry"])
+        except Exception:
+            pass
+    return d
 
 
 def get_total_trades(mode: Optional[str] = None) -> int:
@@ -323,10 +382,12 @@ def save_execution_log(event: Dict[str, Any]) -> int:
         conn = get_connection()
         cursor = conn.cursor()
         now_ts = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        telemetry_val = event.get("telemetry")
+        telemetry_str = json.dumps(telemetry_val) if isinstance(telemetry_val, dict) else str(telemetry_val or "")
         cursor.execute("""
             INSERT INTO execution_logs (
-                timestamp, event_type, route, amount_in, net_profit, status, reason, tx_hash, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                timestamp, event_type, route, amount_in, net_profit, status, reason, tx_hash, telemetry, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             event.get("timestamp") or now_ts,
             event.get("event_type", "INFO"),
@@ -336,6 +397,7 @@ def save_execution_log(event: Dict[str, Any]) -> int:
             event.get("status", "LOGGED"),
             event.get("reason", ""),
             event.get("tx_hash", ""),
+            telemetry_str,
             now_ts
         ))
         log_id = cursor.lastrowid
@@ -354,16 +416,112 @@ def get_recent_execution_logs(limit: int = 50) -> List[Dict[str, Any]]:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, timestamp, event_type, route, amount_in, net_profit, status, reason, tx_hash, created_at
+            SELECT id, timestamp, event_type, route, amount_in, net_profit, status, reason, tx_hash, telemetry, created_at
             FROM execution_logs
             ORDER BY id DESC
             LIMIT ?
         """, (limit,))
         rows = cursor.fetchall()
         conn.close()
-        return [dict(r) for r in rows]
+        res = []
+        for r in rows:
+            d = dict(r)
+            if d.get("telemetry"):
+                try:
+                    d["telemetry"] = json.loads(d["telemetry"])
+                except Exception:
+                    pass
+            res.append(d)
+        return res
     except Exception as e:
         print(f"⚠️ Error reading execution logs: {e}", flush=True)
+        return []
+
+
+def save_latency_audit(audit_dict: Dict[str, Any]) -> int:
+    """Save trade latency audit telemetry to SQLite database."""
+    try:
+        create_database()
+        conn = get_connection()
+        cursor = conn.cursor()
+        intervals = audit_dict.get("intervals_ms", {})
+        timestamps = audit_dict.get("timestamps", {})
+        cursor.execute("""
+            INSERT INTO latency_audits (
+                tx_hash, token_pair, mode,
+                opportunity_detected_at, quote_received_at, validation_started_at,
+                prep_started_at, submitted_at, confirmed_at,
+                quote_age_ms, detection_to_prep_ms, prep_to_submit_ms,
+                submit_to_confirm_ms, total_elapsed_ms,
+                bottleneck_stage, benchmark_status, final_result,
+                skip_reason, telemetry_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            audit_dict.get("tx_hash", ""),
+            audit_dict.get("token_pair", "WETH/USDC"),
+            audit_dict.get("mode", "MOCK"),
+            float(timestamps.get("opportunity_detected_at", 0.0)),
+            float(timestamps.get("quote_received_at", 0.0)),
+            float(timestamps.get("validation_started_at", 0.0)),
+            float(timestamps.get("prep_started_at", 0.0)),
+            float(timestamps.get("submitted_at", 0.0)),
+            float(timestamps.get("confirmed_at", 0.0)),
+            float(audit_dict.get("quote_age_ms", 0.0)),
+            float(intervals.get("detection_to_prep_ms", 0.0)),
+            float(intervals.get("prep_to_submit_ms", 0.0)),
+            float(intervals.get("submit_to_confirm_ms", 0.0)),
+            float(intervals.get("total_elapsed_ms", 0.0)),
+            audit_dict.get("bottleneck_stage", ""),
+            audit_dict.get("benchmark_status", ""),
+            audit_dict.get("final_result", "CONFIRMED"),
+            audit_dict.get("skip_reason", ""),
+            json.dumps(audit_dict),
+            audit_dict.get("created_at") or datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        ))
+        audit_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return audit_id
+    except Exception as exc:
+        print(f"⚠️ Error saving latency audit: {exc}", flush=True)
+        return -1
+
+
+def get_recent_latency_audits(limit: int = 50) -> List[Dict[str, Any]]:
+    """Retrieve recent latency telemetry audits from SQLite database."""
+    try:
+        create_database()
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, tx_hash, token_pair, mode,
+                   opportunity_detected_at, quote_received_at, validation_started_at,
+                   prep_started_at, submitted_at, confirmed_at,
+                   quote_age_ms, detection_to_prep_ms, prep_to_submit_ms,
+                   submit_to_confirm_ms, total_elapsed_ms,
+                   bottleneck_stage, benchmark_status, final_result,
+                   skip_reason, telemetry_json, created_at
+            FROM latency_audits
+            ORDER BY id DESC
+            LIMIT ?
+        """, (limit,))
+        rows = cursor.fetchall()
+        conn.close()
+        results = []
+        for r in rows:
+            d = dict(r)
+            if d.get("telemetry_json"):
+                try:
+                    full_obj = json.loads(d["telemetry_json"])
+                    full_obj["id"] = d["id"]
+                    results.append(full_obj)
+                    continue
+                except Exception:
+                    pass
+            results.append(d)
+        return results
+    except Exception as exc:
+        print(f"⚠️ Error reading latency audits: {exc}", flush=True)
         return []
 
 

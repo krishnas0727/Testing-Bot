@@ -24,6 +24,12 @@ from dex_engine import (
     execute_atomic_trade,
     simulate_atomic_arbitrage,
 )
+from latency_audit import (
+    TradeLatencyAudit,
+    record_latency_audit,
+    check_quote_staleness,
+    get_current_epoch_ms,
+)
 
 last_trade_time = 0
 last_trade_key = None
@@ -42,7 +48,9 @@ def daily_loss_limit_reached() -> bool:
 def _skip(reason: str, **details) -> Dict[str, Any]:
     print(f"[DEX ARBITRAGE] SKIP: {reason}", flush=True)
     is_insufficient = "INSUFFICIENT BALANCE" in reason
-    status = "INSUFFICIENT BALANCE" if is_insufficient else "TRADE SKIPPED"
+    is_stale = "STALE" in reason
+    default_status = "STALE_OPPORTUNITY" if is_stale else ("INSUFFICIENT BALANCE" if is_insufficient else "TRADE SKIPPED")
+    status = details.pop("status", default_status)
     res = {
         "success": False,
         "status": status,
@@ -264,6 +272,9 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
                 "is_gas_acceptable": gas_info.get("is_gas_acceptable", True),
                 "is_profitable": is_profitable,
                 "timestamp": time.time() * 1000,
+                "detected_at": time.time(),
+                "quote_age_ms": 0.0,
+                "is_stale": False,
             }
             opportunities.append(opp)
 
@@ -302,6 +313,9 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
         "weth_amount": best["weth_amount"],
         "is_profitable": best["is_profitable"],
         "timestamp": time.time() * 1000,
+        "detected_at": time.time(),
+        "quote_age_ms": 0.0,
+        "is_stale": False,
     }
 
 
@@ -363,7 +377,7 @@ def _calculate_net_profit(trade_amt: float, buy_q: dict, sell_q: dict, gas_price
     gas_cost_eth = (GAS_UNITS_ESTIMATE * gas_price_gwei * 1e-9)
     gas_cost_usdt = gas_cost_eth * eth_price_usdt
     # Cap gas cost for L2 networks where gas is sub-cent
-    gas_cost_usdt = min(gas_cost_usdt, max(0.0001, trade_amt * 0.002))
+    gas_cost_usdt = min(gas_cost_usdt, max(0.00001, trade_amt * 0.002))
 
     # Gross profit = raw output − input (before all costs)
     gross_profit_usdt = usdt_out - trade_amt
@@ -451,7 +465,41 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
     if not route:
         return _skip("No valid DEX route available")
 
-    mode = getattr(config, "TRADING_MODE", "MOCK")
+    # Early profitability & spread guard
+    if not route.get("is_profitable", True) or float(route.get("net_profit_usdt", 1.0)) <= 0:
+        return _skip("Unprofitable spread (Net <= 0)")
+
+    # Telemetry Timestamp 1: Opportunity detected
+    price_at_det = {
+        "buy_price": float(route.get("buy_price", 0.0)),
+        "sell_price": float(route.get("sell_price", 0.0)),
+        "spread": float(route.get("spread", 0.0))
+    }
+    explicit_detected_at = market.get("detected_at") or (route.get("detected_at") if isinstance(route, dict) else None)
+    if explicit_detected_at:
+        t_detect = float(explicit_detected_at)
+        is_stale, quote_age_ms = check_quote_staleness(t_detect, time.time() * 1000.0, getattr(config, "MAX_QUOTE_AGE_MS", 5000))
+        if is_stale:
+            audit = TradeLatencyAudit(
+                token_pair=config.SYMBOL,
+                mode=mode,
+                detected_at=t_detect,
+                quote_received_at=time.time(),
+                validation_started_at=time.time(),
+                price_at_detection=price_at_det,
+                final_result="STALE_OPPORTUNITY",
+                skip_reason=f"STALE_OPPORTUNITY: Quote age ({quote_age_ms:.1f}ms) exceeds maximum freshness threshold ({config.MAX_QUOTE_AGE_MS}ms)"
+            )
+            record_latency_audit(audit)
+            return _skip(
+                f"STALE_OPPORTUNITY: Quote age ({quote_age_ms:.1f}ms) exceeds freshness limit ({config.MAX_QUOTE_AGE_MS}ms). Refreshing market data.",
+                status="STALE_OPPORTUNITY",
+                is_stale=True,
+                quote_age_ms=quote_age_ms,
+                telemetry=audit.to_dict()
+            )
+    else:
+        t_detect = time.time()
 
     # Gate 5: Wallet balance guard (LIVE/TESTNET only)
     if mode in ("LIVE", "TESTNET"):
@@ -470,13 +518,13 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
         if stable_bal <= 0.0 or stable_bal < min_trade_req:
             return _skip(
                 f"INSUFFICIENT BALANCE: Wallet {short_addr} has ${stable_bal:.4f} USDC/USDT "
-                f"(Need >= ${min_trade_req:.4f}). Transaction aborted."
+                f"(Need at least $0.0001 USDT/USDC). Transaction aborted."
             )
 
         if eth_bal < 0.0001:
             return _skip(
                 f"INSUFFICIENT BALANCE: Wallet has {eth_bal:.6f} ETH for gas "
-                f"(Need >= 0.0001 ETH). Transaction aborted."
+                f"(Need >= 0.0001 ETH for network gas fees). Transaction aborted."
             )
 
         req_val = float(custom_amount) if custom_amount is not None else None
@@ -485,7 +533,7 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
         if trade_amt <= 0.0 or stable_bal < trade_amt:
             return _skip(
                 f"INSUFFICIENT BALANCE: Wallet {short_addr} has ${stable_bal:.4f} USDC/USDT "
-                f"(Need >= ${min_trade_req:.4f}). Transaction aborted."
+                f"(Need at least $0.0001 USDT/USDC). Transaction aborted."
             )
     else:
         req_val = float(custom_amount or route.get("amount_in", getattr(config, "DEFAULT_TRADE_AMOUNT", 5.0)))
@@ -498,8 +546,8 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
 
     # ============================================================
     # Gate 6+7+8: FRESH QUOTE + FULL PROFIT RECALCULATION
-    # This is the core fix — recalculate everything at execution time,
-    # never trust stale quote from the polling cycle.
+    # Telemetry Timestamp 2: Quote received
+    # Telemetry Timestamp 3: Validation started + Quote Staleness Check
     # ============================================================
     print(f"[PROFIT CHECK] Fetching fresh quote for ${trade_amt:.4f} USDT on {buy_dex} -> {sell_dex}...", flush=True)
 
@@ -512,17 +560,58 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
     except Exception as exc:
         return _skip(f"Failed to fetch fresh DEX quotes: {exc}")
 
+    # Telemetry Timestamp 2: Quote received
+    t_quote = time.time()
+
     if buy_dex not in fresh_quotes or sell_dex not in fresh_quotes:
         return _skip(f"Required DEXes {buy_dex}, {sell_dex} not available in fresh quote")
 
     fresh_buy_q = fresh_quotes[buy_dex]
     fresh_sell_q = fresh_quotes[sell_dex]
 
+    # Telemetry Timestamp 3: Validation started
+    t_validate = time.time()
+
+    # QUOTE STALENESS GUARD: Invalidate opportunity if quote exceeds MAX_QUOTE_AGE_MS
+    is_stale, quote_age_ms = check_quote_staleness(t_quote * 1000.0, t_validate * 1000.0, config.MAX_QUOTE_AGE_MS)
+    if is_stale:
+        audit = TradeLatencyAudit(
+            token_pair=config.SYMBOL,
+            mode=mode,
+            detected_at=t_detect,
+            quote_received_at=t_quote,
+            validation_started_at=t_validate,
+            price_at_detection=price_at_det,
+            final_result="STALE_OPPORTUNITY",
+            skip_reason=f"STALE_OPPORTUNITY: Quote age ({quote_age_ms:.1f}ms) exceeds maximum freshness threshold ({config.MAX_QUOTE_AGE_MS}ms)"
+        )
+        record_latency_audit(audit)
+        return _skip(
+            f"STALE_OPPORTUNITY: Quote age ({quote_age_ms:.1f}ms) exceeds freshness limit ({config.MAX_QUOTE_AGE_MS}ms). Refreshing market data.",
+            status="STALE_OPPORTUNITY",
+            is_stale=True,
+            quote_age_ms=quote_age_ms,
+            telemetry=audit.to_dict()
+        )
+
     # Validate that the spread still exists (sell price > buy price)
     if fresh_sell_q["spot_price"] <= fresh_buy_q["spot_price"]:
+        audit = TradeLatencyAudit(
+            token_pair=config.SYMBOL,
+            mode=mode,
+            detected_at=t_detect,
+            quote_received_at=t_quote,
+            validation_started_at=t_validate,
+            price_at_detection=price_at_det,
+            price_at_validation={"buy_price": float(fresh_buy_q["spot_price"]), "sell_price": float(fresh_sell_q["spot_price"])},
+            final_result="STALE_SPREAD_COLLAPSED",
+            skip_reason="Spread disappeared"
+        )
+        record_latency_audit(audit)
         return _skip(
             f"INSUFFICIENT_PROFIT: Spread disappeared — "
-            f"{buy_dex} ${fresh_buy_q['spot_price']:.2f} vs {sell_dex} ${fresh_sell_q['spot_price']:.2f}"
+            f"{buy_dex} ${fresh_buy_q['spot_price']:.2f} vs {sell_dex} ${fresh_sell_q['spot_price']:.2f}",
+            telemetry=audit.to_dict()
         )
 
     # Get fresh gas and ETH price
@@ -553,12 +642,27 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
     if not profit_check["is_profitable"]:
         reason = profit_check.get("skip_reason", "INSUFFICIENT_PROFIT")
         print(f"[PROFIT CHECK] BLOCKED: {reason}", flush=True)
+        audit = TradeLatencyAudit(
+            token_pair=config.SYMBOL,
+            mode=mode,
+            detected_at=t_detect,
+            quote_received_at=t_quote,
+            validation_started_at=t_validate,
+            price_at_detection=price_at_det,
+            price_at_validation={"buy_price": float(fresh_buy_q["spot_price"]), "sell_price": float(fresh_sell_q["spot_price"])},
+            gas_fees={"gas_cost_usdt": profit_check["gas_cost_usdt"], "gas_price_gwei": fresh_gas_gwei},
+            slippage_price_impact={"slippage_cost_usdt": profit_check["slippage_cost_usdt"], "max_price_impact_pct": profit_check["max_price_impact_pct"]},
+            final_result="UNPROFITABLE_ABORTED",
+            skip_reason=reason
+        )
+        record_latency_audit(audit)
         return _skip(reason,
                      gross_profit_usdt=profit_check["gross_profit_usdt"],
                      gas_cost_usdt=profit_check["gas_cost_usdt"],
                      slippage_cost_usdt=profit_check["slippage_cost_usdt"],
                      net_profit_usdt=profit_check["net_profit_usdt"],
-                     net_profit_pct=profit_check["net_profit_pct"])
+                     net_profit_pct=profit_check["net_profit_pct"],
+                     telemetry=audit.to_dict())
 
     # Gate 9: Gas ceiling
     if not profit_check["is_gas_acceptable"]:
@@ -573,6 +677,9 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
     route_key = f"{buy_dex}->{sell_dex}"
     if not is_manual and route_key == last_trade_key and (now - last_trade_time) < cooldown:
         return _skip("Cooldown active (1s remaining)")
+
+    # Telemetry Timestamp 4: Wallet & Transaction Preparation
+    t_prep = time.time()
 
     # Gate 12: Token Allowance Check
     if mode in ("LIVE", "TESTNET") and getattr(config, "ARBITRAGE_CONTRACT_ADDRESS", ""):
@@ -606,7 +713,36 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
         "verified_at_execution": True,
     }
 
+    # Telemetry Timestamp 5: Submission
+    t_submit = time.time()
     result = execute_atomic_trade(execution_route, is_manual=is_manual)
+
+    # Telemetry Timestamp 6: Confirmation
+    t_confirm = time.time()
+
+    # Latency Audit Telemetry Calculation
+    final_res = "CONFIRMED" if result.get("success") else result.get("status", "FAILED")
+    tx_hash = (result.get("trade") or {}).get("tx_hash") or result.get("tx_hash", "")
+    audit = TradeLatencyAudit(
+        tx_hash=tx_hash,
+        token_pair=config.SYMBOL,
+        mode=mode,
+        detected_at=t_detect,
+        quote_received_at=t_quote,
+        validation_started_at=t_validate,
+        prep_started_at=t_prep,
+        submitted_at=t_submit,
+        confirmed_at=t_confirm,
+        price_at_detection=price_at_det,
+        price_at_validation={"buy_price": float(fresh_buy_q["spot_price"]), "sell_price": float(fresh_sell_q["spot_price"])},
+        price_at_submission={"buy_price": float(fresh_buy_q["spot_price"]), "sell_price": float(fresh_sell_q["spot_price"])},
+        gas_fees={"gas_cost_usdt": profit_check["gas_cost_usdt"], "gas_price_gwei": fresh_gas_gwei},
+        slippage_price_impact={"slippage_pct": getattr(config, "SLIPPAGE_PCT", 0.5), "max_price_impact_pct": max_impact},
+        final_result=final_res,
+        skip_reason="" if result.get("success") else result.get("message", "")
+    )
+    telemetry = record_latency_audit(audit)
+    result["telemetry"] = telemetry
 
     # Gate 14: Record profit ONLY after confirmed on-chain transaction success AND net_profit > 0
     if result.get("success"):
@@ -614,12 +750,13 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
         last_trade_key = route_key
         trade_data = result.get("trade", {})
         if trade_data:
-            # Enrich with verified execution-time profit figures
+            # Enrich with verified execution-time profit figures and latency telemetry
             trade_data["price_impact"] = max_impact
             trade_data["slippage"] = getattr(config, "SLIPPAGE_PCT", 0.5)
             trade_data["verified_gross_profit"] = profit_check["gross_profit_usdt"]
             trade_data["verified_gas_cost"] = profit_check["gas_cost_usdt"]
             trade_data["verified_net_profit"] = profit_check["net_profit_usdt"]
+            trade_data["telemetry"] = telemetry
 
             # Final safety check: NEVER record a trade as successful if net profit is <= 0
             if profit_check["net_profit_usdt"] <= 0:
@@ -631,7 +768,7 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
             else:
                 tx_hash = trade_data.get("tx_hash") or result.get("tx_hash")
                 if tx_hash:
-                    print(f"[TRADE CONFIRMED] tx={tx_hash} net_profit=${profit_check['net_profit_usdt']:.6f} USDT", flush=True)
+                    print(f"[TRADE CONFIRMED] tx={tx_hash} net_profit=${profit_check['net_profit_usdt']:.6f} USDT | Latency: {audit.total_elapsed_ms:.1f}ms", flush=True)
                     save_trade(trade_data)
                 else:
                     # MOCK / simulation — save for record

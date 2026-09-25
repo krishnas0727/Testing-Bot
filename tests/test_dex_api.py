@@ -337,8 +337,8 @@ class DEXApiTests(unittest.TestCase):
                 "sell_dex": "SushiSwap_V2",
                 "token_pair": "WETH/USDC",
                 "amount_in": 10.0,
-                "expected_profit": 0.05,
-                "gross_profit": 0.06
+                "expected_profit": 0.15,
+                "gross_profit": 0.60
             })
             self.assertEqual(res.status_code, 200)
             data = res.get_json()

@@ -56,13 +56,17 @@ class DEXSafetyGuardTests(unittest.TestCase):
             self.assertEqual(res["status"], "NOT_ARMED")
 
     def test_price_impact_limit_blocks_excessive_impact(self):
-        with patch.object(config, "EMERGENCY_STOP", False), patch.object(config, "MAX_PRICE_IMPACT_PCT", 1.0):
+        mock_quotes = {
+            "Uniswap_V2": {"spot_price": 3000.0, "base_reserve": 5.0, "quote_reserve": 15000.0, "dex": "Uniswap_V2"},
+            "SushiSwap_V2": {"spot_price": 3150.0, "base_reserve": 5.0, "quote_reserve": 15750.0, "dex": "SushiSwap_V2"},
+        }
+        with patch.object(config, "EMERGENCY_STOP", False), patch.object(config, "MAX_PRICE_IMPACT_PCT", 0.5), patch("arbitrage.get_all_dex_quotes", return_value=mock_quotes):
             result = arbitrage.execute_real_trade({
                 "buy_dex": "Uniswap_V2",
                 "sell_dex": "SushiSwap_V2",
                 "amount_in": 100.0,
                 "net_profit_usdt": 2.50,
-                "max_price_impact_pct": 3.5,  # Exceeds 1.0% limit
+                "max_price_impact_pct": 3.5,  # Exceeds limit
                 "is_profitable": True,
             })
             self.assertFalse(result["success"])

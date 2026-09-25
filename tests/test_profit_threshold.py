@@ -204,7 +204,19 @@ class ProfitThresholdAndSkipReasonTests(unittest.TestCase):
                 "is_gas_acceptable": True,
             }
 
-            with patch("arbitrage.execute_atomic_trade") as mock_exec:
+            mock_quotes = {
+                "Uniswap_V2": {
+                    "spot_price": 2700.0,
+                    "quote_reserve": 54000000.0,
+                    "base_reserve": 20000.0,
+                },
+                "SushiSwap_V2": {
+                    "spot_price": 2740.0,
+                    "quote_reserve": 54800000.0,
+                    "base_reserve": 20000.0,
+                }
+            }
+            with patch("arbitrage.get_all_dex_quotes", return_value=mock_quotes), patch("arbitrage.execute_atomic_trade") as mock_exec:
                 mock_exec.return_value = {"success": True, "trade": profitable_route, "tx_hash": "0x111222"}
                 result = arbitrage.execute_real_trade(profitable_route, custom_amount=5.00, is_manual=True)
                 mock_exec.assert_called_once()
@@ -230,7 +242,19 @@ class ProfitThresholdAndSkipReasonTests(unittest.TestCase):
                 "is_gas_acceptable": True,
             }
 
-            with patch("arbitrage.execute_atomic_trade") as mock_exec:
+            mock_quotes = {
+                "Uniswap_V2": {
+                    "spot_price": 2700.0,
+                    "quote_reserve": 54000000.0,
+                    "base_reserve": 20000.0,
+                },
+                "SushiSwap_V2": {
+                    "spot_price": 2740.0,
+                    "quote_reserve": 54800000.0,
+                    "base_reserve": 20000.0,
+                }
+            }
+            with patch("arbitrage.get_all_dex_quotes", return_value=mock_quotes), patch("arbitrage.execute_atomic_trade") as mock_exec:
                 mock_exec.return_value = {"success": True, "trade": profitable_route, "tx_hash": "0x333444"}
                 result = arbitrage.execute_real_trade(profitable_route, custom_amount=5.00, is_manual=True)
                 mock_exec.assert_called_once()
