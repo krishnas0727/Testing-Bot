@@ -71,13 +71,21 @@ print(f"[DEX App] Database initialized: {config.DATABASE_NAME}", flush=True)
 if getattr(config, "ON_CHAIN_STREAM_ENABLED", True):
     public_bbo_stream.start()
 
-# Restore saved settings from database
+# Restore saved settings from database with precedence to explicit environment variables
 try:
     _saved = load_all_bot_settings()
-    if "auto_trade" in _saved:
+    env_auto = os.getenv("AUTO_TRADE_ENABLED")
+    if env_auto is not None:
+        config.AUTO_TRADE_ENABLED = env_auto.lower() == "true"
+    elif "auto_trade" in _saved:
         config.AUTO_TRADE_ENABLED = bool(_saved["auto_trade"])
-    if "trading_mode" in _saved:
+
+    env_mode = os.getenv("TRADING_MODE")
+    if env_mode:
+        config.TRADING_MODE = env_mode.strip().upper()
+    elif "trading_mode" in _saved:
         config.TRADING_MODE = str(_saved["trading_mode"]).upper()
+
     if "min_profit" in _saved:
         saved_min_profit = float(_saved["min_profit"])
         if saved_min_profit >= 0.50:
@@ -105,17 +113,26 @@ try:
         config.MAX_PRICE_IMPACT_PCT = float(_saved["max_price_impact_pct"])
     if "rpc_url" in _saved and _saved["rpc_url"]:
         config.RPC_URL = str(_saved["rpc_url"]).strip()
-    if "wallet_address" in _saved and _saved["wallet_address"]:
-        config.WALLET_ADDRESS = str(_saved["wallet_address"]).strip()
-    if "private_key" in _saved and _saved["private_key"]:
+
+    env_pk = os.getenv("PRIVATE_KEY", "").strip().strip('"').strip("'")
+    if env_pk:
+        config.PRIVATE_KEY = env_pk
+    elif "private_key" in _saved and _saved["private_key"]:
         config.PRIVATE_KEY = str(_saved["private_key"]).strip()
-        if not getattr(config, "WALLET_ADDRESS", ""):
-            try:
-                from eth_account import Account
-                _acct = Account.from_key(config.PRIVATE_KEY)
-                config.WALLET_ADDRESS = _acct.address
-            except Exception:
-                pass
+
+    env_addr = os.getenv("WALLET_ADDRESS", "").strip().strip('"').strip("'")
+    if env_addr:
+        config.WALLET_ADDRESS = env_addr
+    elif "wallet_address" in _saved and _saved["wallet_address"]:
+        config.WALLET_ADDRESS = str(_saved["wallet_address"]).strip()
+
+    if config.PRIVATE_KEY and not getattr(config, "WALLET_ADDRESS", ""):
+        try:
+            from eth_account import Account
+            _acct = Account.from_key(config.PRIVATE_KEY)
+            config.WALLET_ADDRESS = _acct.address
+        except Exception:
+            pass
     if "contract_address" in _saved and _saved["contract_address"]:
         config.ARBITRAGE_CONTRACT_ADDRESS = str(_saved["contract_address"]).strip()
     if "chain_id" in _saved:
@@ -218,9 +235,34 @@ def get_engine_status(chain_id: Optional[int] = None) -> str:
 
 
 def _acquire_auto_trader_lock() -> bool:
-    """Prevent duplicate trader loops across WSGI workers."""
+    """Prevent duplicate trader loops across WSGI workers with stale PID recovery."""
     path = getattr(config, "AUTO_TRADER_LOCK_PATH", "auto_trader.lock")
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+            if content:
+                pid = int(content)
+                if pid == os.getpid():
+                    return True
+                try:
+                    os.kill(pid, 0)
+                    return False
+                except (OSError, ProcessLookupError, AttributeError):
+                    try:
+                        os.remove(path)
+                    except Exception:
+                        pass
+            else:
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     try:
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         os.write(fd, str(os.getpid()).encode("utf-8"))
@@ -230,6 +272,22 @@ def _acquire_auto_trader_lock() -> bool:
         return False
     except Exception:
         return False
+
+
+def _release_auto_trader_lock():
+    try:
+        path = getattr(config, "AUTO_TRADER_LOCK_PATH", "auto_trader.lock")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+            if content == str(os.getpid()):
+                os.remove(path)
+    except Exception:
+        pass
+
+
+import atexit
+atexit.register(_release_auto_trader_lock)
 
 
 def start_background_auto_trader():
@@ -1727,6 +1785,8 @@ def health_check():
         "emergency_stop": emergency_stop_active(),
         "chain": config.DEFAULT_CHAIN,
         "chain_id": config.CHAIN_ID,
+        "wallet_configured": bool(getattr(config, "WALLET_ADDRESS", "")),
+        "signer_configured": bool(getattr(config, "PRIVATE_KEY", "")),
         "dexes": config.SUPPORTED_DEXES,
     })
 

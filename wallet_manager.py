@@ -32,6 +32,18 @@ def get_wallet_address() -> str:
             return saved_addr
     except Exception:
         pass
+
+    # Fallback: derive address from server PRIVATE_KEY
+    pk = getattr(config, "PRIVATE_KEY", "").strip()
+    if pk:
+        try:
+            from eth_account import Account
+            acct = Account.from_key(pk)
+            config.WALLET_ADDRESS = acct.address
+            return acct.address
+        except Exception:
+            pass
+
     return ""
 
 

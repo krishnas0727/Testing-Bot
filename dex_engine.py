@@ -627,7 +627,10 @@ def execute_atomic_trade(plan: Dict[str, Any], is_manual: bool = False) -> Dict[
             }
             signed = acct.sign_transaction(raw_tx)
             raw_tx_bytes = getattr(signed, "raw_transaction", None) or getattr(signed, "rawTransaction", None)
-            tx_hash = rpc_call("eth_sendRawTransaction", [raw_tx_bytes.hex()])
+            raw_hex = raw_tx_bytes.hex() if hasattr(raw_tx_bytes, "hex") else str(raw_tx_bytes)
+            if not raw_hex.startswith("0x"):
+                raw_hex = "0x" + raw_hex
+            tx_hash = rpc_call("eth_sendRawTransaction", [raw_hex])
 
             now_local = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
             return {

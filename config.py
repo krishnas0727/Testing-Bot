@@ -349,9 +349,16 @@ SYMBOL = os.getenv("TRADING_SYMBOL", _active_chain_info.get("default_symbol", "W
 # NON-CUSTODIAL WALLET & ARBITRAGE CONTRACT
 # ============================================================
 
-WALLET_ADDRESS = os.getenv("WALLET_ADDRESS", "")
-PRIVATE_KEY = os.getenv("PRIVATE_KEY", "")
-ARBITRAGE_CONTRACT_ADDRESS = os.getenv("ARBITRAGE_CONTRACT_ADDRESS", "")
+WALLET_ADDRESS = os.getenv("WALLET_ADDRESS", "").strip().strip('"').strip("'")
+PRIVATE_KEY = os.getenv("PRIVATE_KEY", "").strip().strip('"').strip("'")
+ARBITRAGE_CONTRACT_ADDRESS = os.getenv("ARBITRAGE_CONTRACT_ADDRESS", "").strip().strip('"').strip("'")
+
+if PRIVATE_KEY and not WALLET_ADDRESS:
+    try:
+        from eth_account import Account
+        WALLET_ADDRESS = Account.from_key(PRIVATE_KEY).address
+    except Exception:
+        pass
 
 
 # ============================================================
