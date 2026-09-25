@@ -501,7 +501,7 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
     # This is the core fix — recalculate everything at execution time,
     # never trust stale quote from the polling cycle.
     # ============================================================
-    print(f"[PROFIT CHECK] Fetching fresh quote for ${trade_amt:.4f} USDT on {buy_dex} → {sell_dex}...", flush=True)
+    print(f"[PROFIT CHECK] Fetching fresh quote for ${trade_amt:.4f} USDT on {buy_dex} -> {sell_dex}...", flush=True)
 
     parts = config.SYMBOL.split("/")
     base_sym = parts[0] if len(parts) > 0 else "WETH"
@@ -512,7 +512,6 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
     except Exception as exc:
         return _skip(f"Failed to fetch fresh DEX quotes: {exc}")
 
-<<<<<<< HEAD
     if buy_dex not in fresh_quotes or sell_dex not in fresh_quotes:
         return _skip(f"Required DEXes {buy_dex}, {sell_dex} not available in fresh quote")
 
@@ -611,7 +610,7 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
 
     # Gate 14: Record profit ONLY after confirmed on-chain transaction success
     if result.get("success"):
-        last_trade_time = now
+        last_trade_time = time.time()
         last_trade_key = route_key
         trade_data = result.get("trade", {})
         if trade_data:
