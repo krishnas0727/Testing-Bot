@@ -2356,7 +2356,9 @@ async function loadTrades() {
 }
 
 async function loadLatencyAudits() {
+    const kpiEl = document.getElementById("kpiDetToPrep");
     const tbody = document.getElementById("latencyAuditsTableBody");
+    if (!kpiEl && !tbody) return;
     try {
         const res = await fetch("/api/latency-audit?limit=25");
         const json = await res.json();
