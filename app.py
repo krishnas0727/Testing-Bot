@@ -8,6 +8,7 @@ import os
 import sys
 import threading
 import time
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, Optional, List
 
@@ -48,6 +49,8 @@ from database import (
     save_trade,
     get_live_pnl_summary,
     delete_all_trades,
+    save_execution_log,
+    get_recent_execution_logs,
 )
 
 app = Flask(__name__)
@@ -130,9 +133,9 @@ except Exception as _e:
 last_background_trade_result = None
 last_execution_status = "STANDBY - AUTO TRADE DISABLED"
 
-# Rolling in-memory execution diagnostics and skip events log (latest 50 events)
-execution_audit_logs: list = []
+# Rolling execution diagnostics and skip events log (persisted in SQLite for 24/7 audit history)
 MAX_AUDIT_LOGS = 50
+execution_audit_logs: list = get_recent_execution_logs(limit=MAX_AUDIT_LOGS)
 
 
 def record_execution_event(
@@ -144,11 +147,12 @@ def record_execution_event(
     reason: str,
     tx_hash: str = ""
 ):
-    """Record execution or skip event in rolling in-memory audit log for real-time debugging."""
+    """Record execution or skip event in database and in-memory audit log for 24/7 persistence."""
     global execution_audit_logs
+    now_str = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
     entry = {
-        "id": len(execution_audit_logs) + 1,
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
+        "id": (execution_audit_logs[0]["id"] + 1) if execution_audit_logs and "id" in execution_audit_logs[0] else len(execution_audit_logs) + 1,
+        "timestamp": now_str,
         "event_type": event_type,
         "route": route,
         "amount_in": round(float(amount_in), 2),
@@ -160,6 +164,11 @@ def record_execution_event(
     execution_audit_logs.insert(0, entry)
     if len(execution_audit_logs) > MAX_AUDIT_LOGS:
         execution_audit_logs = execution_audit_logs[:MAX_AUDIT_LOGS]
+
+    try:
+        save_execution_log(entry)
+    except Exception as err:
+        print(f"⚠️ Error persisting execution event: {err}", flush=True)
 
 
 def get_engine_status(chain_id: Optional[int] = None) -> str:
@@ -815,6 +824,11 @@ def confirm_live_trade_api():
         sell_dex = req.get("sell_dex") or "SushiSwap_V2"
         token_pair = req.get("token_pair") or config.SYMBOL
 
+        target_mode = req.get("mode")
+        if not target_mode:
+            target_mode = "TESTNET" if config.is_chain_testnet(chain_id) or getattr(config, "TRADING_MODE", "") == "TESTNET" else "LIVE"
+
+        now_str = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
         trade_data = {
             "tx_hash": tx_hash,
             "chain_id": chain_id,
@@ -831,15 +845,15 @@ def confirm_live_trade_api():
             "price_impact": float(req.get("price_impact", 0.0)),
             "slippage": float(req.get("slippage", config.SLIPPAGE_PCT)),
             "status": "CONFIRMED",
-            "mode": "LIVE",
-            "created_at": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
+            "mode": target_mode,
+            "created_at": now_str,
         }
 
         trade_id = save_trade(trade_data)
         trade_data["id"] = trade_id
 
         record_execution_event(
-            event_type="LIVE_TRADE_CONFIRMED",
+            event_type=f"{target_mode}_TRADE_CONFIRMED",
             route=f"{buy_dex}->{sell_dex}",
             amount_in=amount_in,
             net_profit=verified_net_profit,

@@ -8,7 +8,7 @@ import os
 import sqlite3
 import json
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 from config import DATABASE_NAME, BACKUP_JSON_PATH
 
@@ -102,6 +102,22 @@ def create_database():
         )
     """)
 
+    # 24/7 Execution & Diagnostic Audit Logs Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS execution_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            route TEXT NOT NULL,
+            amount_in REAL DEFAULT 0.0,
+            net_profit REAL DEFAULT 0.0,
+            status TEXT NOT NULL,
+            reason TEXT DEFAULT '',
+            tx_hash TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -179,7 +195,7 @@ def save_trade(trade_data: Dict[str, Any]) -> int:
         float(trade_data.get("slippage", 0.0)),
         trade_data.get("status", "CONFIRMED"),
         trade_data.get("mode", "MOCK"),
-        trade_data.get("created_at") or datetime.now().astimezone().isoformat()
+        trade_data.get("created_at") or datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
     ))
 
     trade_id = cursor.lastrowid
@@ -190,12 +206,24 @@ def save_trade(trade_data: Dict[str, Any]) -> int:
     return trade_id
 
 
+def _normalize_mode_clause(mode: Optional[str]) -> Tuple[str, tuple]:
+    """Helper to translate UI mode filters (LIVE, SIMULATION, ALL) to DB queries."""
+    if not mode or mode == "ALL":
+        return ("", ())
+    if mode == "LIVE":
+        return ("mode IN ('LIVE', 'TESTNET')", ())
+    if mode in ("SIMULATION", "MOCK"):
+        return ("mode IN ('SIMULATION', 'MOCK')", ())
+    return ("mode = ?", (mode,))
+
+
 def get_all_trades(limit: int = 100, mode: Optional[str] = None) -> List[Dict[str, Any]]:
     create_database()
     conn = get_connection()
     cursor = conn.cursor()
-    if mode and mode != "ALL":
-        cursor.execute("SELECT * FROM trades WHERE mode = ? ORDER BY id DESC LIMIT ?", (mode, limit))
+    clause, params = _normalize_mode_clause(mode)
+    if clause:
+        cursor.execute(f"SELECT * FROM trades WHERE {clause} ORDER BY id DESC LIMIT ?", (*params, limit))
     else:
         cursor.execute("SELECT * FROM trades ORDER BY id DESC LIMIT ?", (limit,))
     rows = cursor.fetchall()
@@ -210,8 +238,9 @@ def get_latest_trade(mode: Optional[str] = None) -> Optional[Dict[str, Any]]:
     create_database()
     conn = get_connection()
     cursor = conn.cursor()
-    if mode and mode != "ALL":
-        cursor.execute("SELECT * FROM trades WHERE mode = ? ORDER BY id DESC LIMIT 1", (mode,))
+    clause, params = _normalize_mode_clause(mode)
+    if clause:
+        cursor.execute(f"SELECT * FROM trades WHERE {clause} ORDER BY id DESC LIMIT 1", params)
     else:
         cursor.execute("SELECT * FROM trades ORDER BY id DESC LIMIT 1")
     row = cursor.fetchone()
@@ -223,8 +252,9 @@ def get_total_trades(mode: Optional[str] = None) -> int:
     create_database()
     conn = get_connection()
     cursor = conn.cursor()
-    if mode and mode != "ALL":
-        cursor.execute("SELECT COUNT(*) FROM trades WHERE mode = ? AND status = 'CONFIRMED'", (mode,))
+    clause, params = _normalize_mode_clause(mode)
+    if clause:
+        cursor.execute(f"SELECT COUNT(*) FROM trades WHERE {clause} AND status = 'CONFIRMED'", params)
     else:
         cursor.execute("SELECT COUNT(*) FROM trades WHERE status = 'CONFIRMED'")
     count = cursor.fetchone()[0]
@@ -236,8 +266,9 @@ def get_total_profit(mode: Optional[str] = None) -> float:
     create_database()
     conn = get_connection()
     cursor = conn.cursor()
-    if mode and mode != "ALL":
-        cursor.execute("SELECT COALESCE(SUM(net_profit), 0.0) FROM trades WHERE mode = ? AND status = 'CONFIRMED'", (mode,))
+    clause, params = _normalize_mode_clause(mode)
+    if clause:
+        cursor.execute(f"SELECT COALESCE(SUM(net_profit), 0.0) FROM trades WHERE {clause} AND status = 'CONFIRMED'", params)
     else:
         cursor.execute("SELECT COALESCE(SUM(net_profit), 0.0) FROM trades WHERE status = 'CONFIRMED'")
     total = cursor.fetchone()[0]
@@ -249,12 +280,13 @@ def get_today_live_profit(mode: Optional[str] = None) -> float:
     create_database()
     conn = get_connection()
     cursor = conn.cursor()
-    if mode and mode != "ALL":
-        cursor.execute("""
+    clause, params = _normalize_mode_clause(mode)
+    if clause:
+        cursor.execute(f"""
             SELECT COALESCE(SUM(net_profit), 0.0)
             FROM trades
-            WHERE DATE(created_at) = DATE('now') AND mode = ? AND status = 'CONFIRMED'
-        """, (mode,))
+            WHERE DATE(created_at) = DATE('now') AND {clause} AND status = 'CONFIRMED'
+        """, params)
     else:
         cursor.execute("""
             SELECT COALESCE(SUM(net_profit), 0.0)
@@ -272,6 +304,7 @@ def delete_all_trades():
     cursor = conn.cursor()
     cursor.execute("DELETE FROM trades")
     cursor.execute("DELETE FROM opportunity_log")
+    cursor.execute("DELETE FROM execution_logs")
     conn.commit()
     conn.close()
 
@@ -283,13 +316,67 @@ def delete_all_trades():
             pass
 
 
+def save_execution_log(event: Dict[str, Any]) -> int:
+    """Save execution audit event to database for 24/7 persistent history."""
+    try:
+        create_database()
+        conn = get_connection()
+        cursor = conn.cursor()
+        now_ts = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute("""
+            INSERT INTO execution_logs (
+                timestamp, event_type, route, amount_in, net_profit, status, reason, tx_hash, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            event.get("timestamp") or now_ts,
+            event.get("event_type", "INFO"),
+            event.get("route", ""),
+            float(event.get("amount_in", 0.0)),
+            float(event.get("net_profit", 0.0)),
+            event.get("status", "LOGGED"),
+            event.get("reason", ""),
+            event.get("tx_hash", ""),
+            now_ts
+        ))
+        log_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return log_id
+    except Exception as e:
+        print(f"⚠️ Error saving execution log: {e}", flush=True)
+        return -1
+
+
+def get_recent_execution_logs(limit: int = 50) -> List[Dict[str, Any]]:
+    """Retrieve the most recent execution logs from database across restarts."""
+    try:
+        create_database()
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, timestamp, event_type, route, amount_in, net_profit, status, reason, tx_hash, created_at
+            FROM execution_logs
+            ORDER BY id DESC
+            LIMIT ?
+        """, (limit,))
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        print(f"⚠️ Error reading execution logs: {e}", flush=True)
+        return []
+
+
 def get_live_pnl_summary(mode: Optional[str] = None) -> Dict[str, Any]:
     create_database()
     conn = get_connection()
     cursor = conn.cursor()
 
-    where_clause = "WHERE mode = ? AND status = 'CONFIRMED'" if (mode and mode != "ALL") else "WHERE status = 'CONFIRMED'"
-    params = (mode,) if (mode and mode != "ALL") else ()
+    clause, params = _normalize_mode_clause(mode)
+    if clause:
+        where_clause = f"WHERE {clause} AND status = 'CONFIRMED'"
+    else:
+        where_clause = "WHERE status = 'CONFIRMED'"
 
     cursor.execute(f"""
         SELECT

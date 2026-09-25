@@ -1997,6 +1997,22 @@ function setTradeFilter(mode) {
     loadTrades();
 }
 
+function formatLogTime(timeStr) {
+    if (!timeStr) return "--";
+    try {
+        if (timeStr.includes("T") || timeStr.endsWith("Z")) {
+            const d = new Date(timeStr);
+            if (!isNaN(d.getTime())) {
+                const pad = n => String(n).padStart(2, "0");
+                return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+            }
+        }
+        return timeStr.slice(0, 19);
+    } catch (e) {
+        return timeStr.slice(0, 19);
+    }
+}
+
 async function loadTrades() {
     const tbody = document.getElementById("tradesTableBody");
     if (!tbody) return;
@@ -2020,11 +2036,13 @@ async function loadTrades() {
         tbody.innerHTML = trades.map(t => {
             const shortHash = (t.tx_hash || "").slice(0, 10) + "...";
             const isLive = t.mode === "LIVE";
-            const hashLink = isLive
-                ? `<a href="https://etherscan.io/tx/${t.tx_hash}" target="_blank" style="color:var(--action-color); text-decoration:underline;">${shortHash}</a>`
+            const isTestnet = t.mode === "TESTNET";
+            const explorerBase = (SUPPORTED_CHAINS[t.chain_id]?.explorer || "https://etherscan.io");
+            const hashLink = (isLive || isTestnet)
+                ? `<a href="${explorerBase}/tx/${t.tx_hash}" target="_blank" style="color:var(--action-color); text-decoration:underline;">${shortHash}</a>`
                 : `<span style="color:#a78bfa; font-family:var(--font-mono);">${shortHash}</span>`;
-            const badgeClass = isLive ? "badge-red" : "badge-blue";
-            const modeLabel = isLive ? "LIVE" : (t.mode || "SIMULATION");
+            const badgeClass = isLive ? "badge-red" : (isTestnet ? "badge-yellow" : "badge-blue");
+            const modeLabel = isLive ? "LIVE" : (isTestnet ? "TESTNET" : (t.mode || "SIMULATION"));
             const netProf = Number(t.net_profit || 0);
             const profSign = netProf >= 0 ? "+" : "";
 
@@ -2039,7 +2057,7 @@ async function loadTrades() {
                     <td style="font-family:var(--font-mono); color:var(--text-muted);">$${Number(t.gas_cost_usdt || 0).toFixed(4)}</td>
                     <td style="font-family:var(--font-mono); font-weight:700; color:${netProf >= 0 ? "var(--profit-color)" : "var(--loss-color)"};">${profSign}$${netProf.toFixed(4)}</td>
                     <td><span class="badge ${t.status === "CONFIRMED" ? "badge-green" : "badge-yellow"}">${t.status}</span></td>
-                    <td style="font-size:11px; color:var(--text-muted);">${(t.created_at || "").slice(0, 19)}</td>
+                    <td style="font-size:11px; color:var(--text-muted);">${formatLogTime(t.created_at)}</td>
                 </tr>
             `;
         }).join("");
@@ -2073,7 +2091,7 @@ async function loadExecutionLogs() {
 
             return `
                 <tr>
-                    <td style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">${l.timestamp || ""}</td>
+                    <td style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">${formatLogTime(l.timestamp)}</td>
                     <td><span class="badge ${badgeClass}">${l.event_type}</span></td>
                     <td style="font-weight:600;">${l.route || "-"}</td>
                     <td style="font-family:var(--font-mono);">$${Number(l.amount_in || 0).toFixed(2)}</td>
@@ -3643,6 +3661,7 @@ async function executeMetaMaskOnChainTrade(options = {}) {
 
         // Step 7: Verify and record live trade on backend
         showExecModal("Verifying On-Chain Receipt", "Verifying block receipt & updating live audit log...", 5);
+        const tradeMode = targetChainInfo.isTestnet ? "TESTNET" : "LIVE";
         const confirmRes = await fetch("/api/trade/confirm-live", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -3654,7 +3673,8 @@ async function executeMetaMaskOnChainTrade(options = {}) {
                 token_pair: `${tokenSymbol}/WETH`,
                 amount_in: tradeAmt,
                 expected_profit: route.net_profit_usdt || 0.0,
-                gross_profit: route.gross_profit_usdt || 0.0
+                gross_profit: route.gross_profit_usdt || 0.0,
+                mode: tradeMode
             })
         });
         const confirmData = await confirmRes.json();
