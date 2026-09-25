@@ -274,19 +274,20 @@ def start_background_auto_trader():
                             if result.get("success"):
                                 last_execution_status = "ATOMIC TRADE FILLED"
                                 t = result.get("trade", {})
+                                verified_np = float(t.get("net_profit", np))
                                 record_execution_event(
                                     event_type="TRADE_FILLED",
                                     route=route_name,
                                     amount_in=amt,
-                                    net_profit=np,
+                                    net_profit=verified_np,
                                     status="FILLED",
-                                    reason=f"Profit: +${t.get('net_profit', 0):.4f} USDT",
+                                    reason=f"Profit: +${verified_np:.4f} USDT",
                                     tx_hash=t.get("tx_hash", ""),
                                     telemetry=tel
                                 )
                                 print(
                                     f"[DEX Trade Executed] {t.get('buy_dex')} -> {t.get('sell_dex')} | "
-                                    f"Profit: +${t.get('net_profit', 0):.4f} USDT | Tx: {t.get('tx_hash', '')[:16]}...",
+                                    f"Profit: +${verified_np:.4f} USDT | Tx: {t.get('tx_hash', '')[:16]}...",
                                     flush=True
                                 )
                             elif result.get("status") in ("TRADE SKIPPED", "INSUFFICIENT BALANCE"):
@@ -304,11 +305,12 @@ def start_background_auto_trader():
                                 else:
                                     ev_type = "INSUFFICIENT_BALANCE" if is_insufficient else ("STALE_OPPORTUNITY" if is_stale else "TRADE_SKIPPED")
                                     st_type = "INSUFFICIENT_BALANCE" if is_insufficient else ("STALE" if is_stale else "SKIPPED")
+                                    trade_np = float(result.get("net_profit_usdt", np))
                                     record_execution_event(
                                         event_type=ev_type,
                                         route=route_name,
                                         amount_in=amt,
-                                        net_profit=np,
+                                        net_profit=trade_np,
                                         status=st_type,
                                         reason=clean_reason,
                                         telemetry=tel
@@ -321,11 +323,12 @@ def start_background_auto_trader():
                                         last_execution_status = f"TRADE SKIPPED: {clean_reason}"
                             else:
                                 msg = result.get("message", "Execution error")
+                                trade_np = float(result.get("net_profit_usdt", np))
                                 record_execution_event(
                                     event_type="TRADE_FAILED",
                                     route=route_name,
                                     amount_in=amt,
-                                    net_profit=np,
+                                    net_profit=trade_np,
                                     status="FAILED",
                                     reason=msg,
                                     telemetry=tel
@@ -752,13 +755,14 @@ def manual_trade_api():
         if result.get("success"):
             last_execution_status = "ATOMIC TRADE FILLED"
             t = result.get("trade", {})
+            verified_np = float(t.get("net_profit", np))
             record_execution_event(
                 event_type="TRADE_FILLED",
                 route=route_name,
                 amount_in=amt,
-                net_profit=np,
+                net_profit=verified_np,
                 status="FILLED",
-                reason=f"Profit: +${t.get('net_profit', 0):.4f} USDT",
+                reason=f"Profit: +${verified_np:.4f} USDT",
                 tx_hash=t.get("tx_hash", ""),
                 telemetry=tel
             )
@@ -784,11 +788,12 @@ def manual_trade_api():
                 event_type = "TRADE_SKIPPED"
                 audit_status = "SKIPPED"
 
+            trade_np = float(result.get("net_profit_usdt", np))
             record_execution_event(
                 event_type=event_type,
                 route=route_name,
                 amount_in=amt,
-                net_profit=np,
+                net_profit=trade_np,
                 status=audit_status,
                 reason=clean_reason,
                 telemetry=tel
@@ -799,11 +804,12 @@ def manual_trade_api():
         else:
             msg = result.get("message", "Execution error")
             last_execution_status = f"TRADE FAILED: {msg}"
+            trade_np = float(result.get("net_profit_usdt", np))
             record_execution_event(
                 event_type="TRADE_FAILED",
                 route=route_name,
                 amount_in=amt,
-                net_profit=np,
+                net_profit=trade_np,
                 status="FAILED",
                 reason=msg,
                 telemetry=tel

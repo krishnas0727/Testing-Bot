@@ -379,12 +379,12 @@ def _calculate_net_profit(trade_amt: float, buy_q: dict, sell_q: dict, gas_price
     # Cap gas cost for L2 networks where gas is sub-cent
     gas_cost_usdt = min(gas_cost_usdt, max(0.00001, trade_amt * 0.002))
 
-    # Gross profit = raw output − input (before all costs)
+    # Gross profit = raw output − input (after DEX swap fees embedded in constant-product formula)
     gross_profit_usdt = usdt_out - trade_amt
 
-    # Net profit = gross − gas − slippage reserve
-    # (DEX fees are already embedded in constant-product formula; showing them for transparency)
-    net_profit_usdt = gross_profit_usdt - gas_cost_usdt - slippage_cost_usdt
+    # Net profit = gross profit − gas cost
+    # (DEX fees are already deducted by the constant-product formula; gas is the network transaction fee)
+    net_profit_usdt = gross_profit_usdt - gas_cost_usdt
     net_profit_pct = (net_profit_usdt / trade_amt) * 100.0 if trade_amt > 0 else 0.0
 
     is_gas_ok = gas_price_gwei <= float(getattr(config, "MAX_GAS_PRICE_GWEI", 50.0))
@@ -415,8 +415,8 @@ def _calculate_net_profit(trade_amt: float, buy_q: dict, sell_q: dict, gas_price
         "is_impact_acceptable": is_impact_ok,
         "skip_reason": "" if is_profitable else (
             f"INSUFFICIENT_PROFIT: Net ${net_profit_usdt:.6f} USDT "
-            f"(Gross ${gross_profit_usdt:.6f} - Gas ${gas_cost_usdt:.6f} - Slip ${slippage_cost_usdt:.6f})"
-            if not is_gas_ok is False and not is_impact_ok is False
+            f"(Gross ${gross_profit_usdt:.6f} - Gas ${gas_cost_usdt:.6f})"
+            if is_gas_ok and is_impact_ok
             else (f"Gas too high ({gas_price_gwei:.2f} Gwei)" if not is_gas_ok
                   else f"Price impact too high ({max_impact:.2f}%)")
         ),
