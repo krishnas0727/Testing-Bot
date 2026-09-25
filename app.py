@@ -801,13 +801,18 @@ def wallet_connect_api():
                 config.set_active_chain(chain_id)
                 save_bot_setting("chain_id", chain_id)
 
+        # Use the client-reported chain_id for balance query — fixes Sepolia showing 0
+        client_chain_id = chain_id if chain_id and chain_id in config.CHAIN_REGISTRY else config.CHAIN_ID
         from dex_engine import get_all_dex_quotes
         parts = config.SYMBOL.split("/")
         base_sym = parts[0] if len(parts) > 0 else "WETH"
         quote_sym = parts[1] if len(parts) > 1 else "USDT"
-        quotes = get_all_dex_quotes(100.0, base_sym, quote_sym)
-        eth_price = list(quotes.values())[0]["spot_price"] if quotes else 3000.0
-        wallet = get_wallet_balances(eth_price, wallet_address=address)
+        try:
+            quotes = get_all_dex_quotes(100.0, base_sym, quote_sym)
+            eth_price = list(quotes.values())[0]["spot_price"] if quotes else 3000.0
+        except Exception:
+            eth_price = 3000.0
+        wallet = get_wallet_balances(eth_price, wallet_address=address, chain_id=client_chain_id)
 
         return jsonify({
             "success": True,

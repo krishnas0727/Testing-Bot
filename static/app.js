@@ -2298,17 +2298,16 @@ async function fetchClientWalletBalances(account, chainIdNum) {
     const provider = getMetaMaskProvider();
     if (!provider || !account) return;
 
-    const targetId = Number(chainIdNum || currentSelectedChainId);
-
-    // Verify if MetaMask is currently connected to targetId
-    let currentMmId = null;
+    // Always read from MetaMask's ACTUAL current chain — not the UI-selected chain.
+    // This fixes Sepolia ETH showing 0 when MetaMask is on Sepolia but bot UI shows Base.
+    let actualMmChainId = Number(chainIdNum || currentSelectedChainId);
     try {
-        const hex = metamaskChainId || (await provider.request({ method: "eth_chainId" }));
-        if (hex) currentMmId = parseInt(hex, 16);
+        const hex = await provider.request({ method: "eth_chainId" });
+        if (hex) actualMmChainId = parseInt(hex, 16);
     } catch (e) {}
 
-    if (currentMmId && currentMmId !== targetId) {
-        // MetaMask is on a different chain than the selected source of truth
+    // If MetaMask is not on any supported chain, show disconnected
+    if (!SUPPORTED_CHAINS[actualMmChainId]) {
         clientWalletBalances = { eth: 0, weth: 0, usdt: 0, usdc: 0, usdbc: 0, updated: Date.now() };
         setText("balETH", "--");
         setText("balETHusd", "--");
@@ -2320,7 +2319,7 @@ async function fetchClientWalletBalances(account, chainIdNum) {
         return;
     }
 
-    // Reset balances for the target query to avoid cross-chain state pollution
+    // Reset balances for this query
     clientWalletBalances = {
         eth: 0,
         weth: 0,
@@ -2331,7 +2330,7 @@ async function fetchClientWalletBalances(account, chainIdNum) {
     };
 
     try {
-        // 1. Native ETH / SepoliaETH / POL balance via eth_getBalance
+        // 1. Native ETH / SepoliaETH / POL balance via eth_getBalance (direct from MetaMask)
         const hexBal = await provider.request({
             method: "eth_getBalance",
             params: [account, "latest"]
@@ -2340,8 +2339,8 @@ async function fetchClientWalletBalances(account, chainIdNum) {
             clientWalletBalances.eth = parseInt(hexBal, 16) / 1e18;
         }
 
-        // 2. Token balances via ERC20 balanceOf eth_call
-        const tokens = CLIENT_TOKEN_ADDRESSES[targetId];
+        // 2. Token balances via ERC20 balanceOf eth_call (from MetaMask's actual chain)
+        const tokens = CLIENT_TOKEN_ADDRESSES[actualMmChainId];
         if (tokens) {
             const cleanAddr = account.toLowerCase().replace("0x", "").padStart(64, "0");
             const balanceOfData = "0x70a08231" + cleanAddr;
@@ -2366,23 +2365,28 @@ async function fetchClientWalletBalances(account, chainIdNum) {
                         else if (sym === "WETH") clientWalletBalances.weth = val;
                     }
                 } catch (tokErr) {
-                    console.warn(`[Balance fetch error for ${sym} on chain ${targetId}]:`, tokErr);
+                    console.warn(`[Balance fetch error for ${sym} on chain ${actualMmChainId}]:`, tokErr);
                 }
             }
         }
         clientWalletBalances.updated = Date.now();
-        renderClientWalletBalances();
+        // Render using MetaMask's actual chain labels
+        renderClientWalletBalances(actualMmChainId);
     } catch (err) {
         console.warn("[Client Web3 Balance fetch error]:", err);
     }
 }
 
-function renderClientWalletBalances() {
+
+function renderClientWalletBalances(chainId) {
     if (!metamaskAccount) return;
+    // Use passed chainId (MetaMask actual) or fallback to currentSelectedChainId
+    const activeChain = Number(chainId || currentSelectedChainId);
     const ethPrice = latestMarketData && latestMarketData.summary && latestMarketData.summary.eth_price_usdt ? Number(latestMarketData.summary.eth_price_usdt) : 3000;
-    const chainConfig = SUPPORTED_CHAINS[currentSelectedChainId] || { short: "ETH", currency: "ETH", nativeCurrency: { symbol: "ETH" } };
+    const chainConfig = SUPPORTED_CHAINS[activeChain] || { short: "ETH", currency: "ETH", nativeCurrency: { symbol: "ETH" } };
     const nativeSym = chainConfig.currency || (chainConfig.nativeCurrency ? chainConfig.nativeCurrency.symbol : "ETH");
-    const quoteSym = (chainConfig.defaultPair && chainConfig.defaultPair.split("/")[1]) || (currentSelectedChainId === 8453 ? "USDC" : "USDT");
+    const quoteSym = (chainConfig.defaultPair && chainConfig.defaultPair.split("/")[1]) || (activeChain === 8453 ? "USDC" : "USDT");
+
 
     setText("balETH", `${Number(clientWalletBalances.eth || 0).toFixed(4)} ${nativeSym}`);
     setText("balETHusd", `≈ $${(Number(clientWalletBalances.eth || 0) * ethPrice).toFixed(2)} ${quoteSym}`);
@@ -2575,10 +2579,12 @@ async function handleAccountsChanged(accounts, notifyUser = true) {
     // Update UI elements immediately
     updateWalletUIConnected(metamaskAccount, metamaskChainId);
 
-    // Instant client-side direct Web3 balance fetch
+    // Instant client-side direct Web3 balance fetch — use MetaMask's actual chain
     if (typeof fetchClientWalletBalances === "function") {
+        // Pass 0 so function will detect actual MetaMask chain via eth_chainId
         fetchClientWalletBalances(metamaskAccount, activeCid);
     }
+
 
     // Synchronize connected address with backend
     try {
