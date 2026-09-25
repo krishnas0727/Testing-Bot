@@ -479,7 +479,130 @@ def execution_logs_api():
     })
 
 
+@app.route("/api/trade/verify-profit", methods=["POST"])
+def verify_profit_api():
+    """Real-time pre-execution profitability check.
+
+    Fetches a FRESH DEX quote, recalculates gross profit, gas cost (ETH price × gas units × gas gwei),
+    slippage cost, and net profit. Returns is_profitable=True only if netProfit > 0 after ALL costs.
+    Called by the frontend auto-execute engine immediately before MetaMask signing — never uses stale data.
+    """
+    try:
+        req_data = request.get_json(force=True, silent=True) or {}
+        trade_amount = float(req_data.get("trade_amount") or config.DEFAULT_TRADE_AMOUNT)
+        chain_id_param = req_data.get("chain_id")
+
+        # Switch to client chain if specified
+        if chain_id_param:
+            try:
+                cid = int(chain_id_param)
+                if cid in config.CHAIN_REGISTRY and cid != config.CHAIN_ID:
+                    config.set_active_chain(cid)
+            except (ValueError, TypeError):
+                pass
+
+        active_chain_id = getattr(config, "CHAIN_ID", 8453)
+        chain_info = config.CHAIN_REGISTRY.get(active_chain_id, {})
+
+        parts = config.SYMBOL.split("/")
+        base_sym = parts[0] if len(parts) > 0 else "WETH"
+        quote_sym = parts[1] if len(parts) > 1 else "USDT"
+
+        # Fresh quote from all DEXes
+        from dex_engine import get_all_dex_quotes, estimate_arbitrage_gas_cost_usd
+        from arbitrage import _calculate_net_profit
+
+        try:
+            quotes = get_all_dex_quotes(trade_amount, base_sym, quote_sym)
+        except Exception as exc:
+            return jsonify({
+                "is_profitable": False,
+                "net_profit_usdt": 0.0,
+                "skip_reason": f"INSUFFICIENT_PROFIT: Failed to fetch fresh quote: {exc}",
+            })
+
+        if len(quotes) < 2:
+            return jsonify({
+                "is_profitable": False,
+                "net_profit_usdt": 0.0,
+                "skip_reason": "INSUFFICIENT_PROFIT: Less than 2 DEXes available for arbitrage",
+            })
+
+        # Find the best buy/sell pair
+        best_net = None
+        best_result = None
+        best_buy_dex = None
+        best_sell_dex = None
+
+        avg_eth_price = sum(q["spot_price"] for q in quotes.values()) / len(quotes)
+        gas_info = estimate_arbitrage_gas_cost_usd(avg_eth_price)
+        gas_gwei = gas_info["gas_price_gwei"]
+
+        for buy_dex, buy_q in quotes.items():
+            for sell_dex, sell_q in quotes.items():
+                if buy_dex == sell_dex:
+                    continue
+                if sell_q["spot_price"] <= buy_q["spot_price"]:
+                    continue
+                result = _calculate_net_profit(
+                    trade_amt=trade_amount,
+                    buy_q=buy_q,
+                    sell_q=sell_q,
+                    gas_price_gwei=gas_gwei,
+                    eth_price_usdt=avg_eth_price,
+                )
+                net = result.get("net_profit_usdt", -999.0)
+                if best_net is None or net > best_net:
+                    best_net = net
+                    best_result = result
+                    best_buy_dex = buy_dex
+                    best_sell_dex = sell_dex
+
+        if best_result is None or best_net is None or best_net <= 0:
+            reason = (best_result or {}).get("skip_reason") or "INSUFFICIENT_PROFIT: No profitable route after gas + slippage"
+            return jsonify({
+                "is_profitable": False,
+                "net_profit_usdt": float(best_net or 0),
+                "skip_reason": reason,
+                "gross_profit_usdt": float((best_result or {}).get("gross_profit_usdt", 0)),
+                "gas_cost_usdt": float((best_result or {}).get("gas_cost_usdt", 0)),
+                "slippage_cost_usdt": float((best_result or {}).get("slippage_cost_usdt", 0)),
+            })
+
+        return jsonify({
+            "is_profitable": True,
+            "buy_dex": best_buy_dex,
+            "sell_dex": best_sell_dex,
+            "chain_id": active_chain_id,
+            "chain_name": chain_info.get("name", ""),
+            "trade_amount": trade_amount,
+            "net_profit_usdt": float(best_net),
+            "net_profit_pct": float(best_result.get("net_profit_pct", 0)),
+            "gross_profit_usdt": float(best_result.get("gross_profit_usdt", 0)),
+            "gas_cost_usdt": float(best_result.get("gas_cost_usdt", 0)),
+            "slippage_cost_usdt": float(best_result.get("slippage_cost_usdt", 0)),
+            "dex_fees_usdt": float(best_result.get("dex_fees_usdt", 0)),
+            "weth_out": float(best_result.get("weth_out", 0)),
+            "usdt_out": float(best_result.get("usdt_out", 0)),
+            "min_usdt_out": float(best_result.get("min_usdt_out", 0)),
+            "buy_price": float(quotes[best_buy_dex]["spot_price"]),
+            "sell_price": float(quotes[best_sell_dex]["spot_price"]),
+            "max_price_impact_pct": float(best_result.get("max_price_impact_pct", 0)),
+            "gas_price_gwei": float(gas_gwei),
+            "verified_at": __import__("time").time(),
+            "skip_reason": "",
+        })
+
+    except Exception as exc:
+        return jsonify({
+            "is_profitable": False,
+            "net_profit_usdt": 0.0,
+            "skip_reason": f"Server error during profit check: {str(exc)}",
+        }), 500
+
+
 @app.route("/api/prices", methods=["GET"])
+
 def prices_api():
     """Return live prices and reserves for all supported DEXes on the selected chain."""
     try:

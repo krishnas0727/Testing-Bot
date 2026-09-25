@@ -745,6 +745,120 @@ function startPolling() {
     setInterval(fetchMarketData, 1000);
 }
 
+// ============================================================
+// AUTO-EXECUTE ENGINE — Immediate execution on profitable opportunity
+// Runs on every market data update in LIVE/TESTNET mode
+// ============================================================
+
+let _autoExecLock = false;         // Prevent concurrent executions
+let _autoExecCooldownUntil = 0;   // Timestamp: don't try again until this time
+const AUTO_EXEC_COOLDOWN_MS = 15000; // 15s between auto-executions
+
+async function maybeAutoExecute(marketPayload) {
+    // Guard 1: Lock — only one execution at a time
+    if (_autoExecLock) return;
+
+    // Guard 2: Cooldown
+    if (Date.now() < _autoExecCooldownUntil) return;
+
+    // Guard 3: Settings check — auto_trade must be enabled
+    const settings = marketPayload.settings || {};
+    const autoTradeOn = Boolean(settings.auto_trade);
+    if (!autoTradeOn) return;
+
+    // Guard 4: Mode must be LIVE or TESTNET
+    const mode = (settings.trading_mode || marketPayload.trading_mode || "MOCK").toUpperCase();
+    if (mode !== "LIVE" && mode !== "TESTNET") return;
+
+    // Guard 5: MetaMask wallet must be connected
+    if (!metamaskAccount) return;
+
+    // Guard 6: Emergency stop must be off
+    const emergencyOn = Boolean(settings.emergency_stop || marketPayload.summary?.emergency_stop);
+    if (emergencyOn) return;
+
+    // Guard 7: Best route must be profitable (net_profit_usdt > 0) based on latest scan
+    const best = marketPayload.data?.best_route || marketPayload.best_route;
+    if (!best) return;
+    const latestNet = Number(best.net_profit_usdt || 0);
+    if (latestNet <= 0) return;
+
+    // --- All guards passed — opportunity detected! ---
+    console.log(
+        `[AUTO-EXEC] Profitable opportunity detected: net=$${latestNet.toFixed(6)} USDT ` +
+        `(${best.buy_dex} → ${best.sell_dex}). Triggering immediate execution...`
+    );
+
+    _autoExecLock = true;
+    try {
+        await executeAutoOpportunity(best);
+    } catch (err) {
+        console.warn("[AUTO-EXEC] Execution error:", err);
+    } finally {
+        _autoExecLock = false;
+        _autoExecCooldownUntil = Date.now() + AUTO_EXEC_COOLDOWN_MS;
+    }
+}
+
+async function executeAutoOpportunity(bestRoute) {
+    const tradeAmt = selectedTradeAmount || Number(bestRoute.amount_in || 0.10);
+
+    // Step 1: Show status in UI (non-blocking toast, no modal popup for auto-exec)
+    showToast(
+        `⚡ Auto-Exec: ${bestRoute.buy_dex?.replace("_", " ")} → ${bestRoute.sell_dex?.replace("_", " ")} | Net +$${Number(bestRoute.net_profit_usdt || 0).toFixed(4)}`,
+        "success"
+    );
+
+    // Step 2: IMMEDIATE pre-execution fresh quote + profit recheck from backend
+    let freshCheck;
+    try {
+        const verifyRes = await fetch("/api/trade/verify-profit", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                trade_amount: tradeAmt,
+                wallet_address: metamaskAccount,
+                chain_id: currentSelectedChainId,
+            })
+        });
+        freshCheck = await verifyRes.json();
+    } catch (err) {
+        console.warn("[AUTO-EXEC] Failed to get fresh profit check:", err);
+        return;
+    }
+
+    // Step 3: Recheck — still profitable after fresh quote?
+    if (!freshCheck.is_profitable || Number(freshCheck.net_profit_usdt || 0) <= 0) {
+        console.log(`[AUTO-EXEC] SKIPPED after recheck: ${freshCheck.skip_reason || "INSUFFICIENT_PROFIT"}`);
+        showToast(`⚠️ Auto-Exec skipped: ${freshCheck.skip_reason || "Opportunity disappeared before execution"}`, "warning");
+        return;
+    }
+
+    const freshNet = Number(freshCheck.net_profit_usdt);
+    console.log(`[AUTO-EXEC] Fresh profit confirmed: net=$${freshNet.toFixed(6)} USDT. Signing via MetaMask...`);
+
+    // Step 4: Route to MetaMask non-custodial execution (no server private key)
+    // This uses the existing executeMetaMaskOnChainTrade which handles:
+    //   - approve token if needed
+    //   - swapExactTokensForTokens on buy DEX
+    //   - swapExactTokensForTokens on sell DEX
+    //   - wait for tx confirmation
+    //   - record only on success
+    try {
+        await executeMetaMaskOnChainTrade({
+            autoExec: true,
+            tradeAmount: tradeAmt,
+            freshRoute: freshCheck,
+        });
+    } catch (err) {
+        if (err && err.code === 4001) {
+            showToast("Auto-Exec: MetaMask signature rejected by user.", "warning");
+        } else {
+            console.warn("[AUTO-EXEC] MetaMask execution failed:", err);
+        }
+    }
+}
+
 async function fetchMarketData() {
     const thisEpoch = currentChainEpoch;
     const thisChainId = currentSelectedChainId;
@@ -801,10 +915,15 @@ async function fetchMarketData() {
                 fetchClientWalletBalances(metamaskAccount, currentSelectedChainId);
             }
         }
+
+        // AUTO-EXECUTE: Immediately trigger trade if profitable and auto_trade is on in LIVE/TESTNET
+        maybeAutoExecute(json);
+
     } catch (err) {
         console.warn("[DEX Polling Error]:", err);
     }
 }
+
 
 function updateDashboardUI(payload) {
     const data = payload.data;
@@ -3149,7 +3268,7 @@ async function executeMockPipelineTrade(route, targetChainInfo) {
     }
 }
 
-async function executeMetaMaskOnChainTrade() {
+async function executeMetaMaskOnChainTrade(options = {}) {
     // Guard 1: Emergency Stop Check
     if (latestMarketData && latestMarketData.summary && latestMarketData.summary.emergency_stop) {
         showToast("Emergency Stop is ACTIVE! All trading and blockchain transactions are blocked.", "error");
@@ -3199,7 +3318,7 @@ async function executeMetaMaskOnChainTrade() {
         return;
     }
 
-    const bestRoute = latestMarketData?.best_route || latestMarketData?.data?.best_route;
+    const bestRoute = options?.freshRoute || latestMarketData?.best_route || latestMarketData?.data?.best_route;
     if (!latestMarketData || !bestRoute) {
         showToast("Scanning DEX liquidity... Please wait for a route quote.", "warning");
         return;
@@ -3322,7 +3441,7 @@ async function executeMetaMaskOnChainTrade() {
         }
 
         // Dynamic trade amount calculation based on safe balance
-        let tradeAmt = selectedTradeAmount || 0.10;
+        let tradeAmt = options?.tradeAmount || selectedTradeAmount || 0.10;
         if (availStable > 0 && tradeAmt > availStable) {
             tradeAmt = Math.max(0.0001, Math.floor(availStable * 0.95 * 10000) / 10000);
         }
@@ -3340,46 +3459,48 @@ async function executeMetaMaskOnChainTrade() {
         const routerName = route.buy_dex || "Uniswap_V2";
         const routerAddress = routers[routerName] || Object.values(routers)[0];
 
-        // Close initial check modal before presenting explicit review
-        closeExecModal();
+        // Close initial check modal before presenting explicit review if manual
+        if (!options?.autoExec) {
+            closeExecModal();
 
-        // Calculate trade preview metrics for live confirmation review
-        const ethPrice = Number(latestMarketData?.summary?.eth_price_usdt || 3000);
-        const gasPriceGwei = Number(latestMarketData?.gas_price_gwei || 0.01);
-        const estGasUnits = 250000;
-        const estGasNative = (estGasUnits * gasPriceGwei * 1e-9);
-        const estGasUsd = estGasNative * ethPrice;
-        const gasStr = `~${estGasNative.toFixed(6)} ${nativeSym} (~$${estGasUsd < 0.01 ? '<0.01' : estGasUsd.toFixed(3)} USDT)`;
+            // Calculate trade preview metrics for live confirmation review
+            const ethPrice = Number(latestMarketData?.summary?.eth_price_usdt || 3000);
+            const gasPriceGwei = Number(latestMarketData?.gas_price_gwei || 0.01);
+            const estGasUnits = 250000;
+            const estGasNative = (estGasUnits * gasPriceGwei * 1e-9);
+            const estGasUsd = estGasNative * ethPrice;
+            const gasStr = `~${estGasNative.toFixed(6)} ${nativeSym} (~$${estGasUsd < 0.01 ? '<0.01' : estGasUsd.toFixed(3)} USDT)`;
 
-        let estOutStr = "--";
-        const buyPrice = Number(route.buy_price || 0);
-        if (buyPrice > 0) {
-            const estUnits = tradeAmt / buyPrice;
-            estOutStr = `~${estUnits.toFixed(6)} WETH`;
-        } else {
-            const estUnits = tradeAmt / (ethPrice || 3000);
-            estOutStr = `~${estUnits.toFixed(6)} WETH`;
-        }
+            let estOutStr = "--";
+            const buyPrice = Number(route.buy_price || 0);
+            if (buyPrice > 0) {
+                const estUnits = tradeAmt / buyPrice;
+                estOutStr = `~${estUnits.toFixed(6)} WETH`;
+            } else {
+                const estUnits = tradeAmt / (ethPrice || 3000);
+                estOutStr = `~${estUnits.toFixed(6)} WETH`;
+            }
 
-        const slippageVal = parseFloat(document.getElementById("cfgSlippage")?.value || "0.5");
-        const priceImpactVal = parseFloat(route.price_impact_pct || 0.05);
+            const slippageVal = parseFloat(document.getElementById("cfgSlippage")?.value || "0.5");
+            const priceImpactVal = parseFloat(route.price_impact_pct || 0.05);
 
-        // Explicit Live-Mode Warning: Require explicit user confirmation before initiating wallet transaction
-        try {
-            await new Promise((resolve, reject) => {
-                showLiveTradeConfirmModal({
-                    networkName: `${targetChainInfo.name} (Chain ID ${targetChainId})`,
-                    inputStr: `${tradeAmt.toFixed(4)} ${tokenSymbol}`,
-                    outputStr: estOutStr,
-                    gasStr: gasStr,
-                    slippageStr: `${slippageVal.toFixed(1)}%`,
-                    priceImpactStr: `${priceImpactVal < 0.01 ? '< 0.01' : priceImpactVal.toFixed(2)}%`,
-                    recipientStr: `${metamaskAccount} (Your Connected Wallet)`
-                }, () => resolve(), () => reject(new Error("LIVE_CONFIRMATION_CANCELLED")));
-            });
-        } catch (confirmErr) {
-            showToast("Live trade review cancelled by user.", "info");
-            return;
+            // Explicit Live-Mode Warning: Require explicit user confirmation before initiating manual wallet transaction
+            try {
+                await new Promise((resolve, reject) => {
+                    showLiveTradeConfirmModal({
+                        networkName: `${targetChainInfo.name} (Chain ID ${targetChainId})`,
+                        inputStr: `${tradeAmt.toFixed(4)} ${tokenSymbol}`,
+                        outputStr: estOutStr,
+                        gasStr: gasStr,
+                        slippageStr: `${slippageVal.toFixed(1)}%`,
+                        priceImpactStr: `${priceImpactVal < 0.01 ? '< 0.01' : priceImpactVal.toFixed(2)}%`,
+                        recipientStr: `${metamaskAccount} (Your Connected Wallet)`
+                    }, () => resolve(), () => reject(new Error("LIVE_CONFIRMATION_CANCELLED")));
+                });
+            } catch (confirmErr) {
+                showToast("Live trade review cancelled by user.", "info");
+                return;
+            }
         }
 
         // Step 2: Check pair existence and query DEX Router for fresh on-chain quote
