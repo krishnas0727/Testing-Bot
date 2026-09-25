@@ -608,7 +608,7 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
 
     result = execute_atomic_trade(execution_route, is_manual=is_manual)
 
-    # Gate 14: Record profit ONLY after confirmed on-chain transaction success
+    # Gate 14: Record profit ONLY after confirmed on-chain transaction success AND net_profit > 0
     if result.get("success"):
         last_trade_time = time.time()
         last_trade_key = route_key
@@ -620,14 +620,22 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
             trade_data["verified_gross_profit"] = profit_check["gross_profit_usdt"]
             trade_data["verified_gas_cost"] = profit_check["gas_cost_usdt"]
             trade_data["verified_net_profit"] = profit_check["net_profit_usdt"]
-            # Only save after tx hash confirmed
-            tx_hash = trade_data.get("tx_hash") or result.get("tx_hash")
-            if tx_hash:
-                print(f"[TRADE CONFIRMED] tx={tx_hash} net_profit=${profit_check['net_profit_usdt']:.6f} USDT", flush=True)
-                save_trade(trade_data)
+
+            # Final safety check: NEVER record a trade as successful if net profit is <= 0
+            if profit_check["net_profit_usdt"] <= 0:
+                print(f"[TRADE BLOCKED] Net profit is negative or zero (${profit_check['net_profit_usdt']:.6f} USDT). Not saving as confirmed.", flush=True)
+                trade_data["status"] = "UNPROFITABLE"
+                result["success"] = False
+                result["status"] = "INSUFFICIENT_PROFIT"
+                result["message"] = f"Trade aborted: Net profit was not positive (${profit_check['net_profit_usdt']:.6f} USDT)."
             else:
-                # MOCK / simulation — save for record
-                save_trade(trade_data)
+                tx_hash = trade_data.get("tx_hash") or result.get("tx_hash")
+                if tx_hash:
+                    print(f"[TRADE CONFIRMED] tx={tx_hash} net_profit=${profit_check['net_profit_usdt']:.6f} USDT", flush=True)
+                    save_trade(trade_data)
+                else:
+                    # MOCK / simulation — save for record
+                    save_trade(trade_data)
     else:
         print(f"[TRADE FAILED] {result.get('message', 'Unknown error')} — NOT recording profit.", flush=True)
 
