@@ -244,6 +244,11 @@ def start_background_auto_trader():
                 chain_compatible = (mode == "MOCK") or (mode == "TESTNET" and is_chain_testnet) or (mode == "LIVE" and not is_chain_testnet)
 
                 if auto_enabled and is_armed and chain_compatible and not emergency_stop_active():
+                    has_server_signer = bool(getattr(config, "PRIVATE_KEY", "").strip())
+                    if mode in ("TESTNET", "LIVE") and not has_server_signer:
+                        last_execution_status = f"STANDBY: Automated {mode} trading requires server PRIVATE_KEY. Connect funded MetaMask in UI for manual trading, or switch Mode to MOCK for automated simulation."
+                        continue
+
                     market = analyze_market()
 
                     if market and market.get("is_profitable"):
@@ -736,6 +741,9 @@ def manual_trade_api():
                 status=audit_status,
                 reason=clean_reason
             )
+        elif result.get("status") == "LIVE_SIGNER_REQUIRED":
+            last_execution_status = "METAMASK SIGNER REQUIRED"
+            return jsonify(result), 200
         else:
             msg = result.get("message", "Execution error")
             last_execution_status = f"TRADE FAILED: {msg}"

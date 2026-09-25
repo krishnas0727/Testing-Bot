@@ -1494,11 +1494,12 @@ async function executeCurrentTrade() {
         return;
     }
 
-    const isLiveMode = latestMarketData && (latestMarketData.trading_mode === "LIVE" || (latestMarketData.settings && latestMarketData.settings.trading_mode === "LIVE"));
+    const currentMode = latestMarketData?.trading_mode || latestMarketData?.settings?.trading_mode || "MOCK";
+    const isLiveOrTestnet = (currentMode === "LIVE" || currentMode === "TESTNET");
     const hasServerSigner = latestMarketData && Boolean(latestMarketData.has_private_key);
 
-    // In LIVE mode without server private key, route to MetaMask non-custodial signing
-    if (isLiveMode && !hasServerSigner) {
+    // In LIVE or TESTNET mode without server private key, route to MetaMask non-custodial signing
+    if (isLiveOrTestnet && !hasServerSigner) {
         showToast("Routing to MetaMask for secure non-custodial signing...", "info");
         await executeMetaMaskOnChainTrade();
         return;
