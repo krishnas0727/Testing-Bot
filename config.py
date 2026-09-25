@@ -418,7 +418,7 @@ MAX_DAILY_LOSS_USDT = float(os.getenv("MAX_DAILY_LOSS_USDT", "10.00"))
 # TIMING & EXECUTION SAFETY
 # ============================================================
 
-AUTO_TRADE_COOLDOWN = int(os.getenv("AUTO_TRADE_COOLDOWN", "10"))
+AUTO_TRADE_COOLDOWN = int(os.getenv("AUTO_TRADE_COOLDOWN", "2"))
 REFRESH_INTERVAL = int(os.getenv("REFRESH_INTERVAL", "2"))
 REQUEST_TIMEOUT_MS = int(os.getenv("REQUEST_TIMEOUT_MS", "15000"))
 MAX_QUOTE_AGE_MS = int(os.getenv("MAX_QUOTE_AGE_MS", "5000"))

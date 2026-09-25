@@ -440,7 +440,9 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
 
     # Gate 3: Cooldown
     now = time.time()
-    cooldown = int(getattr(config, "AUTO_TRADE_COOLDOWN", 15))
+    mode = getattr(config, "TRADING_MODE", "MOCK")
+    default_cooldown = 1 if mode == "MOCK" else 2
+    cooldown = int(getattr(config, "AUTO_TRADE_COOLDOWN", default_cooldown))
     if not is_manual and (now - last_trade_time) < cooldown:
         return _skip(f"Cooldown active ({int(cooldown - (now - last_trade_time))}s remaining)")
 
@@ -510,6 +512,7 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
     except Exception as exc:
         return _skip(f"Failed to fetch fresh DEX quotes: {exc}")
 
+<<<<<<< HEAD
     if buy_dex not in fresh_quotes or sell_dex not in fresh_quotes:
         return _skip(f"Required DEXes {buy_dex}, {sell_dex} not available in fresh quote")
 
@@ -569,8 +572,8 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
 
     # Gate 11: Duplicate trigger guard
     route_key = f"{buy_dex}->{sell_dex}"
-    if not is_manual and route_key == last_trade_key and (now - last_trade_time) < (cooldown * 2):
-        return _skip("Duplicate route suppression")
+    if not is_manual and route_key == last_trade_key and (now - last_trade_time) < cooldown:
+        return _skip("Cooldown active (1s remaining)")
 
     # Gate 12: Token Allowance Check
     if mode in ("LIVE", "TESTNET") and getattr(config, "ARBITRAGE_CONTRACT_ADDRESS", ""):

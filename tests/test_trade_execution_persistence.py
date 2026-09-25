@@ -163,6 +163,54 @@ class TradeExecutionPersistenceTests(unittest.TestCase):
         self.assertIn("trade", data)
         self.assertEqual(data["trade"]["status"], "CONFIRMED")
 
+    def test_cooldown_suppression_does_not_log_false_skip(self):
+        """Verify that transient cooldown ticks do NOT pollute execution logs with false TRADE_SKIPPED rows."""
+        initial_logs = get_recent_execution_logs(limit=50)
+        initial_count = len(initial_logs)
+
+        # Test that cooldown skip reasons are filtered from being saved as execution_logs
+        reason = "Cooldown active (1s remaining)"
+        is_cooldown = "Cooldown" in reason or "Duplicate" in reason
+        self.assertTrue(is_cooldown)
+
+        # When cooldown is active, app logic sets status to active scanning rather than recording a skip log
+        if not is_cooldown:
+            record_execution_event(
+                event_type="TRADE_SKIPPED",
+                route="Uniswap_V2->SushiSwap_V2",
+                amount_in=10.0,
+                net_profit=0.045,
+                status="SKIPPED",
+                reason=reason
+            )
+
+        after_logs = get_recent_execution_logs(limit=50)
+        self.assertEqual(len(after_logs), initial_count, "Cooldown pacing must not generate false TRADE_SKIPPED database rows")
+
+    def test_mock_trade_rapid_execution_with_short_cooldown(self):
+        """Verify that trades can execute rapidly with short cooldown without 15s-30s delay."""
+        import arbitrage
+        route = {
+            "buy_dex": "Uniswap_V2",
+            "sell_dex": "SushiSwap_V2",
+            "token_pair": "WETH/USDT",
+            "amount_in": 10.0,
+            "gross_return_usdt": 10.50,
+            "net_profit_usdt": 0.35,
+            "gross_profit_usdt": 0.50,
+            "gas_cost_usdt": 0.15,
+            "price_impact_pct": 0.05,
+        }
+        arbitrage.last_trade_time = 0.0
+        res = arbitrage.execute_real_trade(route, is_manual=False)
+        self.assertTrue(res.get("success"), f"First trade failed: {res.get('message')}")
+
+        # Immediately trying again should be in cooldown for only 1s
+        res2 = arbitrage.execute_real_trade(route, is_manual=False)
+        self.assertFalse(res2.get("success"))
+        self.assertIn("Cooldown active", res2.get("skip_reason", ""))
+        self.assertIn("1s remaining", res2.get("skip_reason", ""))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -281,20 +281,22 @@ def start_background_auto_trader():
                                         clean_reason = clean_reason[len(pfx):].strip()
 
                                 is_insufficient = "INSUFFICIENT BALANCE" in reason or result.get("status") == "INSUFFICIENT BALANCE"
-                                record_execution_event(
-                                    event_type="INSUFFICIENT_BALANCE" if is_insufficient else "TRADE_SKIPPED",
-                                    route=route_name,
-                                    amount_in=amt,
-                                    net_profit=np,
-                                    status="INSUFFICIENT_BALANCE" if is_insufficient else "SKIPPED",
-                                    reason=clean_reason
-                                )
-                                if "Cooldown" in reason or "Duplicate" in reason:
+                                is_cooldown = "Cooldown" in reason or "Duplicate" in reason
+                                if is_cooldown:
                                     last_execution_status = "ACTIVE - SCANNING FOR NEXT ARBITRAGE"
-                                elif is_insufficient:
-                                    last_execution_status = f"INSUFFICIENT BALANCE: {clean_reason}"
                                 else:
-                                    last_execution_status = f"TRADE SKIPPED: {clean_reason}"
+                                    record_execution_event(
+                                        event_type="INSUFFICIENT_BALANCE" if is_insufficient else "TRADE_SKIPPED",
+                                        route=route_name,
+                                        amount_in=amt,
+                                        net_profit=np,
+                                        status="INSUFFICIENT_BALANCE" if is_insufficient else "SKIPPED",
+                                        reason=clean_reason
+                                    )
+                                    if is_insufficient:
+                                        last_execution_status = f"INSUFFICIENT BALANCE: {clean_reason}"
+                                    else:
+                                        last_execution_status = f"TRADE SKIPPED: {clean_reason}"
                             else:
                                 msg = result.get("message", "Execution error")
                                 record_execution_event(
@@ -1039,7 +1041,7 @@ def current_settings() -> Dict[str, Any]:
         "slippage_pct": getattr(config, "SLIPPAGE_PCT", 0.50),
         "max_price_impact_pct": getattr(config, "MAX_PRICE_IMPACT_PCT", 1.00),
         "max_gas_price_gwei": getattr(config, "MAX_GAS_PRICE_GWEI", 50.0),
-        "cooldown": getattr(config, "AUTO_TRADE_COOLDOWN", 15),
+        "cooldown": getattr(config, "AUTO_TRADE_COOLDOWN", 2),
         "symbol": getattr(config, "SYMBOL", "WETH/USDT"),
         "supported_dexes": config.SUPPORTED_DEXES,
         "rpc_url": config.RPC_URL,
