@@ -2704,6 +2704,7 @@ async function selectNetwork(chainId, event) {
         if (typeof event.stopPropagation === "function") event.stopPropagation();
         if (typeof event.preventDefault === "function") event.preventDefault();
     }
+    closeWalletDropdown();
     const id = Number(chainId);
     if (!SUPPORTED_CHAINS[id]) return;
 
@@ -3552,8 +3553,13 @@ function toggleWalletDropdown(event) {
     if (event) event.stopPropagation();
     const menu = document.getElementById("walletDropdownMenu");
     if (!menu) return;
-    const isShown = menu.style.display === "flex";
-    menu.style.display = isShown ? "none" : "flex";
+    const isShown = menu.style.display === "flex" || menu.style.display === "block";
+    if (isShown) {
+        menu.style.display = "none";
+    } else {
+        menu.style.display = "flex";
+        menu.style.flexDirection = "column";
+    }
 }
 
 function closeWalletDropdown() {

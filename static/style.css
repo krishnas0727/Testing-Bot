@@ -324,6 +324,8 @@ header {
 
 /* --- SECONDARY HEADER / CONTROLS DOCK --- */
 .second-header {
+    position: relative;
+    z-index: 1000;
     background: var(--bg-header);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
@@ -368,6 +370,8 @@ header {
 }
 
 .second-header-right {
+    position: relative;
+    z-index: 1001;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -1448,6 +1452,11 @@ header {
 }
 
 /* --- WALLET PILL & DROPDOWN --- */
+.header-wallet-container {
+    position: relative;
+    z-index: 1002;
+}
+
 .wallet-pill {
     background: rgba(15, 23, 42, 0.85);
     border: 1px solid rgba(0, 245, 155, 0.35);
@@ -1489,15 +1498,29 @@ header {
     position: absolute;
     top: calc(100% + 8px);
     right: 0;
-    width: 280px;
-    background: rgba(10, 18, 32, 0.95);
+    width: 290px;
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    background: #0b1329 !important;
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    border: 1px solid var(--border-color);
+    border: 1px solid rgba(56, 189, 248, 0.25);
     border-radius: var(--radius-md);
     padding: 14px;
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
-    z-index: 10000;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.95), 0 0 20px rgba(0, 0, 0, 0.8);
+    z-index: 999999 !important;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.wallet-dropdown-menu::-webkit-scrollbar {
+    width: 4px;
+}
+
+.wallet-dropdown-menu::-webkit-scrollbar-thumb {
+    background: rgba(56, 189, 248, 0.3);
+    border-radius: 4px;
 }
 
 .wallet-menu-header {
@@ -1536,6 +1559,13 @@ header {
     color: var(--text-bright);
 }
 
+.wallet-dropdown-networks {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 4px;
+}
+
 .dropdown-net-card {
     display: flex;
     justify-content: space-between;
@@ -1555,6 +1585,29 @@ header {
     background: rgba(14, 165, 233, 0.2);
     border-color: #0284c7;
     color: #38bdf8;
+}
+
+.dropdown-net-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11.5px;
+    font-weight: 600;
+}
+
+.dropdown-net-status {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
+}
+
+.dropdown-net-card.active .dropdown-net-status {
+    background: rgba(0, 245, 155, 0.2);
+    color: #00f59b;
 }
 
 .wallet-menu-actions {
