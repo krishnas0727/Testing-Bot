@@ -11,12 +11,38 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: TRADING_MODE
-        value: MOCK
+        value: LIVE
       - key: DEFAULT_CHAIN
         value: base
       - key: CHAIN_ID
-        value: 8453
+        value: "8453"
+      - key: RPC_URL
+        value: https://mainnet.base.org
       - key: AUTO_TRADE_ENABLED
-        value: "false"
+        value: "true"
+      - key: LIVE_TRADING_ARMED
+        value: "true"
       - key: EMERGENCY_STOP
         value: "false"
+      - key: DEFAULT_TRADE_AMOUNT
+        value: "5.0"
+      - key: MIN_PROFIT_USDT
+        value: "0.005"
+      - key: MIN_PROFIT_PERCENT
+        value: "0.005"
+      - key: MAX_PRICE_IMPACT_PCT
+        value: "1.00"
+      - key: SLIPPAGE_PCT
+        value: "0.50"
+      - key: AUTO_TRADE_COOLDOWN
+        value: "2"
+      - key: REFRESH_INTERVAL
+        value: "2"
+      - key: ON_CHAIN_STREAM_ENABLED
+        value: "true"
+      - key: ARBITRAGE_CONTRACT_ADDRESS
+        value: "0xf7A798D5E0A4CBB0f109cEC2B02f7f4bFB9c8f5a"
+      - key: WALLET_ADDRESS
+        sync: false
+      - key: PRIVATE_KEY
+        sync: false
