@@ -190,6 +190,7 @@ class TradeExecutionPersistenceTests(unittest.TestCase):
     def test_mock_trade_rapid_execution_with_short_cooldown(self):
         """Verify that trades can execute rapidly with short cooldown without 15s-30s delay."""
         import arbitrage
+        from unittest.mock import patch
         route = {
             "buy_dex": "Uniswap_V2",
             "sell_dex": "SushiSwap_V2",
@@ -201,15 +202,20 @@ class TradeExecutionPersistenceTests(unittest.TestCase):
             "gas_cost_usdt": 0.15,
             "price_impact_pct": 0.05,
         }
-        arbitrage.last_trade_time = 0.0
-        res = arbitrage.execute_real_trade(route, is_manual=False)
-        self.assertTrue(res.get("success"), f"First trade failed: {res.get('message')}")
+        mock_quotes = {
+            "Uniswap_V2": {"spot_price": 2500.0, "amount_out": 0.004, "price_impact_pct": 0.01, "base_reserve": 1000.0, "quote_reserve": 2500000.0},
+            "SushiSwap_V2": {"spot_price": 2600.0, "amount_out": 10.40, "price_impact_pct": 0.01, "base_reserve": 1000.0, "quote_reserve": 2600000.0},
+        }
+        with patch("arbitrage.get_all_dex_quotes", return_value=mock_quotes):
+            arbitrage.last_trade_time = 0.0
+            res = arbitrage.execute_real_trade(route, is_manual=False)
+            self.assertTrue(res.get("success"), f"First trade failed: {res.get('message')}")
 
-        # Immediately trying again should be in cooldown for only 1s
-        res2 = arbitrage.execute_real_trade(route, is_manual=False)
-        self.assertFalse(res2.get("success"))
-        self.assertIn("Cooldown active", res2.get("skip_reason", ""))
-        self.assertIn("1s remaining", res2.get("skip_reason", ""))
+            # Immediately trying again should be in cooldown for only 1s
+            res2 = arbitrage.execute_real_trade(route, is_manual=False)
+            self.assertFalse(res2.get("success"))
+            self.assertIn("Cooldown active", res2.get("skip_reason", ""))
+            self.assertIn("1s remaining", res2.get("skip_reason", ""))
 
 
 if __name__ == "__main__":
