@@ -2465,23 +2465,73 @@ async function loadLatencyAudits() {
     }
 }
 
+let currentExecLogFilter = "SKIPPED";
+
+function setExecLogFilter(filter) {
+    currentExecLogFilter = filter;
+    const btnSkipped = document.getElementById("execFilterBtnSkipped");
+    const btnAll = document.getElementById("execFilterBtnAll");
+    if (btnSkipped && btnAll) {
+        if (filter === "SKIPPED") {
+            btnSkipped.style.background = "#f59e0b";
+            btnSkipped.style.color = "#000";
+            btnSkipped.style.fontWeight = "700";
+            btnAll.style.background = "transparent";
+            btnAll.style.color = "#94a3b8";
+            btnAll.style.fontWeight = "600";
+        } else {
+            btnAll.style.background = "#3b82f6";
+            btnAll.style.color = "#fff";
+            btnAll.style.fontWeight = "700";
+            btnSkipped.style.background = "transparent";
+            btnSkipped.style.color = "#94a3b8";
+            btnSkipped.style.fontWeight = "600";
+        }
+    }
+    loadExecutionLogs();
+}
+
+async function clearExecutionLogs() {
+    if (!confirm("Are you sure you want to clear execution diagnostics logs?")) return;
+    try {
+        await fetch("/api/execution-logs/clear", { method: "POST" });
+        showToast("Execution diagnostics logs cleared.", "info");
+        loadExecutionLogs();
+    } catch (err) {
+        showToast("Clear error: " + err, "error");
+    }
+}
+
 async function loadExecutionLogs() {
     const tbody = document.getElementById("execLogsTableBody");
     if (!tbody) return;
 
     try {
-        const res = await fetch("/api/execution-logs");
+        const filterParam = currentExecLogFilter === "SKIPPED" ? "?filter=skipped" : "?filter=all";
+        const res = await fetch(`/api/execution-logs${filterParam}`);
         const json = await res.json();
-        const logs = json.logs || [];
+        let logs = json.logs || [];
+
+        if (currentExecLogFilter === "SKIPPED") {
+            logs = logs.filter(l => 
+                l.status !== "FILLED" && 
+                l.status !== "CONFIRMED" && 
+                l.event_type !== "TRADE_FILLED" && 
+                !String(l.event_type || "").endsWith("_CONFIRMED")
+            );
+        }
 
         if (logs.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:20px;">No execution events logged yet.</td></tr>`;
+            const emptyMsg = currentExecLogFilter === "SKIPPED" 
+                ? "No skipped trade events recorded. All recent trades executed successfully." 
+                : "No execution events logged yet.";
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:20px;">${emptyMsg}</td></tr>`;
             return;
         }
 
         tbody.innerHTML = logs.map(l => {
             const isFilled = l.status === "FILLED";
-            const isSkipped = l.status === "SKIPPED";
+            const isSkipped = l.status === "SKIPPED" || l.status === "INSUFFICIENT_BALANCE" || l.status === "STALE";
             const badgeClass = isFilled ? "badge-green" : (isSkipped ? "badge-yellow" : "badge-red");
             const netProf = Number(l.net_profit || 0);
             const profSign = netProf >= 0 ? "+" : "";

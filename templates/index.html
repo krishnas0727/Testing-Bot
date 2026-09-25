@@ -1050,10 +1050,17 @@
         <div class="panel" style="margin-top:20px;">
             <div class="panel-header" style="flex-wrap:wrap; gap:12px;">
                 <div>
-                    <h2>Engine Execution & Skip Diagnostics Stream</h2>
+                    <h2>Engine Execution &amp; Skip Diagnostics Stream</h2>
                     <p>Live real-time trace of trade evaluations, simulation checks, and skip reasons for debugging</p>
                 </div>
-                <button class="btn btn-secondary" onclick="loadExecutionLogs()" style="font-size:12px;">🔄 Refresh Diagnostics</button>
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <div style="display:flex; background:rgba(15,23,42,0.8); border-radius:6px; padding:3px; border:1px solid #334155;">
+                        <button id="execFilterBtnSkipped" class="btn" onclick="setExecLogFilter('SKIPPED')" style="padding:4px 10px; font-size:11px; background:#f59e0b; color:#000; border-radius:4px; font-weight:700; border:none; cursor:pointer;">⚠️ Skipped Only</button>
+                        <button id="execFilterBtnAll" class="btn" onclick="setExecLogFilter('ALL')" style="padding:4px 10px; font-size:11px; background:transparent; color:#94a3b8; border-radius:4px; font-weight:600; border:none; cursor:pointer;">All Events</button>
+                    </div>
+                    <button class="btn btn-secondary" onclick="loadExecutionLogs()" style="font-size:12px;">🔄 Refresh Diagnostics</button>
+                    <button class="btn btn-secondary" onclick="clearExecutionLogs()" style="font-size:12px; color:#ef4444; border-color:rgba(239,68,68,0.3);">🗑️ Clear Logs</button>
+                </div>
             </div>
             <div class="table-responsive" style="margin-top:15px;">
                 <table class="data-table" id="execLogsTable">

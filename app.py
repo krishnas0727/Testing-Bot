@@ -519,11 +519,41 @@ def execution_logs_api():
         except (ValueError, TypeError):
             pass
     active_cid = target_cid or getattr(config, "CHAIN_ID", 8453)
+    filter_param = request.args.get("filter", "").lower()
+    logs = execution_audit_logs
+    if filter_param == "skipped":
+        logs = [
+            l for l in execution_audit_logs
+            if l.get("status") not in ("FILLED", "CONFIRMED")
+            and l.get("event_type") != "TRADE_FILLED"
+            and not str(l.get("event_type", "")).endswith("_CONFIRMED")
+        ]
+
     return jsonify({
         "success": True,
-        "logs": execution_audit_logs,
-        "total": len(execution_audit_logs),
+        "logs": logs,
+        "total": len(logs),
         "execution_status": globals().get("last_execution_status", get_engine_status(active_cid)),
+    })
+
+
+@app.route("/api/execution-logs/clear", methods=["POST"])
+def clear_execution_logs_api():
+    """Clear all execution diagnostic logs from memory and database."""
+    global execution_audit_logs
+    execution_audit_logs.clear()
+    try:
+        from database import get_connection
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM execution_logs")
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        print(f"⚠️ Error clearing execution_logs table: {exc}", flush=True)
+    return jsonify({
+        "success": True,
+        "message": "Execution diagnostics logs cleared successfully.",
     })
 
 
