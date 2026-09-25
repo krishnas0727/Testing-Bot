@@ -1445,6 +1445,14 @@ async function simulateCurrentTrade() {
 async function executeCurrentTrade() {
     const isLiveMode = latestMarketData && (latestMarketData.trading_mode === "LIVE" || (latestMarketData.settings && latestMarketData.settings.trading_mode === "LIVE"));
     const hasServerSigner = latestMarketData && Boolean(latestMarketData.has_private_key);
+    const bestRoute = latestMarketData?.best_route || latestMarketData?.data?.best_route;
+
+    // Strict pre-check: Never submit if latest net profit is not strictly positive (> 0)
+    if (bestRoute && Number(bestRoute.net_profit_usdt || 0) <= 0) {
+        const netLoss = Math.abs(Number(bestRoute.net_profit_usdt || 0));
+        showToast(`Cannot execute trade: Expected net profit is -$${netLoss.toFixed(4)} USDT after gas and slippage. Must be > 0.`, "warning");
+        return;
+    }
 
     // In LIVE mode without server private key, route to MetaMask non-custodial signing
     if (isLiveMode && !hasServerSigner) {
@@ -2038,7 +2046,7 @@ async function loadTrades() {
                     <td style="font-family:var(--font-mono); color:var(--profit-color);">+${Number(t.gross_profit || 0).toFixed(4)}</td>
                     <td style="font-family:var(--font-mono); color:var(--text-muted);">$${Number(t.gas_cost_usdt || 0).toFixed(4)}</td>
                     <td style="font-family:var(--font-mono); font-weight:700; color:${netProf >= 0 ? "var(--profit-color)" : "var(--loss-color)"};">${profSign}$${netProf.toFixed(4)}</td>
-                    <td><span class="badge ${t.status === "CONFIRMED" ? "badge-green" : "badge-yellow"}">${t.status}</span></td>
+                    <td><span class="badge ${t.status === "CONFIRMED" ? "badge-green" : (t.status === "UNPROFITABLE" ? "badge-red" : "badge-yellow")}">${t.status}</span></td>
                     <td style="font-size:11px; color:var(--text-muted);">${(t.created_at || "").slice(0, 19)}</td>
                 </tr>
             `;
@@ -3454,6 +3462,55 @@ async function executeMetaMaskOnChainTrade(options = {}) {
             });
             return;
         }
+
+        // ============================================================
+        // MANDATORY PRE-SIGNING RECALCULATION & NET PROFIT GATE
+        // NEVER submit or sign a trade unless recalculated netProfit > 0 AFTER gas, DEX fees and slippage!
+        // ============================================================
+        showExecModal("Verifying Net Profitability", `Recalculating fresh quote, gas, fees and slippage on ${targetChainInfo.name}...`, 1);
+        let verifyProfitData;
+        try {
+            const verifyProfitRes = await fetch("/api/trade/verify-profit", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    trade_amount: tradeAmt,
+                    chain_id: targetChainId,
+                    wallet_address: metamaskAccount
+                })
+            });
+            verifyProfitData = await verifyProfitRes.json();
+        } catch (vpErr) {
+            renderExecutionResult({
+                success: false,
+                status: "VERIFICATION_FAILED",
+                message: `Pre-flight profitability check failed: ${vpErr.message || vpErr}. Aborted before transaction submission.`
+            });
+            return;
+        }
+
+        if (!verifyProfitData || !verifyProfitData.is_profitable || Number(verifyProfitData.net_profit_usdt || 0) <= 0) {
+            const netVal = Number(verifyProfitData?.net_profit_usdt || 0);
+            const lossStr = netVal <= 0 ? `-$${Math.abs(netVal).toFixed(4)} USDT` : `$${netVal.toFixed(4)} USDT`;
+            const reason = verifyProfitData?.skip_reason || `Expected net profit is negative (${lossStr}) after ${Number(verifyProfitData?.gas_cost_usdt || 0).toFixed(4)} USDT gas and fees.`;
+            renderExecutionResult({
+                success: false,
+                status: "INSUFFICIENT_PROFIT",
+                message: `Trade aborted before transaction submission: ${reason} Capital protected.`
+            });
+            showToast(`Trade aborted: Net profit <= 0 (${reason})`, "warning");
+            return;
+        }
+
+        // Update route with freshly recalculated verified values
+        route.gross_profit_usdt = verifyProfitData.gross_profit_usdt;
+        route.net_profit_usdt = verifyProfitData.net_profit_usdt;
+        route.gas_cost_usdt = verifyProfitData.gas_cost_usdt;
+        route.slippage_cost_usdt = verifyProfitData.slippage_cost_usdt;
+        route.buy_dex = verifyProfitData.buy_dex || route.buy_dex;
+        route.sell_dex = verifyProfitData.sell_dex || route.sell_dex;
+        route.buy_price = verifyProfitData.buy_price || route.buy_price;
+        route.sell_price = verifyProfitData.sell_price || route.sell_price;
 
         const parsedAmountIn = ethers.parseUnits(tradeAmt.toFixed(tokenInMeta.decimals), tokenInMeta.decimals);
         const routerName = route.buy_dex || "Uniswap_V2";

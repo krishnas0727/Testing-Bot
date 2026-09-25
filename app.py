@@ -805,15 +805,26 @@ def confirm_live_trade_api():
 
         gas_cost_usdt = round(gas_cost_eth * eth_price, 4)
         amount_in = float(req.get("amount_in", 1.0))
-        expected_profit = float(req.get("expected_profit", req.get("net_profit", 0.0)))
-        amount_out = float(req.get("amount_out", amount_in + expected_profit))
-        gross_profit = float(req.get("gross_profit", amount_out - amount_in))
+
+        # Accurately compute gross profit and verified net profit without double-deducting gas
+        req_gross = req.get("gross_profit")
+        req_expected_net = req.get("expected_profit", req.get("net_profit"))
+        
+        if req_gross is not None and float(req_gross) > 0:
+            gross_profit = float(req_gross)
+        elif req_expected_net is not None and float(req_expected_net) > 0:
+            gross_profit = float(req_expected_net) + gas_cost_usdt
+        else:
+            gross_profit = 0.0
+
+        amount_out = float(req.get("amount_out", amount_in + gross_profit))
         verified_net_profit = round(gross_profit - gas_cost_usdt, 4)
 
         chain_id = int(req.get("chain_id") or config.CHAIN_ID)
         buy_dex = req.get("buy_dex") or "Uniswap_V2"
         sell_dex = req.get("sell_dex") or "SushiSwap_V2"
         token_pair = req.get("token_pair") or config.SYMBOL
+        chain_label = config.CHAIN_REGISTRY.get(chain_id, {}).get("label", "Blockchain")
 
         trade_data = {
             "tx_hash": tx_hash,
@@ -830,11 +841,32 @@ def confirm_live_trade_api():
             "gas_cost_usdt": gas_cost_usdt,
             "price_impact": float(req.get("price_impact", 0.0)),
             "slippage": float(req.get("slippage", config.SLIPPAGE_PCT)),
-            "status": "CONFIRMED",
             "mode": "LIVE",
             "created_at": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
         }
 
+        # STRICT PROFITABILITY GATE: Never confirm a trade with zero or negative net profit!
+        if verified_net_profit <= 0:
+            trade_data["status"] = "UNPROFITABLE"
+            save_trade(trade_data)
+            record_execution_event(
+                event_type="LIVE_TRADE_UNPROFITABLE",
+                route=f"{buy_dex}->{sell_dex}",
+                amount_in=amount_in,
+                net_profit=verified_net_profit,
+                status="UNPROFITABLE",
+                reason=f"Transaction confirmed on {chain_label} but net profit is negative (-${abs(verified_net_profit):.4f} USDT) after ${gas_cost_usdt:.4f} gas fee.",
+                tx_hash=tx_hash
+            )
+            return jsonify({
+                "success": False,
+                "status": "UNPROFITABLE_EXECUTION",
+                "trade": trade_data,
+                "message": f"Transaction mined on {chain_label}, but net profit is negative (-${abs(verified_net_profit):.4f} USDT) after ${gas_cost_usdt:.4f} gas fee. Rejected from profitable trade confirmations."
+            }), 400
+
+        # Successful confirmed profitable trade
+        trade_data["status"] = "CONFIRMED"
         trade_id = save_trade(trade_data)
         trade_data["id"] = trade_id
 
@@ -848,7 +880,6 @@ def confirm_live_trade_api():
             tx_hash=tx_hash
         )
 
-        chain_label = config.CHAIN_REGISTRY.get(chain_id, {}).get("label", "Blockchain")
         return jsonify({
             "success": True,
             "trade_id": trade_id,
