@@ -270,9 +270,14 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
     if not opportunities:
         return None
 
-    # Rank opportunities by net profit
-    opportunities.sort(key=lambda x: x["net_profit_usdt"], reverse=True)
-    best = opportunities[0]
+    # Rank opportunities by net profit: prioritize profitable opportunities first
+    profitable_opps = [o for o in opportunities if o["is_profitable"]]
+    if profitable_opps:
+        profitable_opps.sort(key=lambda x: x["net_profit_usdt"], reverse=True)
+        best = profitable_opps[0]
+    else:
+        opportunities.sort(key=lambda x: x["net_profit_usdt"], reverse=True)
+        best = opportunities[0]
 
     return {
         "best_route": best,

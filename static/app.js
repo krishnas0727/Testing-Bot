@@ -1272,9 +1272,38 @@ function updateDashboardUI(payload) {
         }
 
         const planBadge = document.getElementById("arbPlanBadge");
+        const btnExec = document.getElementById("btnExecuteArbitrage");
+        const isProf = Boolean(best.is_profitable) && (best.net_profit_usdt || 0) > 0;
+        const isLoss = (best.net_profit_usdt || 0) < 0;
+
         if (planBadge) {
-            planBadge.innerText = best.is_profitable ? "OPTIMAL ROUTE" : "LOW SPREAD";
-            planBadge.className = "badge " + (best.is_profitable ? "badge-green" : "badge-yellow");
+            if (isProf) {
+                planBadge.innerText = "OPTIMAL ROUTE";
+                planBadge.className = "badge badge-green";
+            } else if (isLoss) {
+                const lossStr = Math.abs(best.net_profit_usdt || 0).toFixed(4);
+                planBadge.innerText = `UNPROFITABLE (-$${lossStr})`;
+                planBadge.className = "badge badge-red";
+            } else {
+                planBadge.innerText = "LOW SPREAD";
+                planBadge.className = "badge badge-yellow";
+            }
+        }
+
+        if (btnExec) {
+            if (isLoss) {
+                btnExec.style.opacity = "0.7";
+                btnExec.style.background = "#64748b";
+                btnExec.style.cursor = "not-allowed";
+                btnExec.innerText = "⚠️ Unprofitable — Execution Blocked";
+                btnExec.title = "Arbitrage only executes when Net Profit is strictly positive (> $0.00).";
+            } else {
+                btnExec.style.opacity = "1";
+                btnExec.style.background = "";
+                btnExec.style.cursor = "pointer";
+                btnExec.innerText = "⚡ Execute Arbitrage";
+                btnExec.title = "";
+            }
         }
     }
 }
@@ -1290,7 +1319,10 @@ function setText(id, text) {
 
 function updateExecutionPlanForAmount(amount) {
     if (!amount || amount <= 0) return;
-    setText("arbAmountIn", `$${Number(amount).toFixed(2)} USDT`);
+    const activeChainId = currentSelectedChainId || 8453;
+    const sym = latestMarketData?.symbol || (activeChainId === 8453 ? "WETH/USDC" : "WETH/USDT");
+    const quoteSym = sym.includes("/") ? sym.split("/")[1] : "USDC";
+    setText("arbAmountIn", `$${Number(amount).toFixed(2)} ${quoteSym}`);
 
     // Realistic dynamic gas for L2 / micro-trade ($0.0005 on $1, $0.0025 on $5)
     const gasCost = Math.min(0.25, Math.max(0.0001, amount * 0.0005));
@@ -1306,21 +1338,21 @@ function updateExecutionPlanForAmount(amount) {
     const netProfit = grossProfit - gasCost;
     const netProfitPct = (netProfit / amount) * 100.0;
 
-    setText("arbAmountOut", `$${grossReturn.toFixed(4)} USDT`);
+    setText("arbAmountOut", `$${grossReturn.toFixed(4)} ${quoteSym}`);
     setText("arbPriceImpact", `0.01%`);
-    setText("arbGasCost", `$${gasCost.toFixed(4)} USDT`);
+    setText("arbGasCost", `$${gasCost.toFixed(4)} ${quoteSym}`);
 
     const netProfEl = document.getElementById("arbNetProfit");
     if (netProfEl) {
         const sign = netProfit >= 0 ? "+" : "";
-        netProfEl.innerText = `${sign}$${netProfit.toFixed(4)} USDT (${sign}${netProfitPct.toFixed(2)}%)`;
+        netProfEl.innerText = `${sign}$${netProfit.toFixed(4)} ${quoteSym} (${sign}${netProfitPct.toFixed(2)}%)`;
         netProfEl.style.color = netProfit >= 0 ? "var(--profit-color)" : "var(--loss-color)";
     }
 
     const planBadge = document.getElementById("arbPlanBadge");
     if (planBadge) {
-        planBadge.innerText = netProfit > 0 ? "OPTIMAL ROUTE" : "LOW SPREAD";
-        planBadge.className = "badge " + (netProfit > 0 ? "badge-green" : "badge-yellow");
+        planBadge.innerText = netProfit > 0 ? "OPTIMAL ROUTE" : "UNPROFITABLE ROUTE";
+        planBadge.className = "badge " + (netProfit > 0 ? "badge-green" : "badge-red");
     }
 }
 
@@ -1443,6 +1475,25 @@ async function simulateCurrentTrade() {
 }
 
 async function executeCurrentTrade() {
+    const bestRoute = latestMarketData?.best_route || latestMarketData?.data?.best_route;
+    if (!bestRoute) {
+        showToast("Scanning DEX liquidity... Please wait for a route quote.", "warning");
+        return;
+    }
+
+    // Safety Guard: Real Net Profit Check (Never execute a loss)
+    const netProfitVal = Number(bestRoute.net_profit_usdt || 0);
+    if (!bestRoute.is_profitable || netProfitVal <= 0) {
+        const lossMsg = netProfitVal < 0 ? `-$${Math.abs(netProfitVal).toFixed(4)}` : "$0.00";
+        showToast(`Execution blocked: Route is unprofitable (${lossMsg} Net PnL). Arbitrage only executes when Net Profit > 0.`, "error");
+        renderExecutionResult({
+            success: false,
+            status: "BLOCKED_UNPROFITABLE",
+            message: `Execution blocked to protect your capital. This route produces a net loss (${lossMsg}). DEX Arbitrage requires strictly positive profit (Net Profit > $0.00).`
+        });
+        return;
+    }
+
     const isLiveMode = latestMarketData && (latestMarketData.trading_mode === "LIVE" || (latestMarketData.settings && latestMarketData.settings.trading_mode === "LIVE"));
     const hasServerSigner = latestMarketData && Boolean(latestMarketData.has_private_key);
 
@@ -3343,6 +3394,19 @@ async function executeMetaMaskOnChainTrade(options = {}) {
     }
 
     const route = bestRoute;
+
+    // Safety Guard: Real Net Profit Check (Never execute a loss)
+    const netProfitVal = Number(route.net_profit_usdt || 0);
+    if (!route.is_profitable || netProfitVal <= 0) {
+        const lossMsg = netProfitVal < 0 ? `-$${Math.abs(netProfitVal).toFixed(4)}` : "$0.00";
+        showToast(`Execution blocked: Route is unprofitable (${lossMsg} Net PnL). Arbitrage only executes when Net Profit > 0.`, "error");
+        renderExecutionResult({
+            success: false,
+            status: "BLOCKED_UNPROFITABLE",
+            message: `Execution blocked to protect your capital. This route produces a net loss (${lossMsg}). DEX Arbitrage requires strictly positive profit (Net Profit > $0.00).`
+        });
+        return;
+    }
 
     const isMock = latestMarketData && (latestMarketData.trading_mode === "MOCK" || (latestMarketData.settings && latestMarketData.settings.trading_mode === "MOCK"));
     if (isMock && targetChainId !== 11155111) {

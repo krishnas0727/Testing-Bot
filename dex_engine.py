@@ -291,8 +291,14 @@ def get_dex_reserves(dex_name: str, base_sym: str = "WETH", quote_sym: str = "US
 
             base_reserve = raw_base / (10 ** base_dec)
             quote_reserve = raw_quote / (10 ** quote_dec)
-            source = "on-chain-rpc"
-            onchain_success = True
+
+            # Minimum viable liquidity threshold:
+            # Depleted/dust pools (< $100 quote or < 0.02 base) cannot support swaps without catastrophic slippage.
+            if quote_reserve < 100.0 or base_reserve < 0.02:
+                onchain_success = False
+            else:
+                source = "on-chain-rpc"
+                onchain_success = True
         except Exception:
             onchain_success = False
 
@@ -303,7 +309,7 @@ def get_dex_reserves(dex_name: str, base_sym: str = "WETH", quote_sym: str = "US
             "reserve_usdt": 60_000_000.0
         })
         base_reserve = defaults.get("reserve_weth", 20000.0)
-        base_quote = defaults.get("reserve_usdt", 60_000_000.0)
+        base_quote = defaults.get("reserve_usdt") or defaults.get("reserve_usdc") or 60_000_000.0
 
         # Subtle dynamic oscillation (~0.05%) to give living chart movement without collapsing spread
         t = time.time()
