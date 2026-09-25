@@ -1668,6 +1668,12 @@ function renderExecutionResult(json) {
                     <span style="color:var(--text-muted);">Verified Net PnL</span>
                     <span style="font-family:var(--font-mono); font-weight:700; color:var(--profit-color);">+$${Number(json.trade.net_profit || 0).toFixed(4)} USDT</span>
                 </div>
+                ${json.trade.created_at ? `
+                <div style="display:flex; justify-content:space-between; margin-top:3px;">
+                    <span style="color:var(--text-muted);">Time</span>
+                    <span style="font-family:var(--font-mono); font-size:11px;">${formatLogTime(json.trade.created_at)}</span>
+                </div>
+                ` : ""}
             </div>
         ` : ""}
         ${isInsufficient ? `
@@ -2049,19 +2055,135 @@ function setTradeFilter(mode) {
     loadTrades();
 }
 
-function formatLogTime(timeStr) {
-    if (!timeStr) return "--";
+// ============================================================
+// TIMEZONE & TIMESTAMP CONVERSION UTILITIES
+// Displays all blockchain & audit timestamps in user local timezone (IST UTC+5:30 for India)
+// ============================================================
+
+function getUserTimezoneInfo() {
     try {
-        if (timeStr.includes("T") || timeStr.endsWith("Z")) {
-            const d = new Date(timeStr);
-            if (!isNaN(d.getTime())) {
-                const pad = n => String(n).padStart(2, "0");
-                return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        const d = new Date();
+        const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Kolkata";
+        const offsetMinutes = -d.getTimezoneOffset(); // e.g. +330 for IST
+        const isIndia = offsetMinutes === 330 ||
+            timeZone.toLowerCase().includes("kolkata") ||
+            timeZone.toLowerCase().includes("calcutta") ||
+            timeZone.toLowerCase().includes("india");
+
+        const sign = offsetMinutes >= 0 ? "+" : "-";
+        const absMinutes = Math.abs(offsetMinutes);
+        const hours = String(Math.floor(absMinutes / 60)).padStart(2, "0");
+        const minutes = String(absMinutes % 60).padStart(2, "0");
+        const offsetStr = `UTC${sign}${hours}:${minutes}`;
+
+        let label = "IST";
+        if (isIndia) {
+            label = "IST";
+        } else {
+            try {
+                const parts = new Intl.DateTimeFormat("en-US", { timeZoneName: "short" }).formatToParts(d);
+                const tzPart = parts.find(p => p.type === "timeZoneName");
+                label = (tzPart && !tzPart.value.includes("GMT") && !tzPart.value.includes("UTC")) ? tzPart.value : offsetStr;
+            } catch (e) {
+                label = offsetStr;
             }
         }
-        return timeStr.slice(0, 19);
+
+        return {
+            timeZone,
+            offsetMinutes,
+            offsetStr,
+            label,
+            isIndia
+        };
     } catch (e) {
-        return timeStr.slice(0, 19);
+        return {
+            timeZone: "Asia/Kolkata",
+            offsetMinutes: 330,
+            offsetStr: "UTC+05:30",
+            label: "IST",
+            isIndia: true
+        };
+    }
+}
+
+function parseUtcOrLocalTimestamp(timeVal) {
+    if (!timeVal) return null;
+
+    // 1. Numeric epoch (seconds or milliseconds)
+    if (typeof timeVal === "number" || (/^\d+$/.test(String(timeVal).trim()) && !isNaN(Number(timeVal)))) {
+        const num = Number(timeVal);
+        const ms = num < 1e11 ? num * 1000 : num;
+        const d = new Date(ms);
+        return isNaN(d.getTime()) ? null : d;
+    }
+
+    let str = String(timeVal).trim();
+    if (!str) return null;
+
+    // 2. Explicit timezone offset present (e.g. "+05:30", "-04:00", "+00:00", or ends with "Z")
+    if (str.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(str)) {
+        const iso = str.includes("T") ? str : str.replace(" ", "T");
+        const d = new Date(iso);
+        if (!isNaN(d.getTime())) return d;
+    }
+
+    // 3. Trailing " UTC" or " GMT" indicator
+    if (/\s+(UTC|GMT)$/i.test(str)) {
+        const cleaned = str.replace(/\s+(UTC|GMT)$/i, "").replace(" ", "T") + "Z";
+        const d = new Date(cleaned);
+        if (!isNaN(d.getTime())) return d;
+    }
+
+    // 4. Standard on-chain / database timestamp ("YYYY-MM-DD HH:mm:ss" or "YYYY-MM-DDTHH:mm:ss")
+    // Blockchain receipts and SQLite timestamps are stored in UTC.
+    // Parse as UTC by appending "Z":
+    const isoUtc = (str.includes("T") ? str : str.replace(" ", "T")) + "Z";
+    const dUtc = new Date(isoUtc);
+    if (!isNaN(dUtc.getTime())) return dUtc;
+
+    // 5. Fallback native Date parse
+    const dFallback = new Date(str);
+    return isNaN(dFallback.getTime()) ? null : dFallback;
+}
+
+function formatLogTime(timeVal, options = {}) {
+    if (!timeVal) return "--";
+    try {
+        const d = parseUtcOrLocalTimestamp(timeVal);
+        if (!d || isNaN(d.getTime())) return String(timeVal).slice(0, 19);
+
+        const tz = getUserTimezoneInfo();
+        const targetTz = options.timeZone || tz.timeZone || "Asia/Kolkata";
+
+        // Format in user's local timezone (IST / UTC+5:30 in India)
+        const formatter = new Intl.DateTimeFormat("en-GB", {
+            timeZone: targetTz,
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false
+        });
+
+        const parts = formatter.formatToParts(d);
+        const map = {};
+        for (const p of parts) {
+            map[p.type] = p.value;
+        }
+
+        const dateStr = `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}:${map.second}`;
+
+        if (options.plainText) {
+            return `${dateStr} ${tz.label}`;
+        }
+
+        const origStr = String(timeVal).slice(0, 30);
+        return `<span title="Local Time (${tz.timeZone} ${tz.offsetStr}) | Stored on-chain: ${origStr}" style="white-space:nowrap;">${dateStr} <span style="font-size:9px; color:#38bdf8; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.25); padding:1px 4px; border-radius:3px; font-weight:700; vertical-align:middle; letter-spacing:0.5px;">${tz.label}</span></span>`;
+    } catch (e) {
+        return String(timeVal).slice(0, 19);
     }
 }
 
@@ -2143,7 +2265,7 @@ async function loadExecutionLogs() {
 
             return `
                 <tr>
-                    <td style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">${formatLogTime(l.timestamp)}</td>
+                    <td style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">${formatLogTime(l.timestamp || l.created_at)}</td>
                     <td><span class="badge ${badgeClass}">${l.event_type}</span></td>
                     <td style="font-weight:600;">${l.route || "-"}</td>
                     <td style="font-family:var(--font-mono);">$${Number(l.amount_in || 0).toFixed(2)}</td>
