@@ -937,9 +937,12 @@
                         <button id="filterBtnSim" class="btn" onclick="setTradeFilter('SIMULATION')" style="padding:4px 10px; font-size:11px; background:transparent; color:#94a3b8; border-radius:4px; font-weight:600; border:none; cursor:pointer;">🔬 Simulations</button>
                         <button id="filterBtnAll" class="btn" onclick="setTradeFilter('ALL')" style="padding:4px 10px; font-size:11px; background:transparent; color:#94a3b8; border-radius:4px; font-weight:600; border:none; cursor:pointer;">All History</button>
                     </div>
-                    <button class="btn btn-secondary" onclick="exportTradeHistory('csv')" style="font-size:12px;">📥 Export CSV</button>
-                    <button class="btn btn-secondary" onclick="exportTradeHistory('json')" style="font-size:12px;">📥 Export JSON</button>
+                    <button class="btn btn-secondary" onclick="exportTradeHistory('csv')" style="font-size:12px;">📊 Export CSV</button>
+                    <button class="btn btn-secondary" onclick="exportTradeHistory('json')" style="font-size:12px;">💾 Export JSON</button>
+                    <button class="btn btn-primary" onclick="downloadFullBackup()" style="font-size:12px; background:linear-gradient(135deg, #2563eb, #1d4ed8);">💾 Save All Data</button>
+                    <button class="btn btn-secondary" onclick="triggerRestoreUpload()" style="font-size:12px;">📤 Restore Data</button>
                     <button class="btn btn-secondary" onclick="clearTradeHistory()" style="font-size:12px;">Clear History</button>
+                    <input type="file" id="backupFileInput" accept=".json" style="display:none;" onchange="handleBackupFileSelected(event)">
                 </div>
             </div>
 
@@ -1220,6 +1223,39 @@
                     <button type="submit" class="btn btn-primary">Save DEX Configuration</button>
                 </div>
             </form>
+
+            <!-- 24/7 DATA STORAGE & BACKUP CENTER -->
+            <div class="card" style="margin-top:25px; border-left:4px solid #3b82f6;">
+                <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <h3 style="margin:0; font-size:15px; color:var(--text-bright);">💾 24/7 Data Storage & Backup Center</h3>
+                        <p style="margin:4px 0 0 0; font-size:12px; color:var(--text-muted);">
+                            Secure all your trade history, profits, opportunities, and bot configurations permanently.
+                        </p>
+                    </div>
+                    <span id="dataStorageStatusBadge" class="badge badge-green">SQLITE PERSISTENT</span>
+                </div>
+                <div style="padding:18px; display:flex; flex-direction:column; gap:14px;">
+                    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+                        <button type="button" class="btn btn-primary" onclick="downloadFullBackup()" style="font-size:13px; font-weight:600; padding:9px 18px; background:linear-gradient(135deg, #2563eb, #1d4ed8);">
+                            💾 Save All Data (Download Full Backup)
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="triggerRestoreUpload()" style="font-size:13px; font-weight:600; padding:9px 18px;">
+                            📤 Restore Data (Upload Backup JSON)
+                        </button>
+                    </div>
+                    <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:8px; padding:14px; font-size:12.5px; color:var(--text-secondary); line-height:1.65;">
+                        <strong style="color:var(--text-bright);">📌 24/7 Cloud Hosting Storage Guide (Render / Cloud Server):</strong><br>
+                        Cloud web servers (like Render free tier) occasionally restart or sleep when idle. To guarantee <strong>100% 24/7 permanent storage</strong> without losing data:
+                        <ul style="margin:8px 0 8px 20px; padding:0;">
+                            <li><strong>1-Click Backup File:</strong> Click <em>"Save All Data"</em> above anytime to instantly download a complete JSON backup file containing all your verified trades, profit records, and settings.</li>
+                            <li><strong>1-Click Restore:</strong> Click <em>"Restore Data"</em> to upload any backup file and restore your entire database in 1 second.</li>
+                            <li><strong>Browser Auto-Cache:</strong> The dashboard automatically keeps an offline copy of your recent trade records in your browser cache.</li>
+                            <li><strong>Render Persistent Disk (Optional):</strong> On Render, you can attach a <strong>Persistent Disk</strong> (Mount: <code>/var/data</code>) and add Environment Variable <code>DATA_DIR=/var/data</code> to keep files permanently on disk 24/7 across all restarts.</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 

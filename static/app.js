@@ -2372,6 +2372,28 @@ async function loadTrades() {
         const trades = json.trades || [];
 
         if (trades.length === 0) {
+            // Check if server was restarted and lost ephemeral data, but localStorage has cached trades
+            if (currentTradeFilter === "ALL" || !currentTradeFilter) {
+                try {
+                    const cachedStr = localStorage.getItem("dex_bot_cached_trades");
+                    if (cachedStr) {
+                        const cachedTrades = JSON.parse(cachedStr);
+                        if (Array.isArray(cachedTrades) && cachedTrades.length > 0) {
+                            fetch("/api/backup/restore", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ trades: cachedTrades })
+                            }).then(r => r.json()).then(res => {
+                                if (res.success && res.restored_trades > 0) {
+                                    showToast(`Auto-recovered ${res.restored_trades} trade records from local cache.`, "info");
+                                    loadTrades();
+                                }
+                            }).catch(() => {});
+                        }
+                    }
+                } catch (e) {}
+            }
+
             const emptyMsg = currentTradeFilter === "LIVE"
                 ? "No confirmed live on-chain trades yet. Connect funded wallet to begin live execution."
                 : (currentTradeFilter === "SIMULATION"
@@ -2380,6 +2402,10 @@ async function loadTrades() {
             tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:var(--text-muted); padding:30px;">${emptyMsg}</td></tr>`;
             return;
         }
+
+        try {
+            localStorage.setItem("dex_bot_cached_trades", JSON.stringify(trades));
+        } catch (e) {}
 
         tbody.innerHTML = trades.map(t => {
             const shortHash = (t.tx_hash || "").slice(0, 10) + "...";
@@ -4462,5 +4488,63 @@ async function executeMetaMaskOnChainTrade(options = {}) {
 function exportTradeHistory(format = "csv") {
     showToast(`Preparing ${format.toUpperCase()} export...`, "info");
     const currentFilter = document.querySelector("#tab-trades .btn[style*='background:#dc2626']") ? "LIVE" : "ALL";
-    window.location.href = `/api/trades/export?format=${format}&mode=${currentFilter}`;
+    const downloadParam = format === "json" ? "&download=true" : "";
+    window.location.href = `/api/trades/export?format=${format}&mode=${currentFilter}${downloadParam}`;
+}
+
+// ============================================================
+// 24/7 DATA STORAGE & BACKUP CENTER (SAVE & RESTORE)
+// ============================================================
+
+function downloadFullBackup() {
+    showToast("Generating full 24/7 database backup download...", "info");
+    window.location.href = "/api/backup/download";
+}
+
+function triggerRestoreUpload() {
+    const fileInput = document.getElementById("backupFileInput");
+    if (fileInput) {
+        fileInput.value = "";
+        fileInput.click();
+    }
+}
+
+async function handleBackupFileSelected(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+
+    if (!file.name.endsWith(".json")) {
+        showToast("Invalid file format. Please select a .json backup file.", "error");
+        return;
+    }
+
+    showToast(`Restoring database from ${file.name}...`, "info");
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        try {
+            const jsonText = e.target.result;
+            const parsedData = JSON.parse(jsonText);
+
+            const res = await fetch("/api/backup/restore", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(parsedData)
+            });
+            const result = await res.json();
+
+            if (result.success) {
+                showToast(`Data restored successfully! Restored ${result.restored_trades || 0} trades. Total: ${result.total_trades || 0}`, "success");
+                loadTrades();
+                loadExecutionLogs();
+                loadSettings();
+                fetchMarketData();
+            } else {
+                showToast(`Failed to restore data: ${result.message || "Unknown error"}`, "error");
+            }
+        } catch (err) {
+            console.error("Backup restore error:", err);
+            showToast("Failed to parse backup JSON file: " + err.message, "error");
+        }
+    };
+    reader.readAsText(file);
 }

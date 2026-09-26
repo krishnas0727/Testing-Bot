@@ -650,3 +650,130 @@ def restore_trades_from_json_backup():
         conn.close()
     except Exception as e:
         print(f"⚠️ Restore trades backup error: {e}", flush=True)
+
+
+def export_full_database_backup() -> Dict[str, Any]:
+    """Export complete database backup containing trades, settings, and opportunity logs."""
+    create_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM trades ORDER BY id ASC")
+    trades_rows = cursor.fetchall()
+    trades_list = [dict(r) for r in trades_rows]
+
+    cursor.execute("SELECT key, value, updated_at FROM bot_settings")
+    settings_rows = cursor.fetchall()
+    settings_dict = {}
+    for r in settings_rows:
+        try:
+            settings_dict[r["key"]] = json.loads(r["value"])
+        except Exception:
+            settings_dict[r["key"]] = r["value"]
+
+    cursor.execute("SELECT * FROM opportunity_log ORDER BY id DESC LIMIT 100")
+    opp_rows = cursor.fetchall()
+    opp_list = [dict(r) for r in opp_rows]
+
+    conn.close()
+
+    return {
+        "version": "2.0",
+        "exported_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+        "total_trades": len(trades_list),
+        "trades": trades_list,
+        "settings": settings_dict,
+        "recent_opportunities": opp_list
+    }
+
+
+def restore_full_database_backup(backup_data: Any) -> Dict[str, Any]:
+    """Restore database from backup JSON data with deduplication."""
+    create_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    trades_to_restore = []
+    settings_to_restore = {}
+
+    if isinstance(backup_data, list):
+        trades_to_restore = backup_data
+    elif isinstance(backup_data, dict):
+        trades_to_restore = backup_data.get("trades", [])
+        settings_to_restore = backup_data.get("settings", {})
+
+    restored_trades_count = 0
+    restored_settings_count = 0
+
+    # 1. Restore trades with deduplication
+    for t in trades_to_restore:
+        if not isinstance(t, dict):
+            continue
+        tx = (t.get("tx_hash") or "").strip()
+        created = t.get("created_at") or datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Deduplication check
+        if tx and tx != "0xbackup":
+            cursor.execute("SELECT id FROM trades WHERE tx_hash = ?", (tx,))
+        else:
+            cursor.execute("SELECT id FROM trades WHERE token_pair = ? AND created_at = ?", (t.get("token_pair", ""), created))
+        if cursor.fetchone():
+            continue
+
+        telemetry_val = t.get("telemetry")
+        telemetry_str = json.dumps(telemetry_val) if isinstance(telemetry_val, dict) else str(telemetry_val or "")
+
+        cursor.execute("""
+            INSERT INTO trades (
+                tx_hash, chain_id, buy_dex, sell_dex, token_pair,
+                amount_in, amount_out, gross_profit, net_profit,
+                gas_used, gas_price_gwei, gas_cost_usdt, price_impact, slippage,
+                status, mode, created_at, telemetry
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            tx or "0xbackup",
+            int(t.get("chain_id", 8453)),
+            t.get("buy_dex", "Uniswap_V2"),
+            t.get("sell_dex", "SushiSwap_V2"),
+            t.get("token_pair", "WETH/USDT"),
+            float(t.get("amount_in", 0.0)),
+            float(t.get("amount_out", 0.0)),
+            float(t.get("gross_profit", 0.0)),
+            float(t.get("net_profit", 0.0)),
+            int(t.get("gas_used", 0)),
+            float(t.get("gas_price_gwei", 0.0)),
+            float(t.get("gas_cost_usdt", 0.0)),
+            float(t.get("price_impact", 0.0)),
+            float(t.get("slippage", 0.0)),
+            t.get("status", "CONFIRMED"),
+            t.get("mode", "MOCK"),
+            created,
+            telemetry_str
+        ))
+        restored_trades_count += 1
+
+    # 2. Restore settings
+    for k, v in settings_to_restore.items():
+        v_str = json.dumps(v) if not isinstance(v, str) else v
+        cursor.execute("""
+            INSERT OR REPLACE INTO bot_settings (key, value, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+        """, (str(k), v_str))
+        restored_settings_count += 1
+
+    conn.commit()
+
+    cursor.execute("SELECT COUNT(*) FROM trades")
+    total_trades = cursor.fetchone()[0]
+    conn.close()
+
+    # Synchronize to disk backup
+    sync_trades_to_json_backup()
+
+    return {
+        "success": True,
+        "restored_trades": restored_trades_count,
+        "restored_settings": restored_settings_count,
+        "total_trades": total_trades
+    }
+

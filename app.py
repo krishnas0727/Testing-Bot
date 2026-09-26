@@ -6,6 +6,7 @@ and credentials. Supports MOCK, TESTNET, and LIVE trading modes.
 """
 import os
 import sys
+import json
 import threading
 import time
 from datetime import datetime
@@ -1738,12 +1739,21 @@ def export_trades_api():
         trades = get_all_trades(limit=1000, mode=filter_mode)
 
         if export_format == "json":
-            return jsonify({
+            payload = {
                 "success": True,
                 "exported_at": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
                 "total_trades": len(trades),
                 "trades": trades
-            })
+            }
+            if request.args.get("download", "").lower() == "true":
+                from flask import Response
+                filename = f"dex_arbitrage_trades_{int(time.time())}.json"
+                return Response(
+                    json.dumps(payload, indent=2),
+                    mimetype="application/json",
+                    headers={"Content-Disposition": f"attachment; filename={filename}"}
+                )
+            return jsonify(payload)
 
         import csv
         import io
@@ -1789,6 +1799,55 @@ def export_trades_api():
             mimetype="text/csv",
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
+    except Exception as exc:
+        return jsonify({"success": False, "message": str(exc)}), 500
+
+
+@app.route("/api/backup/download", methods=["GET"])
+def backup_download_api():
+    """Download full 24/7 database backup of all trades, settings, and opportunity logs as a JSON attachment."""
+    try:
+        from database import export_full_database_backup
+        data = export_full_database_backup()
+        json_str = json.dumps(data, indent=2)
+
+        filename = f"dex_bot_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        from flask import Response
+        return Response(
+            json_str,
+            mimetype="application/json",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as exc:
+        return jsonify({"success": False, "message": str(exc)}), 500
+
+
+@app.route("/api/backup/restore", methods=["POST"])
+def backup_restore_api():
+    """Restore trades and settings from an uploaded backup JSON file or JSON payload with deduplication."""
+    try:
+        from database import restore_full_database_backup
+
+        payload = None
+        if "file" in request.files:
+            uploaded_file = request.files["file"]
+            if uploaded_file and uploaded_file.filename:
+                payload = json.loads(uploaded_file.read().decode("utf-8"))
+        elif request.is_json:
+            payload = request.get_json(silent=True)
+        else:
+            raw_data = request.get_data(as_text=True)
+            if raw_data:
+                try:
+                    payload = json.loads(raw_data)
+                except Exception:
+                    pass
+
+        if not payload:
+            return jsonify({"success": False, "message": "No valid backup JSON data received."}), 400
+
+        result = restore_full_database_backup(payload)
+        return jsonify(result)
     except Exception as exc:
         return jsonify({"success": False, "message": str(exc)}), 500
 
