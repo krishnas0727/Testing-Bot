@@ -639,6 +639,12 @@ def verify_profit_api():
             except (ValueError, TypeError):
                 pass
 
+        client_addr = (req_data.get("wallet_address") or "").strip()
+        if client_addr and client_addr.startswith("0x") and len(client_addr) == 42:
+            if config.WALLET_ADDRESS != client_addr:
+                config.WALLET_ADDRESS = client_addr
+                save_bot_setting("wallet_address", client_addr)
+
         active_chain_id = getattr(config, "CHAIN_ID", 8453)
         chain_info = config.CHAIN_REGISTRY.get(active_chain_id, {})
 
@@ -807,6 +813,12 @@ def manual_trade_api():
 
         req_data = request.get_json(silent=True) or {}
         custom_amount = req_data.get("trade_amount")
+
+        client_addr = (req_data.get("wallet_address") or "").strip()
+        if client_addr and client_addr.startswith("0x") and len(client_addr) == 42:
+            if config.WALLET_ADDRESS != client_addr:
+                config.WALLET_ADDRESS = client_addr
+                save_bot_setting("wallet_address", client_addr)
 
         if custom_amount is not None:
             try:
@@ -1409,6 +1421,12 @@ def switch_chain_api():
         chain_info = config.set_active_chain(chain_id)
         save_bot_setting("chain_id", chain_id)
         save_bot_setting("rpc_url", chain_info["rpc_url"])
+
+        client_addr = (req_data.get("address") or "").strip()
+        if client_addr and client_addr.startswith("0x") and len(client_addr) == 42:
+            config.WALLET_ADDRESS = client_addr
+            save_bot_setting("wallet_address", client_addr)
+
         last_execution_status = get_engine_status(chain_id)
 
         return jsonify({

@@ -175,7 +175,7 @@
                 <!-- Connected State -->
                 <div id="headerWalletPill" class="wallet-pill" style="display:none; width:154px; min-width:154px; max-width:154px; justify-content:center; box-sizing:border-box;" onclick="toggleWalletDropdown(event)">
                     <span id="walletNetworkIndicator" class="network-dot dot-green" title="Network Active"></span>
-                    <span id="headerWalletAddress" class="wallet-addr-text">0x0000...0000</span>
+                    <span id="headerWalletAddress" class="wallet-addr-text">Connect Wallet</span>
                     <span class="dropdown-caret">▼</span>
                 </div>
 
@@ -183,7 +183,7 @@
                 <div id="walletDropdownMenu" class="wallet-dropdown-menu" style="display:none;">
                     <div class="wallet-menu-header">
                         <span class="menu-label">CONNECTED ACCOUNT</span>
-                        <div id="menuFullAddress" class="full-address-mono">0x0000...0000</div>
+                        <div id="menuFullAddress" class="full-address-mono">No Wallet Connected</div>
                     </div>
                     <div class="wallet-menu-network">
                         <span class="menu-label">ACTIVE NETWORK</span>
@@ -1167,7 +1167,8 @@
 
                         <div class="form-group">
                             <label>Non-Custodial Wallet Address</label>
-                            <input type="text" id="cfgWalletAddress" class="form-control" placeholder="0x... (Leave empty in MOCK mode)">
+                            <input type="text" id="cfgWalletAddress" class="form-control" placeholder="Connect MetaMask to link wallet address" readonly style="background:rgba(255,255,255,0.04); color:var(--text-primary); cursor:not-allowed;">
+                            <small style="color:var(--text-muted); font-size:11px;">Automatically synchronized with your connected MetaMask wallet on the active chain.</small>
                         </div>
 
                         <div class="form-group">

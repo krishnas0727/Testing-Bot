@@ -785,18 +785,17 @@ async function maybeAutoExecute(marketPayload) {
     const autoTradeOn = (userPref !== "false") && (settings.auto_trade !== false);
     if (!autoTradeOn) return;
 
-    // Guard 4: Mode must be LIVE or TESTNET
-    const mode = (settings.trading_mode || marketPayload.trading_mode || "MOCK").toUpperCase();
-    if (mode !== "LIVE" && mode !== "TESTNET") return;
-
-    // Guard 5: MetaMask wallet must be connected
-    if (!metamaskAccount) return;
-
-    // Guard 6: Emergency stop must be off
+    // Guard 4: Emergency stop must be off
     const emergencyOn = Boolean(settings.emergency_stop || marketPayload.summary?.emergency_stop);
     if (emergencyOn) return;
 
-    // Guard 7: Best route must be profitable (net_profit_usdt > 0) based on latest scan
+    // Guard 5: Mode & Wallet Check
+    const mode = (settings.trading_mode || marketPayload.trading_mode || "MOCK").toUpperCase();
+    if (mode === "LIVE" || mode === "TESTNET") {
+        if (!metamaskAccount) return;
+    }
+
+    // Guard 6: Best route must be profitable (net_profit_usdt > 0) based on latest scan
     const best = marketPayload.data?.best_route || marketPayload.best_route;
     if (!best) return;
     const latestNet = Number(best.net_profit_usdt || 0);
@@ -805,12 +804,34 @@ async function maybeAutoExecute(marketPayload) {
     // --- All guards passed — opportunity detected! ---
     console.log(
         `[AUTO-EXEC] Profitable opportunity detected: net=$${latestNet.toFixed(6)} USDT ` +
-        `(${best.buy_dex} → ${best.sell_dex}). Triggering immediate execution...`
+        `(${best.buy_dex} → ${best.sell_dex}) [Mode: ${mode}, Chain: ${currentSelectedChainId}]. Triggering execution...`
     );
 
     _autoExecLock = true;
     try {
-        await executeAutoOpportunity(best);
+        if (mode === "MOCK") {
+            const tradeAmt = selectedTradeAmount || Number(best.amount_in || 0.10);
+            const detectedAt = marketPayload.quote_freshness?.detected_at || marketPayload.data?.detected_at || Date.now();
+            const res = await fetch("/api/trade", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    trade_amount: tradeAmt,
+                    wallet_address: metamaskAccount || "",
+                    chain_id: currentSelectedChainId,
+                    detected_at: detectedAt
+                })
+            });
+            const json = await res.json();
+            if (json.success) {
+                showToast(`⚡ Auto-Trade (Simulated): Net +$${Number(json.trade?.net_profit || latestNet).toFixed(4)} USDT`, "success");
+                loadTrades();
+                loadExecutionLogs();
+                loadLatencyAudits();
+            }
+        } else {
+            await executeAutoOpportunity(best);
+        }
     } catch (err) {
         console.warn("[AUTO-EXEC] Execution error:", err);
     } finally {
@@ -1041,8 +1062,8 @@ function updateDashboardUI(payload) {
     }
 
     // 3. KPI stats
-    const isConnected = Boolean(metamaskAccount) || (Boolean(wallet.is_connected) && Boolean(wallet.wallet_address));
-    const activeAddress = metamaskAccount || wallet.wallet_address || "";
+    const isConnected = Boolean(metamaskAccount);
+    const activeAddress = metamaskAccount || "";
 
     const ethPrice = Number(summary.eth_price_usdt || 3000);
     const dispEth = (wallet.eth !== undefined && Number(wallet.eth) > 0) ? Number(wallet.eth) : Number(clientWalletBalances.eth || 0);
@@ -1178,10 +1199,10 @@ function updateDashboardUI(payload) {
     // 4. Wallet balances
     const walletBadge = document.getElementById("walletAddressBadge");
     if (walletBadge) {
-        if (isConnected && activeAddress) {
-            const shortAddr = activeAddress.slice(0, 6) + "..." + activeAddress.slice(-4);
-            const sourceLabel = (wallet.source === "on-chain-rpc" && wallet.wallet_address) ? "On-Chain" : "Web3";
-            walletBadge.innerText = `${shortAddr} (${sourceLabel})`;
+        if (metamaskAccount) {
+            const shortAddr = metamaskAccount.slice(0, 6) + "..." + metamaskAccount.slice(-4);
+            const chainName = SUPPORTED_CHAINS[activeChainId]?.short || `Chain ${activeChainId}`;
+            walletBadge.innerText = `${shortAddr} (${chainName})`;
             walletBadge.className = "badge badge-green";
         } else {
             walletBadge.innerText = "Wallet Disconnected";
@@ -2080,7 +2101,7 @@ async function loadSettings() {
         setValue("headerChainSelect", s.chain_id);
         setValue("cfgTradingMode", s.trading_mode);
         setValue("cfgRpcUrl", s.rpc_url);
-        setValue("cfgWalletAddress", s.wallet_address);
+        setValue("cfgWalletAddress", metamaskAccount || s.wallet_address || "");
         setValue("cfgContractAddress", s.contract_address);
         setValue("cfgTradeAmount", s.trade_amount);
         setValue("cfgMinProfit", s.min_profit);
@@ -2751,26 +2772,56 @@ async function selectNetwork(chainId, event) {
 
     // 1. Immediately invalidate and clear stale data from previous chain
     invalidateAndResetChainUI(id);
+    currentSelectedChainId = id;
+    safeStorage.setItem("userSelectedChainId", id);
+    updateNetworkCardsVisual(id);
     const thisEpoch = currentChainEpoch;
 
-    // 2. If MetaMask is connected, check & prompt network alignment
-    if (metamaskAccount) {
+    // 2. Direct MetaMask Confirmation & Dynamic Connection:
+    const provider = getMetaMaskProvider();
+    if (provider) {
         try {
-            const currentMmCid = metamaskChainId ? parseInt(metamaskChainId, 16) : null;
+            // A. Request account authorization from MetaMask (prompts MetaMask dialog if not yet connected)
+            let accounts = await provider.request({ method: "eth_accounts" });
+            if (!accounts || accounts.length === 0) {
+                showToast(`Connecting MetaMask for ${SUPPORTED_CHAINS[id].name}...`, "info");
+                accounts = await provider.request({ method: "eth_requestAccounts" });
+            }
+            if (accounts && accounts.length > 0) {
+                metamaskAccount = accounts[0];
+                safeStorage.setItem("metamask_connected", "true");
+            }
+
+            // B. Prompt MetaMask network switch confirmation (prompts MetaMask to switch network)
+            const currentMmHex = await provider.request({ method: "eth_chainId" });
+            const currentMmCid = parseInt(currentMmHex, 16);
             if (currentMmCid !== id) {
                 await requestSwitchNetwork(id);
             }
-        } catch (switchErr) {
-            console.warn("[MetaMask switch warning]:", switchErr);
+            const postSwitchHex = await provider.request({ method: "eth_chainId" });
+            metamaskChainId = postSwitchHex;
+
+            // Re-check account on active network
+            const postAccs = await provider.request({ method: "eth_accounts" });
+            if (postAccs && postAccs.length > 0) {
+                metamaskAccount = postAccs[0];
+            }
+        } catch (mmErr) {
+            console.warn("[MetaMask direct connect/switch warning]:", mmErr);
+            if (mmErr.code === 4001) {
+                showToast("Network switch / wallet confirmation cancelled in MetaMask.", "warning");
+            }
         }
+    } else {
+        showMetaMaskModal();
     }
 
-    // 3. Update backend active blockchain configuration
+    // 3. Update backend active blockchain & wallet configuration
     try {
         const res = await fetch("/api/chain/switch", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chain_id: id })
+            body: JSON.stringify({ chain_id: id, address: metamaskAccount || "" })
         });
         const json = await res.json();
         if (thisEpoch !== currentChainEpoch) return; // Superseded by rapid switch!
@@ -2784,16 +2835,31 @@ async function selectNetwork(chainId, event) {
         } else {
             showToast(json.message || "Failed to switch chain", "error");
         }
+
+        if (metamaskAccount) {
+            await fetch("/api/wallet/connect", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ address: metamaskAccount, chain_id: id })
+            });
+        }
     } catch (err) {
         console.error("Backend chain switch error:", err);
     }
 
-    // 4. Fetch fresh data for newly selected chain
+    // 4. Update Web3 Signer & Contracts for the chosen chain
+    await initEthersProviderAndSigner();
+    await initContractInstance(true);
+
+    // 5. Update UI & Fetch fresh data for newly selected chain
+    if (metamaskAccount) {
+        updateWalletUIConnected(metamaskAccount, metamaskChainId);
+        if (typeof fetchClientWalletBalances === "function") {
+            await fetchClientWalletBalances(metamaskAccount, id);
+        }
+    }
     fetchMarketData();
     fetchMultiPairData();
-    if (metamaskAccount && typeof fetchClientWalletBalances === "function") {
-        fetchClientWalletBalances(metamaskAccount, id);
-    }
 }
 
 async function quickSwitchChain(chainId) {
@@ -3091,7 +3157,7 @@ async function restoreMetaMaskSession() {
     }
 }
 
-async function connectMetaMask() {
+async function connectMetaMask(targetChainId = null) {
     const provider = getMetaMaskProvider();
     if (!provider) {
         showMetaMaskModal();
@@ -3122,6 +3188,14 @@ async function connectMetaMask() {
 
         safeStorage.setItem("metamask_connected", "true");
         await handleAccountsChanged(accounts, true);
+
+        // If a specific target chain is requested or MetaMask is on a different chain, prompt network alignment
+        const targetCid = Number(targetChainId || currentSelectedChainId);
+        const currentChainHex = await provider.request({ method: "eth_chainId" });
+        const currentMmCid = parseInt(currentChainHex, 16);
+        if (targetCid && currentMmCid !== targetCid && SUPPORTED_CHAINS[targetCid]) {
+            await requestSwitchNetwork(targetCid);
+        }
     } catch (err) {
         console.warn("[MetaMask connect error]:", err);
         showToast(`MetaMask error: ${err.message || err}`, "error");
@@ -3190,7 +3264,7 @@ async function handleAccountsChanged(accounts, notifyUser = true) {
                 await fetch("/api/chain/switch", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ chain_id: mmCid })
+                    body: JSON.stringify({ chain_id: mmCid, address: metamaskAccount })
                 });
             } catch (err) {
                 console.warn("[MetaMask auto-switch error]:", err);
@@ -3209,10 +3283,8 @@ async function handleAccountsChanged(accounts, notifyUser = true) {
 
     // Instant client-side direct Web3 balance fetch — use MetaMask's actual chain
     if (typeof fetchClientWalletBalances === "function") {
-        // Pass 0 so function will detect actual MetaMask chain via eth_chainId
-        fetchClientWalletBalances(metamaskAccount, activeCid);
+        await fetchClientWalletBalances(metamaskAccount, activeCid);
     }
-
 
     // Synchronize connected address with backend
     try {
@@ -3242,6 +3314,18 @@ async function handleChainChanged(chainIdHex) {
     metamaskChainId = chainIdHex;
     const newChainId = parseInt(chainIdHex, 16);
     console.log("[MetaMask]: Chain changed to:", newChainId, chainIdHex);
+
+    const provider = getMetaMaskProvider();
+    if (provider) {
+        try {
+            const accounts = await provider.request({ method: "eth_accounts" });
+            if (accounts && accounts.length > 0) {
+                metamaskAccount = accounts[0];
+                safeStorage.setItem("metamask_connected", "true");
+            }
+        } catch (e) {}
+    }
+
     await initEthersProviderAndSigner();
 
     // Preserve metamaskAccount! Network switching must not lose wallet connection
@@ -3252,22 +3336,34 @@ async function handleChainChanged(chainIdHex) {
     // Synchronize network cards and backend config if chain is supported
     if (SUPPORTED_CHAINS[newChainId]) {
         invalidateAndResetChainUI(newChainId);
+        currentSelectedChainId = newChainId;
+        safeStorage.setItem("userSelectedChainId", newChainId);
+        updateNetworkCardsVisual(newChainId);
+
         try {
             const res = await fetch("/api/chain/switch", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ chain_id: newChainId })
+                body: JSON.stringify({ chain_id: newChainId, address: metamaskAccount || "" })
             });
             const data = await res.json();
             if (data.success) {
                 showToast(`Switched bot to ${SUPPORTED_CHAINS[newChainId].name}`, "info");
             }
+            if (metamaskAccount) {
+                await fetch("/api/wallet/connect", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ address: metamaskAccount, chain_id: newChainId })
+                });
+            }
         } catch (e) {
             console.warn("[Chain sync to backend error]:", e);
         }
+
         await initContractInstance(true);
         if (metamaskAccount && typeof fetchClientWalletBalances === "function") {
-            fetchClientWalletBalances(metamaskAccount, newChainId);
+            await fetchClientWalletBalances(metamaskAccount, newChainId);
         }
         fetchMarketData();
         fetchMultiPairData();
@@ -3511,6 +3607,9 @@ function updateWalletUIConnected(address, chainIdHex) {
         portConnectBtn.className = "btn btn-secondary";
         portConnectBtn.onclick = disconnectMetaMask;
     }
+
+    const cfgAddr = document.getElementById("cfgWalletAddress");
+    if (cfgAddr) cfgAddr.value = address;
 }
 
 function updateWalletUIDisconnected() {
@@ -3521,6 +3620,9 @@ function updateWalletUIDisconnected() {
     if (btnConnect) btnConnect.style.display = "inline-flex";
     if (walletPill) walletPill.style.display = "none";
     if (menu) menu.style.display = "none";
+
+    setText("headerWalletAddress", "Connect Wallet");
+    setText("menuFullAddress", "No Wallet Connected");
 
     const portBadge = document.getElementById("walletAddressBadge");
     if (portBadge) {
@@ -3533,6 +3635,9 @@ function updateWalletUIDisconnected() {
         portConnectBtn.className = "btn btn-secondary";
         portConnectBtn.onclick = connectMetaMask;
     }
+
+    const cfgAddr = document.getElementById("cfgWalletAddress");
+    if (cfgAddr) cfgAddr.value = "";
 
     setText("balETH", "0.0000 ETH");
     setText("balETHusd", "≈ $0.00 USDT");
@@ -3770,7 +3875,8 @@ async function executeMockPipelineTrade(route, targetChainInfo) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 trade_amount: tradeAmt,
-                wallet_address: metamaskAccount || "0x9cb6b2c1205a16ba947b783ed99569234decfcc0",
+                wallet_address: metamaskAccount || "",
+                chain_id: currentSelectedChainId,
                 detected_at: detectedAt
             })
         });
