@@ -159,6 +159,11 @@ def create_database():
     conn.commit()
     conn.close()
 
+    try:
+        restore_trades_from_json_backup()
+    except Exception:
+        pass
+
 
 # ============================================================
 # BOT SETTINGS
@@ -614,8 +619,8 @@ def restore_trades_from_json_backup():
                             tx_hash, chain_id, buy_dex, sell_dex, token_pair,
                             amount_in, amount_out, gross_profit, net_profit,
                             gas_used, gas_price_gwei, gas_cost_usdt, price_impact, slippage,
-                            status, mode, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            status, mode, created_at, telemetry
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         t.get("tx_hash", "0xbackup"),
                         int(t.get("chain_id", 1)),
@@ -633,7 +638,8 @@ def restore_trades_from_json_backup():
                         float(t.get("slippage", 0.0)),
                         t.get("status", "CONFIRMED"),
                         t.get("mode", "MOCK"),
-                        t.get("created_at") or datetime.now().astimezone().isoformat()
+                        t.get("created_at") or datetime.now().astimezone().isoformat(),
+                        json.dumps(t.get("telemetry")) if isinstance(t.get("telemetry"), dict) else str(t.get("telemetry") or "")
                     ))
                 conn.commit()
         conn.close()

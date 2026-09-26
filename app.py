@@ -1348,20 +1348,19 @@ def settings_api():
             save_bot_setting("wallet_address", config.WALLET_ADDRESS)
 
         if "private_key" in data:
-            pk = str(data["private_key"]).strip()
+            pk = str(data["private_key"]).strip().strip('"').strip("'")
             if pk:
                 if not pk.startswith("0x") and len(pk) == 64:
                     pk = "0x" + pk
-                if len(pk) == 66:
+                try:
+                    from eth_account import Account
+                    acct = Account.from_key(pk)
                     config.PRIVATE_KEY = pk
                     save_bot_setting("private_key", pk)
-                    try:
-                        from eth_account import Account
-                        acct = Account.from_key(pk)
-                        config.WALLET_ADDRESS = acct.address
-                        save_bot_setting("wallet_address", acct.address)
-                    except Exception:
-                        pass
+                    config.WALLET_ADDRESS = acct.address
+                    save_bot_setting("wallet_address", acct.address)
+                except Exception as e:
+                    print(f"[Settings API] Invalid private key: {e}", flush=True)
             elif pk == "":
                 config.PRIVATE_KEY = ""
                 save_bot_setting("private_key", "")
