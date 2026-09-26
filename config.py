@@ -368,8 +368,8 @@ if PRIVATE_KEY and not WALLET_ADDRESS:
 # MOCK | TESTNET | LIVE
 TRADING_MODE = os.getenv("TRADING_MODE", "MOCK").upper()
 
-# Auto-trading background engine (safe default: False)
-AUTO_TRADE_ENABLED = os.getenv("AUTO_TRADE_ENABLED", "false").lower() == "true"
+# Auto-trading background engine (default: True, only off when manually toggled)
+AUTO_TRADE_ENABLED = os.getenv("AUTO_TRADE_ENABLED", "true").lower() == "true"
 
 # Live execution arm switch
 LIVE_TRADING_ARMED = os.getenv("LIVE_TRADING_ARMED", "true").lower() == "true"

@@ -79,6 +79,8 @@ try:
         config.AUTO_TRADE_ENABLED = env_auto.lower() == "true"
     elif "auto_trade" in _saved:
         config.AUTO_TRADE_ENABLED = bool(_saved["auto_trade"])
+    else:
+        config.AUTO_TRADE_ENABLED = True
 
     env_mode = os.getenv("TRADING_MODE")
     if env_mode:

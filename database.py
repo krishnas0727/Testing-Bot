@@ -84,6 +84,11 @@ def create_database():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # Ensure auto_trade defaults to true unless manually changed by user
+    cursor.execute("""
+        INSERT OR IGNORE INTO bot_settings (key, value, updated_at)
+        VALUES ('auto_trade', 'true', CURRENT_TIMESTAMP)
+    """)
 
     # Arbitrage Opportunity Scan Log
     cursor.execute("""

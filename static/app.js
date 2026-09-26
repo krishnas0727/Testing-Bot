@@ -545,6 +545,20 @@ function playTerminalSound(type) {
 // ============================================================
 
 document.addEventListener("DOMContentLoaded", () => {
+    // 1. Maintain permanent user preference for Auto Trade toggle (defaults to True)
+    const savedAutoPref = localStorage.getItem("user_auto_trade_preference");
+    const autoToggle = document.getElementById("headerAutoTradeToggle");
+    if (autoToggle) {
+        if (savedAutoPref === "false") {
+            autoToggle.checked = false;
+        } else {
+            autoToggle.checked = true;
+            if (savedAutoPref === null) {
+                localStorage.setItem("user_auto_trade_preference", "true");
+            }
+        }
+    }
+
     initChart();
     initTerminalAudio();
     handleInitialRoute();
@@ -754,6 +768,7 @@ function startPolling() {
 
 let _autoExecLock = false;         // Prevent concurrent executions
 let _autoExecCooldownUntil = 0;   // Timestamp: don't try again until this time
+let _syncingAutoTrade = false;
 const AUTO_EXEC_COOLDOWN_MS = 15000; // 15s between auto-executions
 
 async function maybeAutoExecute(marketPayload) {
@@ -763,9 +778,11 @@ async function maybeAutoExecute(marketPayload) {
     // Guard 2: Cooldown
     if (Date.now() < _autoExecCooldownUntil) return;
 
-    // Guard 3: Settings check — auto_trade must be enabled
+    // Guard 3: Settings check — auto_trade must be enabled (honoring user preference)
     const settings = marketPayload.settings || {};
-    const autoTradeOn = Boolean(settings.auto_trade);
+    const userPref = localStorage.getItem("user_auto_trade_preference");
+    if (userPref === "false") return;
+    const autoTradeOn = (userPref !== "false") && (settings.auto_trade !== false);
     if (!autoTradeOn) return;
 
     // Guard 4: Mode must be LIVE or TESTNET
@@ -1002,7 +1019,22 @@ function updateDashboardUI(payload) {
     if (arbLiveBanner) arbLiveBanner.style.display = isLiveModeActive ? "block" : "none";
 
     const autoToggle = document.getElementById("headerAutoTradeToggle");
-    if (autoToggle) autoToggle.checked = Boolean(settings.auto_trade);
+    const userAutoPref = localStorage.getItem("user_auto_trade_preference");
+    if (autoToggle) {
+        if (userAutoPref === "false") {
+            autoToggle.checked = false;
+        } else {
+            autoToggle.checked = true;
+            if (settings.auto_trade === false && !_syncingAutoTrade) {
+                _syncingAutoTrade = true;
+                fetch("/api/settings", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ auto_trade: true })
+                }).finally(() => { _syncingAutoTrade = false; });
+            }
+        }
+    }
 
     if (settings.emergency_stop !== undefined) {
         updateEmergencyStopUI(Boolean(settings.emergency_stop));
@@ -1067,18 +1099,17 @@ function updateDashboardUI(payload) {
         statusSubtitle = "Atomic Arbitrage Executed On-Chain";
     }
 
-    // Header Auto-Trade Badge - never show fake ACTIVE status if engine is in STANDBY/BLOCKED
+    // Header Auto-Trade Badge - shows ACTIVE (green) when enabled, OFF (red) only when manually turned off
     const autoBadge = document.getElementById("headerAutoTradeBadge");
     if (autoBadge) {
-        if (isEmergency || statusTitle.includes("BLOCKED") || statusTitle.includes("HALTED")) {
-            autoBadge.innerText = "BLOCKED";
+        const userAutoPref = localStorage.getItem("user_auto_trade_preference");
+        const isAutoOn = (userAutoPref !== "false");
+        if (isEmergency) {
+            autoBadge.innerText = "HALTED";
             autoBadge.className = "badge badge-red";
-        } else if (!settings.auto_trade) {
-            autoBadge.innerText = "STANDBY";
+        } else if (!isAutoOn) {
+            autoBadge.innerText = "OFF";
             autoBadge.className = "badge badge-red";
-        } else if (statusTitle.includes("STANDBY") || statusTitle.includes("DISCONNECTED")) {
-            autoBadge.innerText = "STANDBY";
-            autoBadge.className = "badge badge-yellow";
         } else {
             autoBadge.innerText = "ACTIVE";
             autoBadge.className = "badge badge-green";
@@ -1919,6 +1950,15 @@ function onLiveConfirmProceed() {
 // ============================================================
 
 async function quickToggleAutoTrade(enabled) {
+    // Record user's explicit manual intent in localStorage so it stays permanent
+    localStorage.setItem("user_auto_trade_preference", enabled ? "true" : "false");
+    const autoToggle = document.getElementById("headerAutoTradeToggle");
+    if (autoToggle) autoToggle.checked = enabled;
+    const autoBadge = document.getElementById("headerAutoTradeBadge");
+    if (autoBadge) {
+        autoBadge.innerText = enabled ? "ACTIVE" : "OFF";
+        autoBadge.className = "badge " + (enabled ? "badge-green" : "badge-red");
+    }
     try {
         const res = await fetch("/api/settings", {
             method: "POST",
@@ -1927,7 +1967,8 @@ async function quickToggleAutoTrade(enabled) {
         });
         const json = await res.json();
         if (json.success) {
-            showToast(`Auto Trade ${enabled ? "Activated" : "Deactivated"}`, enabled ? "success" : "info");
+            showToast(`Auto Trade ${enabled ? "Activated (Always ON)" : "Deactivated (Manual OFF)"}`, enabled ? "success" : "info");
+            fetchMarketData();
         }
     } catch (err) {
         showToast("Error updating Auto Trade: " + err, "error");
