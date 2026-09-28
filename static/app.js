@@ -259,7 +259,8 @@ const CLIENT_FACTORY_V2_ABI = [
 ];
 
 let currentTab = "dashboard";
-let selectedTradeAmount = 5;
+const savedCustomAmt = parseFloat(safeStorage.getItem("customTradeAmount"));
+let selectedTradeAmount = !isNaN(savedCustomAmt) && savedCustomAmt > 0 ? savedCustomAmt : 10;
 let latestMarketData = null;
 let liveChart = null;
 let priceSnapshots = [];
@@ -550,12 +551,24 @@ document.addEventListener("DOMContentLoaded", () => {
     handleInitialRoute();
     startClock();
     invalidateAndResetChainUI(currentSelectedChainId);
+
+    // Synchronize custom trade input and Execution Plan with selected trade amount
+    const customInp = document.getElementById("customTradeInput");
+    if (customInp) {
+        if (!isNaN(selectedTradeAmount) && selectedTradeAmount > 0) {
+            customInp.value = selectedTradeAmount;
+        } else if (parseFloat(customInp.value) > 0) {
+            selectedTradeAmount = parseFloat(customInp.value);
+        }
+    }
+    updateExecutionPlanForAmount(selectedTradeAmount);
+
     startPolling();
     loadSettings();
     loadTrades();
     initMetaMask();
     fetchMultiPairData();
-    setInterval(fetchMultiPairData, 3500);
+    setInterval(fetchMultiPairData, 10000);
 });
 
 // Close wallet dropdown when clicking anywhere outside
@@ -742,7 +755,7 @@ function updateChart(prices) {
 
 function startPolling() {
     fetchMarketData();
-    setInterval(fetchMarketData, 1000);
+    setInterval(fetchMarketData, 2000);
 }
 
 // ============================================================
@@ -801,7 +814,11 @@ async function maybeAutoExecute(marketPayload) {
 }
 
 async function executeAutoOpportunity(bestRoute) {
-    const tradeAmt = selectedTradeAmount || Number(bestRoute.amount_in || 0.10);
+    const customInp = document.getElementById("customTradeInput");
+    if (customInp && parseFloat(customInp.value) > 0) {
+        selectedTradeAmount = parseFloat(customInp.value);
+    }
+    const tradeAmt = selectedTradeAmount || Number(bestRoute.amount_in || 10.0);
 
     // Step 1: Show status in UI (non-blocking toast, no modal popup for auto-exec)
     showToast(
@@ -859,11 +876,18 @@ async function executeAutoOpportunity(bestRoute) {
     }
 }
 
+let isFetchingMarket = false;
 async function fetchMarketData() {
+    if (isFetchingMarket) return;
+    isFetchingMarket = true;
     const thisEpoch = currentChainEpoch;
     const thisChainId = currentSelectedChainId;
     const t0 = performance.now();
     try {
+        const customInp = document.getElementById("customTradeInput");
+        if (customInp && parseFloat(customInp.value) > 0) {
+            selectedTradeAmount = parseFloat(customInp.value);
+        }
         const params = new URLSearchParams();
         if (selectedTradeAmount) params.append("amount", selectedTradeAmount);
         if (metamaskAccount) params.append("address", metamaskAccount);
@@ -921,6 +945,8 @@ async function fetchMarketData() {
 
     } catch (err) {
         console.warn("[DEX Polling Error]:", err);
+    } finally {
+        isFetchingMarket = false;
     }
 }
 
@@ -1259,22 +1285,44 @@ function updateDashboardUI(payload) {
     // 7. Arbitrage tab breakdown
     if (best.buy_dex) {
         setText("arbRouteText", `${best.buy_dex.replace("_", " ")} ➔ ${best.sell_dex.replace("_", " ")}`);
-        setText("arbAmountIn", `$${Number(best.amount_in || selectedTradeAmount).toFixed(2)} ${quoteSym}`);
-        setText("arbAmountOut", `$${Number(best.gross_return_usdt || best.amount_in || selectedTradeAmount).toFixed(4)} ${quoteSym}`);
+
+        // Strictly respect user's selectedTradeAmount or custom input
+        const customInp = document.getElementById("customTradeInput");
+        if (customInp && parseFloat(customInp.value) > 0) {
+            selectedTradeAmount = parseFloat(customInp.value);
+        }
+        const tradeAmtDisplay = selectedTradeAmount || best.amount_in || 10.0;
+        setText("arbAmountIn", `$${Number(tradeAmtDisplay).toFixed(2)} ${quoteSym}`);
+
+        let grossOut = best.gross_return_usdt;
+        let netProf = best.net_profit_usdt;
+        let gasCost = best.gas_cost_usdt;
+        let netPct = best.net_profit_percent;
+
+        // If backend returned route for a different amount (e.g. default 5 while user chose 15), scale it:
+        if (best.amount_in && Math.abs(best.amount_in - tradeAmtDisplay) > 0.001) {
+            const scale = tradeAmtDisplay / best.amount_in;
+            grossOut = tradeAmtDisplay + ((best.gross_profit_usdt || (best.gross_return_usdt - best.amount_in)) * scale);
+            gasCost = Math.min(0.25, Math.max(0.0001, tradeAmtDisplay * 0.0005));
+            netProf = (grossOut - tradeAmtDisplay) - gasCost;
+            netPct = (netProf / tradeAmtDisplay) * 100.0;
+        }
+
+        setText("arbAmountOut", `$${Number(grossOut || tradeAmtDisplay).toFixed(4)} ${quoteSym}`);
         setText("arbPriceImpact", `${Number(best.max_price_impact_pct || 0.01).toFixed(2)}%`);
-        setText("arbGasCost", `$${Number(best.gas_cost_usdt || 0.005).toFixed(4)} ${quoteSym}`);
+        setText("arbGasCost", `$${Number(gasCost || 0.005).toFixed(4)} ${quoteSym}`);
 
         const netProfEl = document.getElementById("arbNetProfit");
         if (netProfEl) {
-            const sign = (best.net_profit_usdt || 0) >= 0 ? "+" : "";
-            netProfEl.innerText = `${sign}$${Number(best.net_profit_usdt || 0).toFixed(4)} ${quoteSym} (${sign}${Number(best.net_profit_percent || 0).toFixed(2)}%)`;
-            netProfEl.style.color = (best.net_profit_usdt || 0) >= 0 ? "var(--profit-color)" : "var(--loss-color)";
+            const sign = (netProf || 0) >= 0 ? "+" : "";
+            netProfEl.innerText = `${sign}$${Number(netProf || 0).toFixed(4)} ${quoteSym} (${sign}${Number(netPct || 0).toFixed(2)}%)`;
+            netProfEl.style.color = (netProf || 0) >= 0 ? "var(--profit-color)" : "var(--loss-color)";
         }
 
         const planBadge = document.getElementById("arbPlanBadge");
         if (planBadge) {
-            planBadge.innerText = best.is_profitable ? "OPTIMAL ROUTE" : "LOW SPREAD";
-            planBadge.className = "badge " + (best.is_profitable ? "badge-green" : "badge-yellow");
+            planBadge.innerText = (netProf || 0) > 0 ? "OPTIMAL ROUTE" : "LOW SPREAD";
+            planBadge.className = "badge " + ((netProf || 0) > 0 ? "badge-green" : "badge-yellow");
         }
     }
 }
@@ -1290,7 +1338,9 @@ function setText(id, text) {
 
 function updateExecutionPlanForAmount(amount) {
     if (!amount || amount <= 0) return;
-    setText("arbAmountIn", `$${Number(amount).toFixed(2)} USDT`);
+    const chainConfig = getSelectedChain();
+    const quoteSym = (chainConfig.defaultPair && chainConfig.defaultPair.split("/")[1]) || (currentSelectedChainId === 8453 || currentSelectedChainId === 84532 ? "USDC" : "USDT");
+    setText("arbAmountIn", `$${Number(amount).toFixed(2)} ${quoteSym}`);
 
     // Realistic dynamic gas for L2 / micro-trade ($0.0005 on $1, $0.0025 on $5)
     const gasCost = Math.min(0.25, Math.max(0.0001, amount * 0.0005));
@@ -1306,14 +1356,14 @@ function updateExecutionPlanForAmount(amount) {
     const netProfit = grossProfit - gasCost;
     const netProfitPct = (netProfit / amount) * 100.0;
 
-    setText("arbAmountOut", `$${grossReturn.toFixed(4)} USDT`);
+    setText("arbAmountOut", `$${grossReturn.toFixed(4)} ${quoteSym}`);
     setText("arbPriceImpact", `0.01%`);
-    setText("arbGasCost", `$${gasCost.toFixed(4)} USDT`);
+    setText("arbGasCost", `$${gasCost.toFixed(4)} ${quoteSym}`);
 
     const netProfEl = document.getElementById("arbNetProfit");
     if (netProfEl) {
         const sign = netProfit >= 0 ? "+" : "";
-        netProfEl.innerText = `${sign}$${netProfit.toFixed(4)} USDT (${sign}${netProfitPct.toFixed(2)}%)`;
+        netProfEl.innerText = `${sign}$${netProfit.toFixed(4)} ${quoteSym} (${sign}${netProfitPct.toFixed(2)}%)`;
         netProfEl.style.color = netProfit >= 0 ? "var(--profit-color)" : "var(--loss-color)";
     }
 
@@ -1326,6 +1376,7 @@ function updateExecutionPlanForAmount(amount) {
 
 function selectTradeSize(amount) {
     selectedTradeAmount = amount;
+    safeStorage.setItem("customTradeAmount", amount);
     document.querySelectorAll(".size-btn").forEach(btn => {
         const btnVal = parseFloat(btn.innerText.replace("$", ""));
         btn.classList.toggle("active", Math.abs(btnVal - amount) < 0.0001);
@@ -1333,10 +1384,12 @@ function selectTradeSize(amount) {
     document.querySelectorAll(".size-pct-pill, .btn-max-safe").forEach(btn => {
         btn.classList.remove("active");
     });
+    const chainConfig = getSelectedChain();
+    const quoteSym = (chainConfig.defaultPair && chainConfig.defaultPair.split("/")[1]) || (currentSelectedChainId === 8453 || currentSelectedChainId === 84532 ? "USDC" : "USDT");
     const inp = document.getElementById("customTradeInput");
     if (inp) inp.value = amount;
     const dashLbl = document.getElementById("dashSizingLabel");
-    if (dashLbl) dashLbl.innerText = `$${Number(amount).toFixed(2)} USDT`;
+    if (dashLbl) dashLbl.innerText = `$${Number(amount).toFixed(2)} ${quoteSym}`;
     updateExecutionPlanForAmount(amount);
     fetchMarketData();
 }
@@ -1348,23 +1401,26 @@ function selectMaxSafeSize() {
     } else if (latestMarketData && latestMarketData.wallet) {
         available = Number(latestMarketData.wallet.total_stable_usdt || 0);
     }
+    const chainConfig = getSelectedChain();
+    const quoteSym = (chainConfig.defaultPair && chainConfig.defaultPair.split("/")[1]) || (currentSelectedChainId === 8453 || currentSelectedChainId === 84532 ? "USDC" : "USDT");
     if (available <= 0.0) {
-        showToast("Wallet has $0.00 USDT/USDC. Deposit funds or connect MetaMask.", "warning");
+        showToast(`Wallet has $0.00 ${quoteSym}. Deposit funds or connect MetaMask.`, "warning");
         return;
     }
     const safeAmt = Math.floor(available * 0.95 * 10000) / 10000;
     selectedTradeAmount = Math.max(0.0001, safeAmt);
+    safeStorage.setItem("customTradeAmount", selectedTradeAmount);
     document.querySelectorAll(".size-btn").forEach(btn => {
         btn.classList.toggle("active", btn.classList.contains("btn-max-safe"));
     });
     const inp = document.getElementById("customTradeInput");
     if (inp) inp.value = selectedTradeAmount.toFixed(4);
     const dashLbl = document.getElementById("dashSizingLabel");
-    if (dashLbl) dashLbl.innerText = `$${selectedTradeAmount.toFixed(4)} USDT`;
+    if (dashLbl) dashLbl.innerText = `$${selectedTradeAmount.toFixed(4)} ${quoteSym}`;
     updateExecutionPlanForAmount(selectedTradeAmount);
     fetchMarketData();
     playTerminalSound("test");
-    showToast(`Set trade size to max safe balance (95%): $${selectedTradeAmount.toFixed(4)} USDT`, "success");
+    showToast(`Set trade size to max safe balance (95%): $${selectedTradeAmount.toFixed(4)} ${quoteSym}`, "success");
 }
 
 function selectSizingPercentage(pct) {
@@ -1374,13 +1430,16 @@ function selectSizingPercentage(pct) {
     } else if (latestMarketData && latestMarketData.wallet) {
         available = Number(latestMarketData.wallet.total_stable_usdt || 0);
     }
+    const chainConfig = getSelectedChain();
+    const quoteSym = (chainConfig.defaultPair && chainConfig.defaultPair.split("/")[1]) || (currentSelectedChainId === 8453 || currentSelectedChainId === 84532 ? "USDC" : "USDT");
     if (available <= 0.0) {
-        showToast("Wallet has $0.00 USDT/USDC. Deposit funds or connect MetaMask.", "warning");
+        showToast(`Wallet has $0.00 ${quoteSym}. Deposit funds or connect MetaMask.`, "warning");
         return;
     }
     const factor = Math.min(1.0, pct / 100.0);
     const amt = Math.floor(available * factor * 10000) / 10000;
     selectedTradeAmount = Math.max(0.0001, amt);
+    safeStorage.setItem("customTradeAmount", selectedTradeAmount);
 
     document.querySelectorAll(".size-btn").forEach(btn => btn.classList.remove("active"));
     const activePill = document.getElementById(`pctBtn${pct}`);
@@ -1389,28 +1448,35 @@ function selectSizingPercentage(pct) {
     const inp = document.getElementById("customTradeInput");
     if (inp) inp.value = selectedTradeAmount.toFixed(4);
     const dashLbl = document.getElementById("dashSizingLabel");
-    if (dashLbl) dashLbl.innerText = `$${selectedTradeAmount.toFixed(4)} USDT (${pct}%)`;
+    if (dashLbl) dashLbl.innerText = `$${selectedTradeAmount.toFixed(4)} ${quoteSym} (${pct}%)`;
     updateExecutionPlanForAmount(selectedTradeAmount);
     fetchMarketData();
     playTerminalSound("test");
-    showToast(`Set trade size to ${pct}%: $${selectedTradeAmount.toFixed(4)} USDT`, "success");
+    showToast(`Set trade size to ${pct}%: $${selectedTradeAmount.toFixed(4)} ${quoteSym}`, "success");
 }
 
 let customAmountDebounceTimer = null;
 function onCustomAmountChange() {
     const inp = document.getElementById("customTradeInput");
     if (inp) {
-        const val = parseFloat(inp.value) || 0.10;
-        selectedTradeAmount = Math.max(0.0001, val);
+        const val = parseFloat(inp.value) || 0;
+        if (val > 0) {
+            selectedTradeAmount = val;
+            safeStorage.setItem("customTradeAmount", val);
+        }
         document.querySelectorAll(".size-btn").forEach(btn => {
             const btnVal = parseFloat(btn.innerText.replace("$", ""));
             btn.classList.toggle("active", Math.abs(btnVal - val) < 0.0001);
         });
-        updateExecutionPlanForAmount(selectedTradeAmount);
+        const chainConfig = getSelectedChain();
+        const quoteSym = (chainConfig.defaultPair && chainConfig.defaultPair.split("/")[1]) || (currentSelectedChainId === 8453 || currentSelectedChainId === 84532 ? "USDC" : "USDT");
+        const dashLbl = document.getElementById("dashSizingLabel");
+        if (dashLbl) dashLbl.innerText = `$${val.toFixed(2)} ${quoteSym}`;
+        updateExecutionPlanForAmount(val || selectedTradeAmount);
         if (customAmountDebounceTimer) clearTimeout(customAmountDebounceTimer);
         customAmountDebounceTimer = setTimeout(() => {
             fetchMarketData();
-        }, 300);
+        }, 200);
     }
 }
 
@@ -1496,6 +1562,10 @@ async function executeCurrentTrade() {
 
     showExecModal("Executing Atomic DEX Arbitrage", "Submitting transaction to DEX Arbitrage Smart Contract...");
     try {
+        const customInp = document.getElementById("customTradeInput");
+        if (customInp && parseFloat(customInp.value) > 0) {
+            selectedTradeAmount = parseFloat(customInp.value);
+        }
         let tradeAmtToSend = selectedTradeAmount;
         if (latestMarketData && latestMarketData.wallet) {
             const avail = Number(latestMarketData.wallet.total_stable_usdt || 0);
@@ -2458,22 +2528,25 @@ async function fetchClientWalletBalances(account, chainIdNum) {
 
     try {
         // 1. Native ETH / SepoliaETH / POL balance via eth_getBalance (direct from MetaMask)
-        const hexBal = await provider.request({
+        const ethPromise = provider.request({
             method: "eth_getBalance",
             params: [account, "latest"]
-        });
-        if (hexBal && hexBal !== "0x") {
-            clientWalletBalances.eth = parseInt(hexBal, 16) / 1e18;
-        }
+        }).then(hexBal => {
+            if (hexBal && hexBal !== "0x") {
+                clientWalletBalances.eth = parseInt(hexBal, 16) / 1e18;
+                renderClientWalletBalances(actualMmChainId);
+            }
+        }).catch(e => console.warn("[ETH balance error]:", e));
 
-        // 2. Token balances via ERC20 balanceOf eth_call (from MetaMask's actual chain)
+        // 2. Token balances via ERC20 balanceOf eth_call (in parallel)
         const tokens = CLIENT_TOKEN_ADDRESSES[actualMmChainId];
+        let tokenPromises = [];
         if (tokens) {
             const cleanAddr = account.toLowerCase().replace("0x", "").padStart(64, "0");
             const balanceOfData = "0x70a08231" + cleanAddr;
 
-            for (const [sym, info] of Object.entries(tokens)) {
-                if (!info || !info.address) continue;
+            tokenPromises = Object.entries(tokens).map(async ([sym, info]) => {
+                if (!info || !info.address) return;
                 try {
                     const hexRes = await provider.request({
                         method: "eth_call",
@@ -2494,10 +2567,12 @@ async function fetchClientWalletBalances(account, chainIdNum) {
                 } catch (tokErr) {
                     console.warn(`[Balance fetch error for ${sym} on chain ${actualMmChainId}]:`, tokErr);
                 }
-            }
+            });
         }
+
+        await Promise.all([ethPromise, ...tokenPromises]);
         clientWalletBalances.updated = Date.now();
-        // Render using MetaMask's actual chain labels
+        // Render final balances using MetaMask's actual chain labels
         renderClientWalletBalances(actualMmChainId);
     } catch (err) {
         console.warn("[Client Web3 Balance fetch error]:", err);
@@ -2685,56 +2760,52 @@ async function handleAccountsChanged(accounts, notifyUser = true) {
             currentSelectedChainId = mmCid;
             safeStorage.setItem("userSelectedChainId", mmCid);
             updateNetworkCardsVisual(mmCid);
-            try {
-                await fetch("/api/chain/switch", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ chain_id: mmCid })
-                });
-            } catch (err) {
-                console.warn("[MetaMask auto-switch error]:", err);
-            }
         } else {
             handleUnsupportedChain(mmCid);
         }
     }
 
-    // Setup ethers Provider & Signer architecture
-    await initEthersProviderAndSigner();
-    await initContractInstance(true);
-
-    // Update UI elements immediately
+    // 1. IMMEDIATE OPTIMISTIC UI UPDATE - Instant feedback for user!
     updateWalletUIConnected(metamaskAccount, metamaskChainId);
 
-    // Instant client-side direct Web3 balance fetch — use MetaMask's actual chain
+    if (notifyUser) {
+        const short = metamaskAccount.slice(0, 6) + "..." + metamaskAccount.slice(-4);
+        const chainName = SUPPORTED_CHAINS[activeCid]?.short || `Chain ${activeCid}`;
+        showToast(`MetaMask Connected: ${short} on ${chainName}`, "success");
+    }
+
+    // 2. Direct, parallel client balance fetch immediately from MetaMask
     if (typeof fetchClientWalletBalances === "function") {
-        // Pass 0 so function will detect actual MetaMask chain via eth_chainId
         fetchClientWalletBalances(metamaskAccount, activeCid);
     }
 
+    // 3. Non-blocking initialization of signer and contract in background
+    initEthersProviderAndSigner().catch(e => console.warn("[Signer init warn]:", e));
+    initContractInstance(false).catch(e => console.warn("[Contract init warn]:", e));
 
-    // Synchronize connected address with backend
-    try {
-        const res = await fetch("/api/wallet/connect", {
+    // 4. Asynchronous backend synchronization (no blocking UI wait)
+    if (metamaskChainId && SUPPORTED_CHAINS[parseInt(metamaskChainId, 16)]) {
+        fetch("/api/chain/switch", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                address: metamaskAccount,
-                chain_id: activeCid
-            })
-        });
-        const data = await res.json();
+            body: JSON.stringify({ chain_id: activeCid })
+        }).catch(err => console.warn("[MetaMask auto-switch error]:", err));
+    }
+
+    fetch("/api/wallet/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            address: metamaskAccount,
+            chain_id: activeCid
+        })
+    }).then(res => res.json()).then(data => {
         if (data.success) {
-            if (notifyUser) {
-                const short = metamaskAccount.slice(0, 6) + "..." + metamaskAccount.slice(-4);
-                const chainName = SUPPORTED_CHAINS[activeCid]?.short || `Chain ${activeCid}`;
-                showToast(`MetaMask Connected: ${short} on ${chainName}`, "success");
-            }
             fetchMarketData();
         }
-    } catch (err) {
+    }).catch(err => {
         console.warn("[MetaMask Sync Error]:", err);
-    }
+    });
 }
 
 async function handleChainChanged(chainIdHex) {
@@ -3130,11 +3201,16 @@ function closeMetaMaskModal() {
 // ADVANCED FEATURE 2: MULTI-PAIR OPPORTUNITY SCANNER
 // ============================================================
 
+let isFetchingMultiPair = false;
 async function fetchMultiPairData() {
-    const thisEpoch = currentChainEpoch;
-    const thisChainId = currentSelectedChainId;
+    if (isFetchingMultiPair) return;
     const grid = document.getElementById("multiPairGrid");
     if (!grid) return;
+    if (currentTab !== "pools" && currentTab !== "dashboard") return;
+
+    isFetchingMultiPair = true;
+    const thisEpoch = currentChainEpoch;
+    const thisChainId = currentSelectedChainId;
 
     try {
         const res = await fetch(`/api/market/all-pairs?chain_id=${thisChainId}`);
@@ -3203,6 +3279,8 @@ async function fetchMultiPairData() {
         });
     } catch (err) {
         console.warn("[Multi-Pair Fetch Error]:", err);
+    } finally {
+        isFetchingMultiPair = false;
     }
 }
 
@@ -3449,7 +3527,11 @@ async function executeMetaMaskOnChainTrade(options = {}) {
         }
 
         // Dynamic trade amount calculation based on safe balance
-        let tradeAmt = options?.tradeAmount || selectedTradeAmount || 0.10;
+        const customInp = document.getElementById("customTradeInput");
+        if (customInp && parseFloat(customInp.value) > 0) {
+            selectedTradeAmount = parseFloat(customInp.value);
+        }
+        let tradeAmt = options?.tradeAmount || selectedTradeAmount || 10.0;
         if (availStable > 0 && tradeAmt > availStable) {
             tradeAmt = Math.max(0.0001, Math.floor(availStable * 0.95 * 10000) / 10000);
         }

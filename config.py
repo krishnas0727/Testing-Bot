@@ -57,7 +57,7 @@ RPC_URL = os.getenv("RPC_URL", "https://ethereum-sepolia-rpc.publicnode.com")
 
 PUBLIC_RPC_FALLBACKS = {
     8453: [
-        "https://ethereum-sepolia-rpc.publicnode.com",
+        "https://mainnet.base.org",
         "https://base.llamarpc.com",
         "https://1rpc.io/base",
         "https://base-rpc.publicnode.com",

@@ -204,7 +204,22 @@ class ProfitThresholdAndSkipReasonTests(unittest.TestCase):
                 "is_gas_acceptable": True,
             }
 
-            with patch("arbitrage.execute_atomic_trade") as mock_exec:
+            with patch("arbitrage.execute_atomic_trade") as mock_exec, \
+                 patch("arbitrage._calculate_net_profit", return_value={
+                     "is_profitable": True,
+                     "is_gas_acceptable": True,
+                     "weth_out": 0.000003,
+                     "usdt_out": 0.0102,
+                     "gross_profit_usdt": 0.0007,
+                     "gas_cost_usdt": 0.00005,
+                     "slippage_cost_usdt": 0.00005,
+                     "net_profit_usdt": 0.0006,
+                     "net_profit_pct": 6.0,
+                     "buy_impact_pct": 0.01,
+                     "sell_impact_pct": 0.01,
+                     "max_price_impact_pct": 0.01,
+                     "min_usdt_out": 0.0101,
+                 }):
                 mock_exec.return_value = {"success": True, "trade": profitable_route, "tx_hash": "0x111222"}
                 result = arbitrage.execute_real_trade(profitable_route, custom_amount=5.00, is_manual=True)
                 mock_exec.assert_called_once()

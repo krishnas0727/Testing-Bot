@@ -6,7 +6,10 @@ calculates dynamic on-chain gas costs in USD, and executes atomic smart contract
 """
 import time
 import math
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
+
+_MARKET_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_MARKET_CACHE_TTL = 1.5
 
 import config
 from database import (
@@ -130,6 +133,13 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
     parts = active_symbol.split("/")
     base_sym = parts[0] if len(parts) > 0 else "WETH"
     quote_sym = parts[1] if len(parts) > 1 else "USDT"
+
+    now = time.time()
+    cache_key = f"{chain_id_val}_{round(trade_amount, 4)}_{base_sym}_{quote_sym}"
+    if cache_key in _MARKET_CACHE:
+        c_time, c_market = _MARKET_CACHE[cache_key]
+        if now - c_time < _MARKET_CACHE_TTL:
+            return c_market
 
     try:
         quotes = get_all_dex_quotes(trade_amount, base_sym, quote_sym)
@@ -274,7 +284,7 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
     opportunities.sort(key=lambda x: x["net_profit_usdt"], reverse=True)
     best = opportunities[0]
 
-    return {
+    market_data = {
         "best_route": best,
         "opportunities": opportunities,
         "prices": prices,
@@ -298,6 +308,8 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
         "is_profitable": best["is_profitable"],
         "timestamp": time.time() * 1000,
     }
+    _MARKET_CACHE[cache_key] = (now, market_data)
+    return market_data
 
 
 # ============================================================
@@ -439,10 +451,13 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
     if not is_manual and (now - last_trade_time) < cooldown:
         return _skip(f"Cooldown active ({int(cooldown - (now - last_trade_time))}s remaining)")
 
-    # Gate 4: Route availability
+    # Gate 4: Route availability & profitability check
     route = market.get("best_route") if "best_route" in market else market
     if not route:
         return _skip("No valid DEX route available")
+
+    if not route.get("is_profitable", True) or float(route.get("net_profit_usdt", 1.0)) <= 0:
+        return _skip("Unprofitable spread: Net profit is zero or negative")
 
     mode = getattr(config, "TRADING_MODE", "MOCK")
 
@@ -463,12 +478,12 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
         if stable_bal <= 0.0 or stable_bal < min_trade_req:
             return _skip(
                 f"INSUFFICIENT BALANCE: Wallet {short_addr} has ${stable_bal:.4f} USDC/USDT "
-                f"(Need >= ${min_trade_req:.4f}). Transaction aborted."
+                f"(Need at least ${min_trade_req:.4f} USDT/USDC). Transaction aborted."
             )
 
         if eth_bal < 0.0001:
             return _skip(
-                f"INSUFFICIENT BALANCE: Wallet has {eth_bal:.6f} ETH for gas "
+                f"INSUFFICIENT BALANCE: Wallet has {eth_bal:.6f} ETH for network gas fees "
                 f"(Need >= 0.0001 ETH). Transaction aborted."
             )
 
@@ -478,7 +493,7 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
         if trade_amt <= 0.0 or stable_bal < trade_amt:
             return _skip(
                 f"INSUFFICIENT BALANCE: Wallet {short_addr} has ${stable_bal:.4f} USDC/USDT "
-                f"(Need >= ${min_trade_req:.4f}). Transaction aborted."
+                f"(Need at least ${min_trade_req:.4f} USDT/USDC). Transaction aborted."
             )
     else:
         req_val = float(custom_amount or route.get("amount_in", getattr(config, "DEFAULT_TRADE_AMOUNT", 5.0)))
@@ -494,7 +509,7 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
     # This is the core fix — recalculate everything at execution time,
     # never trust stale quote from the polling cycle.
     # ============================================================
-    print(f"[PROFIT CHECK] Fetching fresh quote for ${trade_amt:.4f} USDT on {buy_dex} → {sell_dex}...", flush=True)
+    print(f"[PROFIT CHECK] Fetching fresh quote for ${trade_amt:.4f} USDT on {buy_dex} -> {sell_dex}...", flush=True)
 
     parts = config.SYMBOL.split("/")
     base_sym = parts[0] if len(parts) > 0 else "WETH"
