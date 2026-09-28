@@ -2187,13 +2187,17 @@ async function loadExecutionLogs() {
 
             return `
                 <tr>
-                    <td style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">${l.timestamp || ""}</td>
+                    <td style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono); white-space:nowrap;">${l.timestamp || ""}</td>
                     <td><span class="badge ${badgeClass}">${l.event_type}</span></td>
-                    <td style="font-weight:600;">${l.route || "-"}</td>
-                    <td style="font-family:var(--font-mono);">$${Number(l.amount_in || 0).toFixed(2)}</td>
-                    <td style="font-family:var(--font-mono); font-weight:700; color:${netProf >= 0 ? "var(--profit-color)" : "var(--loss-color)"};">${profSign}$${netProf.toFixed(4)}</td>
+                    <td style="font-weight:600; white-space:nowrap;">${l.route || "-"}</td>
+                    <td style="font-family:var(--font-mono); white-space:nowrap;">$${Number(l.amount_in || 0).toFixed(2)}</td>
+                    <td style="font-family:var(--font-mono); font-weight:700; white-space:nowrap; color:${netProf >= 0 ? "var(--profit-color)" : "var(--loss-color)"};">${profSign}$${netProf.toFixed(4)}</td>
                     <td><span class="badge ${badgeClass}">${l.status}</span></td>
-                    <td style="font-family:var(--font-mono); font-size:11px; color:${isSkipped ? "#f59e0b" : "var(--text-secondary)"}; word-break:break-word;">${l.reason || "-"}</td>
+                    <td style="font-family:var(--font-mono); font-size:11px;">
+                        <span style="background:${isSkipped ? 'rgba(245, 158, 11, 0.15)' : 'rgba(148, 163, 184, 0.1)'}; border:1px solid ${isSkipped ? 'rgba(245, 158, 11, 0.4)' : 'rgba(148, 163, 184, 0.2)'}; padding:3px 8px; border-radius:4px; color:${isSkipped ? '#f59e0b' : 'var(--text-bright)'}; display:inline-block; line-height:1.4; word-break:break-word;">
+                            ${l.reason || "-"}
+                        </span>
+                    </td>
                 </tr>
             `;
         }).join("");
