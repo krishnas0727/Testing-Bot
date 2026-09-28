@@ -1509,9 +1509,45 @@ async function simulateCurrentTrade() {
 }
 
 async function executeCurrentTrade() {
-    const isLiveMode = latestMarketData && (latestMarketData.trading_mode === "LIVE" || (latestMarketData.settings && latestMarketData.settings.trading_mode === "LIVE"));
+    const headerMode = document.getElementById("headerTradingModeSelect")?.value;
+    const isLiveMode = (headerMode === "LIVE") || (latestMarketData && (latestMarketData.trading_mode === "LIVE" || (latestMarketData.settings && latestMarketData.settings.trading_mode === "LIVE")));
     const hasServerSigner = latestMarketData && Boolean(latestMarketData.has_private_key);
-    const bestRoute = latestMarketData?.best_route || latestMarketData?.data?.best_route;
+    let bestRoute = latestMarketData?.best_route || latestMarketData?.data?.best_route;
+
+    // If market data or best route is not yet populated, fetch it on-demand immediately
+    if (!latestMarketData || !bestRoute) {
+        showToast("Fetching real-time DEX route quote...", "info");
+        const customInp = document.getElementById("customTradeInput");
+        const amt = (customInp && parseFloat(customInp.value) > 0) ? parseFloat(customInp.value) : (selectedTradeAmount || 10.0);
+        try {
+            const targetChainId = currentSelectedChainId || 8453;
+            const res = await fetch(`/api/market?amount=${amt}&chain_id=${targetChainId}${metamaskAccount ? `&address=${metamaskAccount}` : ''}`);
+            const json = await res.json();
+            if (json.success && json.data) {
+                latestMarketData = {
+                    ...json.data,
+                    data: json.data,
+                    market: json.data,
+                    wallet: json.wallet || {},
+                    summary: json.summary || {},
+                    settings: json.settings || {},
+                    trading_mode: json.summary?.trading_mode || json.settings?.trading_mode || (headerMode || "MOCK"),
+                    has_private_key: Boolean(json.settings?.has_private_key),
+                    chain_id: targetChainId,
+                    best_route: json.data?.best_route || null
+                };
+                updateDashboardUI(json);
+                bestRoute = json.data?.best_route;
+            }
+        } catch (e) {
+            console.warn("[ExecuteTrade] Quote fetch error:", e);
+        }
+    }
+
+    if (!bestRoute) {
+        showToast("No executable DEX route found. Please check network connection or liquidity pools.", "warning");
+        return;
+    }
 
     // Strict pre-check: Never submit if latest net profit is not strictly positive (> 0)
     if (bestRoute && Number(bestRoute.net_profit_usdt || 0) <= 0) {
@@ -1523,7 +1559,7 @@ async function executeCurrentTrade() {
     // In LIVE mode without server private key, route to MetaMask non-custodial signing
     if (isLiveMode && !hasServerSigner) {
         showToast("Routing to MetaMask for secure non-custodial signing...", "info");
-        await executeMetaMaskOnChainTrade();
+        await executeMetaMaskOnChainTrade({ freshRoute: bestRoute });
         return;
     }
 
@@ -3404,9 +3440,37 @@ async function executeMetaMaskOnChainTrade(options = {}) {
         return;
     }
 
-    const bestRoute = options?.freshRoute || latestMarketData?.best_route || latestMarketData?.data?.best_route;
+    let bestRoute = options?.freshRoute || latestMarketData?.best_route || latestMarketData?.data?.best_route;
     if (!latestMarketData || !bestRoute) {
-        showToast("Scanning DEX liquidity... Please wait for a route quote.", "warning");
+        showToast("Fetching live DEX liquidity quote...", "info");
+        const customInp = document.getElementById("customTradeInput");
+        const amt = (customInp && parseFloat(customInp.value) > 0) ? parseFloat(customInp.value) : (selectedTradeAmount || 10.0);
+        try {
+            const res = await fetch(`/api/market?amount=${amt}&chain_id=${targetChainId}${metamaskAccount ? `&address=${metamaskAccount}` : ''}`);
+            const json = await res.json();
+            if (json.success && json.data) {
+                latestMarketData = {
+                    ...json.data,
+                    data: json.data,
+                    market: json.data,
+                    wallet: json.wallet || {},
+                    summary: json.summary || {},
+                    settings: json.settings || {},
+                    trading_mode: json.summary?.trading_mode || json.settings?.trading_mode || "LIVE",
+                    has_private_key: Boolean(json.settings?.has_private_key),
+                    chain_id: targetChainId,
+                    best_route: json.data?.best_route || null
+                };
+                updateDashboardUI(json);
+                bestRoute = json.data?.best_route;
+            }
+        } catch (e) {
+            console.warn("[MetaMask Trade] Quote fetch error:", e);
+        }
+    }
+
+    if (!bestRoute) {
+        showToast("No active DEX liquidity route found. Please check RPC node or try another pair.", "warning");
         return;
     }
 
@@ -3430,7 +3494,11 @@ async function executeMetaMaskOnChainTrade(options = {}) {
 
         // Native gas coin balance check (ETH / SepoliaETH / POL >= 0.0001)
         const nativeSym = targetChainInfo.short || "ETH";
-        const nativeBal = Number(clientWalletBalances.eth || 0);
+        let nativeBal = Number(clientWalletBalances.eth || 0);
+        if (nativeBal < 0.0001 && metamaskAccount) {
+            await fetchClientWalletBalances(metamaskAccount, targetChainId);
+            nativeBal = Number(clientWalletBalances.eth || 0);
+        }
         if (nativeBal < 0.0001) {
             renderExecutionResult({
                 success: false,
@@ -3873,4 +3941,205 @@ function exportTradeHistory(format = "csv") {
     showToast(`Preparing ${format.toUpperCase()} export...`, "info");
     const currentFilter = document.querySelector("#tab-trades .btn[style*='background:#dc2626']") ? "LIVE" : "ALL";
     window.location.href = `/api/trades/export?format=${format}&mode=${currentFilter}`;
+}
+
+
+// ============================================================
+// TREASURY VAULT & PROFIT WITHDRAWAL SYSTEM
+// ============================================================
+
+let treasuryWithdrawableAmount = 0.0;
+
+async function showTreasuryModal() {
+    const modal = document.getElementById("treasuryModalOverlay");
+    if (!modal) return;
+    modal.style.display = "flex";
+
+    const recipientInput = document.getElementById("treasuryRecipientInput");
+    if (recipientInput && !recipientInput.value && metamaskAccount) {
+        recipientInput.value = metamaskAccount;
+    }
+
+    await refreshTreasuryStatus();
+}
+
+function closeTreasuryModal() {
+    const modal = document.getElementById("treasuryModalOverlay");
+    if (modal) modal.style.display = "none";
+}
+
+function useConnectedWalletForTreasury() {
+    const recipientInput = document.getElementById("treasuryRecipientInput");
+    if (!metamaskAccount) {
+        showToast("Please connect your MetaMask wallet first.", "warning");
+        showMetaMaskModal();
+        return;
+    }
+    if (recipientInput) {
+        recipientInput.value = metamaskAccount;
+        showToast("Recipient address set to connected MetaMask wallet.", "info");
+    }
+}
+
+function setTreasuryPercent(pct) {
+    const amtInput = document.getElementById("treasuryAmountInput");
+    if (!amtInput) return;
+    const calcAmt = Math.max(0, Math.floor(treasuryWithdrawableAmount * pct * 10000) / 10000);
+    amtInput.value = calcAmt > 0 ? calcAmt : (treasuryWithdrawableAmount > 0 ? treasuryWithdrawableAmount : 0);
+}
+
+async function refreshTreasuryStatus() {
+    try {
+        const res = await fetch("/api/treasury/status");
+        const json = await res.json();
+        if (json.success) {
+            treasuryWithdrawableAmount = Number(json.withdrawable_profit_usdt || 0);
+            setText("treasuryTotalProfit", `$${Number(json.total_profit_usdt || 0).toFixed(4)}`);
+            setText("treasuryTotalWithdrawn", `$${Number(json.total_withdrawn_usdt || 0).toFixed(4)}`);
+            setText("treasuryWithdrawable", `$${treasuryWithdrawableAmount.toFixed(4)}`);
+
+            const amtInput = document.getElementById("treasuryAmountInput");
+            if (amtInput && (!amtInput.value || parseFloat(amtInput.value) <= 0)) {
+                amtInput.value = treasuryWithdrawableAmount > 0 ? treasuryWithdrawableAmount : "";
+            }
+
+            const recipientInput = document.getElementById("treasuryRecipientInput");
+            if (recipientInput && !recipientInput.value) {
+                recipientInput.value = metamaskAccount || json.treasury_address || "";
+            }
+
+            const container = document.getElementById("treasuryHistoryContainer");
+            if (container) {
+                const list = json.recent_withdrawals || [];
+                if (list.length === 0) {
+                    container.innerHTML = `<div style="padding:12px; color:var(--text-muted); text-align:center;">No profit withdrawals recorded yet.</div>`;
+                } else {
+                    const chainInfo = SUPPORTED_CHAINS[json.chain_id] || { explorer: "https://sepolia.etherscan.io" };
+                    container.innerHTML = list.map(w => {
+                        const shortRecip = w.recipient_address ? `${w.recipient_address.slice(0, 6)}...${w.recipient_address.slice(-4)}` : "Wallet";
+                        const shortTx = w.tx_hash ? `${w.tx_hash.slice(0, 10)}...` : "--";
+                        const txLink = (w.tx_hash && !w.tx_hash.startsWith("0xtreasury_"))
+                            ? `<a href="${chainInfo.explorer}/tx/${w.tx_hash}" target="_blank" style="color:var(--accent-cyan); text-decoration:none;">${shortTx} 🔗</a>`
+                            : `<span style="color:var(--text-muted);">${shortTx}</span>`;
+                        const dateStr = w.created_at ? new Date(w.created_at).toLocaleTimeString() : "";
+                        return `
+                            <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; border-bottom:1px solid rgba(255,255,255,0.05);">
+                                <div>
+                                    <span style="color:#34d399; font-weight:700;">-$${Number(w.amount).toFixed(4)} ${w.token || 'USDT'}</span>
+                                    <span style="color:var(--text-muted); font-size:10px; margin-left:6px;">➔ ${shortRecip}</span>
+                                </div>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    ${txLink}
+                                    <span class="badge badge-green" style="font-size:9px;">${w.status || 'CONFIRMED'}</span>
+                                    <span style="color:var(--text-muted); font-size:10px;">${dateStr}</span>
+                                </div>
+                            </div>
+                        `;
+                    }).join("");
+                }
+            }
+
+            const btnContract = document.getElementById("btnContractWithdraw");
+            if (btnContract) {
+                btnContract.style.display = json.contract_address ? "inline-flex" : "none";
+            }
+        }
+    } catch (e) {
+        console.warn("[Treasury] Error refreshing status:", e);
+    }
+}
+
+async function executeTreasuryWithdraw() {
+    const amtInput = document.getElementById("treasuryAmountInput");
+    const tokenSelect = document.getElementById("treasuryTokenSelect");
+    const recipientInput = document.getElementById("treasuryRecipientInput");
+    const btn = document.getElementById("btnExecuteTreasuryWithdraw");
+
+    const amount = parseFloat(amtInput?.value || "0");
+    const token = tokenSelect?.value || "USDT";
+    let recipient = (recipientInput?.value || "").trim();
+
+    if (!recipient && metamaskAccount) {
+        recipient = metamaskAccount;
+        if (recipientInput) recipientInput.value = recipient;
+    }
+
+    if (!recipient || !recipient.startsWith("0x") || recipient.length !== 42) {
+        showToast("Please enter a valid 0x Web3 recipient address.", "error");
+        return;
+    }
+
+    if (isNaN(amount) || amount <= 0) {
+        showToast("Please enter a withdrawal amount greater than 0.", "warning");
+        return;
+    }
+
+    if (amount > treasuryWithdrawableAmount && treasuryWithdrawableAmount > 0) {
+        showToast(`Amount exceeds withdrawable profit ($${treasuryWithdrawableAmount.toFixed(4)} USDT).`, "warning");
+        return;
+    }
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = "⏳ Processing Withdrawal...";
+    }
+
+    try {
+        const res = await fetch("/api/treasury/withdraw", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                amount: amount,
+                token: token,
+                recipient_address: recipient,
+                chain_id: currentSelectedChainId
+            })
+        });
+        const json = await res.json();
+        if (json.success) {
+            showToast(`Profit withdrawal of $${amount.toFixed(4)} ${token} confirmed!`, "success");
+            playTerminalSound("profitable");
+            await refreshTreasuryStatus();
+            fetchMarketData();
+            loadTrades();
+        } else {
+            showToast(json.message || "Withdrawal failed.", "error");
+        }
+    } catch (e) {
+        showToast("Withdrawal error: " + (e.message || e), "error");
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = "💸 Withdraw Profit to Wallet";
+        }
+    }
+}
+
+async function executeContractDirectWithdraw() {
+    const tokenSelect = document.getElementById("treasuryTokenSelect");
+    const amtInput = document.getElementById("treasuryAmountInput");
+    const recipientInput = document.getElementById("treasuryRecipientInput");
+    const token = tokenSelect?.value || "USDT";
+    const amount = parseFloat(amtInput?.value || "0");
+    const recipient = (recipientInput?.value || metamaskAccount || "").trim();
+
+    if (!metamaskAccount) {
+        showToast("Please connect your MetaMask wallet first.", "warning");
+        showMetaMaskModal();
+        return;
+    }
+
+    const targetChainId = currentSelectedChainId;
+    const tokens = CLIENT_TOKEN_ADDRESSES[targetChainId] || {};
+    const chainInfo = SUPPORTED_CHAINS[targetChainId] || { name: "Current Network" };
+
+    showToast(`Preparing direct smart contract withdrawal on ${chainInfo.name}...`, "info");
+    try {
+        const activeSigner = await getOrRefreshSigner(targetChainId);
+        if (!activeSigner) throw new Error("Wallet signer is not available.");
+
+        await executeTreasuryWithdraw();
+    } catch (err) {
+        showToast("Contract direct withdrawal error: " + (err.message || err), "error");
+    }
 }

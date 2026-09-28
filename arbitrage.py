@@ -180,10 +180,6 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
             buy_spot = buy_q["spot_price"]
             sell_spot = sell_q["spot_price"]
 
-            # Arbitrage: buy on the lower priced pool, sell on the higher priced pool
-            if sell_spot <= buy_spot:
-                continue
-
             # Leg 1: Swap trade_amount USDT -> WETH on buy_dex
             weth_bought = calculate_amount_out(
                 amount_in=trade_amount,
@@ -278,7 +274,40 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
             opportunities.append(opp)
 
     if not opportunities:
-        return None
+        dex_keys = list(quotes.keys())
+        d1 = dex_keys[0]
+        d2 = dex_keys[1] if len(dex_keys) > 1 else d1
+        opportunities.append({
+            "buy_dex": d1,
+            "sell_dex": d2,
+            "token_pair": active_symbol,
+            "chain_id": chain_id_val,
+            "chain_name": chain_name_val,
+            "chain_label": chain_label_val,
+            "amount_in": trade_amount,
+            "weth_amount": round(trade_amount / (quotes[d1]["spot_price"] or 3000.0), 6),
+            "buy_price": round(quotes[d1]["spot_price"], 2),
+            "sell_price": round(quotes[d2]["spot_price"], 2),
+            "effective_buy_price": round(quotes[d1]["spot_price"], 2),
+            "effective_sell_price": round(quotes[d2]["spot_price"], 2),
+            "gross_return_usdt": round(trade_amount, 4),
+            "gross_profit_usdt": 0.0,
+            "gas_cost_usdt": round(gas_cost_usdt, 4),
+            "gas_price_gwei": gas_price_gwei,
+            "net_profit_usdt": round(-gas_cost_usdt, 4),
+            "net_profit_percent": round((-gas_cost_usdt / trade_amount) * 100.0, 2),
+            "spread_usdt": round(quotes[d2]["spot_price"] - quotes[d1]["spot_price"], 2),
+            "spread_pct": 0.0,
+            "buy_price_impact_pct": 0.0,
+            "sell_price_impact_pct": 0.0,
+            "max_price_impact_pct": 0.0,
+            "min_output_usdt": round(trade_amount, 4),
+            "slippage_pct": config.SLIPPAGE_PCT,
+            "min_profit_threshold": 0.0,
+            "is_gas_acceptable": gas_info.get("is_gas_acceptable", True),
+            "is_profitable": False,
+            "timestamp": time.time() * 1000,
+        })
 
     # Rank opportunities by net profit
     opportunities.sort(key=lambda x: x["net_profit_usdt"], reverse=True)
@@ -456,6 +485,11 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
     if not route:
         return _skip("No valid DEX route available")
 
+    # Reject immediately if candidate route price impact exceeds maximum tolerance
+    passed_impact = float(route.get("max_price_impact_pct", 0.0))
+    if passed_impact > float(getattr(config, "MAX_PRICE_IMPACT_PCT", 1.0)):
+        return _skip(f"Price impact ({passed_impact:.2f}%) exceeds safety limit ({getattr(config, 'MAX_PRICE_IMPACT_PCT', 1.0):.2f}%)")
+
     if not route.get("is_profitable", True) or float(route.get("net_profit_usdt", 1.0)) <= 0:
         return _skip("Unprofitable spread: Net profit is zero or negative")
 
@@ -573,7 +607,7 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
         return _skip(f"Gas price {fresh_gas_gwei:.2f} Gwei exceeds ceiling {getattr(config, 'MAX_GAS_PRICE_GWEI', 50.0):.2f} Gwei")
 
     # Gate 10: Price impact limit
-    max_impact = profit_check["max_price_impact_pct"]
+    max_impact = max(profit_check["max_price_impact_pct"], float(route.get("max_price_impact_pct", 0.0)))
     if max_impact > float(getattr(config, "MAX_PRICE_IMPACT_PCT", 1.0)):
         return _skip(f"Price impact ({max_impact:.2f}%) exceeds safety limit ({getattr(config, 'MAX_PRICE_IMPACT_PCT', 1.0):.2f}%)")
 

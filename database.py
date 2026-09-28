@@ -102,6 +102,22 @@ def create_database():
         )
     """)
 
+    # Treasury & Profit Withdrawals Ledger
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS treasury_withdrawals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tx_hash TEXT DEFAULT '',
+            chain_id INTEGER DEFAULT 11155111,
+            token TEXT DEFAULT 'USDT',
+            amount REAL NOT NULL,
+            recipient_address TEXT NOT NULL,
+            status TEXT DEFAULT 'CONFIRMED',
+            mode TEXT DEFAULT 'LIVE',
+            notes TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -380,3 +396,74 @@ def restore_trades_from_json_backup():
         conn.close()
     except Exception as e:
         print(f"⚠️ Restore trades backup error: {e}", flush=True)
+
+
+# ============================================================
+# TREASURY & PROFIT WITHDRAWALS
+# ============================================================
+
+def record_treasury_withdrawal(data: Dict[str, Any]) -> int:
+    """Record a profit withdrawal to user's wallet or treasury recipient."""
+    create_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO treasury_withdrawals (
+            tx_hash, chain_id, token, amount, recipient_address, status, mode, notes, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        data.get("tx_hash", ""),
+        int(data.get("chain_id", 11155111)),
+        data.get("token", "USDT"),
+        float(data.get("amount", 0.0)),
+        data.get("recipient_address", ""),
+        data.get("status", "CONFIRMED"),
+        data.get("mode", "LIVE"),
+        data.get("notes", ""),
+        data.get("created_at") or datetime.now().astimezone().isoformat()
+    ))
+    wid = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return wid
+
+
+def get_total_withdrawn(mode: Optional[str] = None, token: Optional[str] = None) -> float:
+    """Calculate total profit withdrawn to date."""
+    create_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+    query = "SELECT COALESCE(SUM(amount), 0.0) FROM treasury_withdrawals WHERE status = 'CONFIRMED'"
+    params = []
+    if mode and mode != "ALL":
+        query += " AND mode = ?"
+        params.append(mode)
+    if token:
+        query += " AND token = ?"
+        params.append(token)
+    cursor.execute(query, tuple(params))
+    total = cursor.fetchone()[0]
+    conn.close()
+    return round(float(total), 4)
+
+
+def get_treasury_withdrawals(limit: int = 50, mode: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Retrieve history of profit withdrawals."""
+    create_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+    if mode and mode != "ALL":
+        cursor.execute("SELECT * FROM treasury_withdrawals WHERE mode = ? ORDER BY id DESC LIMIT ?", (mode, limit))
+    else:
+        cursor.execute("SELECT * FROM treasury_withdrawals ORDER BY id DESC LIMIT ?", (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def get_withdrawable_profit(mode: Optional[str] = None) -> float:
+    """Calculate available realized profit ready for withdrawal."""
+    total_profit = get_total_profit(mode=mode)
+    total_withdrawn = get_total_withdrawn(mode=mode)
+    return round(max(0.0, total_profit - total_withdrawn), 4)
+

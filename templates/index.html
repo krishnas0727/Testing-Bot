@@ -74,6 +74,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="9"/></svg>
             <span>On-Chain Audit Log</span>
         </a>
+        <a href="#treasury" id="nav-treasury" class="nav-link" onclick="event.preventDefault(); showTreasuryModal()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11M20 10v11M8 14v4M12 14v4M16 14v4"/></svg>
+            <span>Treasury & Withdraw</span>
+        </a>
         <a href="/settings" id="nav-settings" class="nav-link" onclick="switchTab(event, 'settings')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             <span>Web3 & Protocol Settings</span>
@@ -134,6 +138,10 @@
             <button id="btnSoundToggle" class="sound-toggle-pill sound-active" onclick="toggleTerminalAudio()" title="Toggle Web Audio trading signals and chimes">
                 <span style="font-size:12px;">🔊</span>
                 <span id="soundToggleLabel" style="font-size:11px; font-weight:700;">Sound ON</span>
+            </button>
+            <button id="btnHeaderTreasury" class="btn" style="background:linear-gradient(135deg, rgba(16,185,129,0.2) 0%, rgba(5,150,105,0.3) 100%); border:1px solid #10b981; color:#34d399; font-weight:700; font-size:11px; padding:4px 10px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:5px; box-shadow:0 0 10px rgba(16,185,129,0.2);" onclick="showTreasuryModal()" title="Open Treasury Vault & Withdraw Realized Profit">
+                <span>🏦</span>
+                <span>Treasury</span>
             </button>
         </div>
     </header>
@@ -308,10 +316,10 @@
                 <span class="value" id="kpiBalance">$0.00</span>
                 <span class="sub" id="kpiBalanceSub">Non-Custodial Web3 Wallet</span>
             </div>
-            <div class="stat-card">
+            <div class="stat-card" style="position:relative;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                     <span class="label">Total Net Profit</span>
-                    <span style="font-size:14px; opacity:0.8;">📈</span>
+                    <button type="button" class="btn btn-primary" style="padding:2px 8px; font-size:10px; font-weight:700; background:linear-gradient(135deg, #10b981 0%, #059669 100%); border:none; color:#fff; border-radius:4px; cursor:pointer;" onclick="showTreasuryModal()" title="Open Treasury & Withdraw Profit">💸 Withdraw</button>
                 </div>
                 <span class="value text-profit" id="kpiProfit">+$0.00</span>
                 <span class="sub" id="kpiProfitSub">After Gas & Protocol Fees</span>
@@ -1315,6 +1323,87 @@
             <button class="btn btn-secondary" style="flex:1; padding:10px; font-size:13px;" onclick="closeMetaMaskModal()">
                 Dismiss
             </button>
+        </div>
+    </div>
+<!-- TREASURY & PROFIT WITHDRAWAL MODAL -->
+<div id="treasuryModalOverlay" style="display:none; position:fixed; inset:0; background:rgba(4,9,20,0.85); backdrop-filter:blur(8px); z-index:99999; align-items:center; justify-content:center;">
+    <div class="exec-dialog" style="background:#111a2b; border:1px solid #263753; border-radius:16px; width:560px; max-width:92%; padding:24px; box-sizing:border-box; margin:auto; box-shadow:0 25px 50px -12px rgba(0,0,0,0.85);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:22px;">🏦</span>
+                <div>
+                    <h3 style="margin:0; font-size:18px; color:var(--text-bright);">Treasury Vault & Profit Withdrawal</h3>
+                    <p style="margin:2px 0 0 0; color:var(--text-muted); font-size:11px;">Withdraw confirmed arbitrage profits directly to your Web3 wallet</p>
+                </div>
+            </div>
+            <button type="button" class="btn btn-secondary" style="padding:2px 8px; font-size:12px; border-radius:4px; min-width:auto;" onclick="closeTreasuryModal()">✕</button>
+        </div>
+
+        <!-- TREASURY STATS TILES -->
+        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin-bottom:16px;">
+            <div style="background:#0f172a; padding:12px; border-radius:8px; border:1px solid rgba(56,189,248,0.2);">
+                <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">Total Realized Profit</div>
+                <div id="treasuryTotalProfit" style="font-size:16px; font-weight:700; color:var(--profit-color);">$0.0000</div>
+                <div style="font-size:10px; color:var(--text-muted);">Confirmed trades</div>
+            </div>
+            <div style="background:#0f172a; padding:12px; border-radius:8px; border:1px solid rgba(56,189,248,0.2);">
+                <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">Already Withdrawn</div>
+                <div id="treasuryTotalWithdrawn" style="font-size:16px; font-weight:700; color:var(--text-bright);">$0.0000</div>
+                <div style="font-size:10px; color:var(--text-muted);">Transferred to date</div>
+            </div>
+            <div style="background:#0f172a; padding:12px; border-radius:8px; border:1px solid #10b981; box-shadow:0 0 10px rgba(16,185,129,0.2);">
+                <div style="font-size:11px; color:#34d399; font-weight:700; margin-bottom:4px;">Available to Withdraw</div>
+                <div id="treasuryWithdrawable" style="font-size:16px; font-weight:700; color:#34d399;">$0.0000</div>
+                <div style="font-size:10px; color:var(--text-muted);">Net withdrawable</div>
+            </div>
+        </div>
+
+        <!-- WITHDRAWAL INPUT FORM -->
+        <div style="background:#0b1329; border:1px solid rgba(148,163,184,0.2); border-radius:10px; padding:16px; margin-bottom:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <label style="font-size:12px; font-weight:700; color:var(--text-bright);">Recipient Web3 Address</label>
+                <button type="button" class="btn btn-secondary" style="padding:2px 8px; font-size:10px;" onclick="useConnectedWalletForTreasury()">
+                    🦊 Use Connected MetaMask
+                </button>
+            </div>
+            <input type="text" id="treasuryRecipientInput" placeholder="0x... Recipient Wallet Address" style="width:100%; box-sizing:border-box; padding:10px 12px; background:#1e293b; border:1px solid #334155; border-radius:6px; color:#fff; font-family:var(--font-mono); font-size:12px; margin-bottom:12px; outline:none;" />
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <label style="font-size:12px; font-weight:700; color:var(--text-bright);">Withdrawal Amount & Token</label>
+                <div style="display:flex; gap:6px;">
+                    <button type="button" class="btn btn-secondary" style="padding:2px 6px; font-size:10px;" onclick="setTreasuryPercent(0.25)">25%</button>
+                    <button type="button" class="btn btn-secondary" style="padding:2px 6px; font-size:10px;" onclick="setTreasuryPercent(0.50)">50%</button>
+                    <button type="button" class="btn btn-secondary" style="padding:2px 6px; font-size:10px;" onclick="setTreasuryPercent(0.75)">75%</button>
+                    <button type="button" class="btn btn-secondary" style="padding:2px 6px; font-size:10px; background:#10b981; color:#000; font-weight:700;" onclick="setTreasuryPercent(1.0)">100% MAX</button>
+                </div>
+            </div>
+
+            <div style="display:flex; gap:8px;">
+                <select id="treasuryTokenSelect" style="width:110px; padding:10px; background:#1e293b; border:1px solid #334155; border-radius:6px; color:#fff; font-weight:700; font-size:12px; outline:none;">
+                    <option value="USDT">USDT</option>
+                    <option value="USDC">USDC</option>
+                    <option value="ETH">ETH</option>
+                </select>
+                <input type="number" id="treasuryAmountInput" step="any" min="0.0001" placeholder="0.00" style="flex:1; padding:10px 12px; background:#1e293b; border:1px solid #334155; border-radius:6px; color:#fff; font-size:14px; font-weight:700; outline:none;" />
+            </div>
+        </div>
+
+        <!-- ACTION BUTTONS -->
+        <div style="display:flex; gap:10px; margin-bottom:16px;">
+            <button type="button" id="btnExecuteTreasuryWithdraw" class="btn btn-primary" style="flex:1; padding:12px; font-size:13px; font-weight:700; justify-content:center; background:linear-gradient(135deg, #10b981 0%, #059669 100%); color:#fff; border:none; box-shadow:0 0 12px rgba(16,185,129,0.35); cursor:pointer;" onclick="executeTreasuryWithdraw()">
+                💸 Withdraw Profit to Wallet
+            </button>
+            <button type="button" id="btnContractWithdraw" class="btn btn-secondary" style="padding:12px; font-size:12px; font-weight:700; justify-content:center; cursor:pointer;" onclick="executeContractDirectWithdraw()">
+                🦊 Contract Direct Withdraw
+            </button>
+        </div>
+
+        <!-- RECENT WITHDRAWALS TABLE -->
+        <div>
+            <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">Recent Withdrawal History</div>
+            <div id="treasuryHistoryContainer" style="max-height:130px; overflow-y:auto; background:#0f172a; border:1px solid #1e293b; border-radius:6px; font-family:var(--font-mono); font-size:11px;">
+                <div style="padding:12px; color:var(--text-muted); text-align:center;">No withdrawals recorded yet.</div>
+            </div>
         </div>
     </div>
 </div>

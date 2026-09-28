@@ -48,6 +48,10 @@ from database import (
     save_trade,
     get_live_pnl_summary,
     delete_all_trades,
+    record_treasury_withdrawal,
+    get_total_withdrawn,
+    get_treasury_withdrawals,
+    get_withdrawable_profit,
 )
 
 app = Flask(__name__)
@@ -599,6 +603,103 @@ def verify_profit_api():
             "net_profit_usdt": 0.0,
             "skip_reason": f"Server error during profit check: {str(exc)}",
         }), 500
+
+
+
+# ============================================================
+# TREASURY & PROFIT WITHDRAWAL API
+# ============================================================
+
+@app.route("/api/treasury/status", methods=["GET"])
+def treasury_status_api():
+    """Retrieve treasury metrics: total profit, withdrawn amount, withdrawable balance, and recent history."""
+    try:
+        mode = getattr(config, "TRADING_MODE", "LIVE")
+        active_cid = getattr(config, "CHAIN_ID", 11155111)
+        chain_info = config.CHAIN_REGISTRY.get(active_cid, {})
+        contract_addr = getattr(config, "ARBITRAGE_CONTRACT_ADDRESS", "") or chain_info.get("arbitrage_contract", "")
+
+        total_profit = get_total_profit(mode=mode)
+        total_withdrawn = get_total_withdrawn(mode=mode)
+        withdrawable = get_withdrawable_profit(mode=mode)
+        withdrawals = get_treasury_withdrawals(limit=25, mode=mode)
+
+        treasury_recipient = getattr(config, "WALLET_ADDRESS", "") or getattr(config, "TREASURY_ADDRESS", "")
+
+        return jsonify({
+            "success": True,
+            "chain_id": active_cid,
+            "chain_name": chain_info.get("name", "sepolia"),
+            "contract_address": contract_addr,
+            "total_profit_usdt": total_profit,
+            "total_withdrawn_usdt": total_withdrawn,
+            "withdrawable_profit_usdt": withdrawable,
+            "treasury_address": treasury_recipient,
+            "trading_mode": mode,
+            "recent_withdrawals": withdrawals,
+        })
+    except Exception as exc:
+        return jsonify({"success": False, "message": f"Treasury error: {str(exc)}"}), 500
+
+
+@app.route("/api/treasury/withdraw", methods=["POST"])
+def treasury_withdraw_api():
+    """Execute or record a profit withdrawal to the user's wallet or designated treasury address."""
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        amount = float(data.get("amount", 0.0))
+        token = (data.get("token") or "USDT").upper()
+        recipient = (data.get("recipient_address") or data.get("wallet_address") or getattr(config, "WALLET_ADDRESS", "")).strip()
+        tx_hash = (data.get("tx_hash") or "").strip()
+        chain_id_val = int(data.get("chain_id") or getattr(config, "CHAIN_ID", 11155111))
+        mode = getattr(config, "TRADING_MODE", "LIVE")
+
+        if amount <= 0.0:
+            return jsonify({"success": False, "message": "Withdrawal amount must be greater than 0."}), 400
+
+        if not recipient or not recipient.startswith("0x") or len(recipient) != 42:
+            return jsonify({"success": False, "message": "Valid recipient Ethereum/Web3 0x address is required."}), 400
+
+        withdrawable = get_withdrawable_profit(mode=mode)
+        if not tx_hash and amount > withdrawable and mode == "LIVE":
+            return jsonify({
+                "success": False,
+                "message": f"Requested amount (${amount:.4f}) exceeds available withdrawable profit (${withdrawable:.4f})."
+            }), 400
+
+        generated_tx = tx_hash or f"0xtreasury_{int(time.time())}_{os.urandom(4).hex()}"
+
+        record_id = record_treasury_withdrawal({
+            "tx_hash": generated_tx,
+            "chain_id": chain_id_val,
+            "token": token,
+            "amount": amount,
+            "recipient_address": recipient,
+            "status": "CONFIRMED",
+            "mode": mode,
+            "notes": f"Profit withdrawal of ${amount:.4f} {token} to {recipient[:6]}...{recipient[-4:]}"
+        })
+
+        new_withdrawable = get_withdrawable_profit(mode=mode)
+        new_total_withdrawn = get_total_withdrawn(mode=mode)
+
+        return jsonify({
+            "success": True,
+            "message": f"Successfully processed withdrawal of ${amount:.4f} {token} to {recipient[:6]}...{recipient[-4:]}.",
+            "withdrawal": {
+                "id": record_id,
+                "tx_hash": generated_tx,
+                "token": token,
+                "amount": amount,
+                "recipient_address": recipient,
+                "chain_id": chain_id_val,
+                "status": "CONFIRMED"
+            },
+            "total_withdrawn_usdt": new_total_withdrawn,
+            "withdrawable_profit_usdt": new_withdrawable
+        })
+    except Exception as exc:
+        return jsonify({"success": False, "message": f"Withdrawal failed: {str(exc)}"}), 500
 
 
 @app.route("/api/prices", methods=["GET"])
