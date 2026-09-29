@@ -52,6 +52,8 @@ from database import (
     get_total_withdrawn,
     get_treasury_withdrawals,
     get_withdrawable_profit,
+    get_treasury_buckets_summary,
+    get_treasury_allocations,
 )
 
 app = Flask(__name__)
@@ -396,12 +398,17 @@ def market_api():
         is_emergency = emergency_stop_active()
         mode = getattr(config, "TRADING_MODE", "LIVE")
 
+        pnl_stats = get_live_pnl_summary(mode=mode if mode == "LIVE" else None)
         if not is_wallet_connected or total_balance <= 0.0 or is_emergency:
             display_profit = 0.0
             display_trades = 0
+            display_roi = 0.0
+            display_win_rate = 0.0
         else:
-            display_profit = get_total_profit(mode=mode)
-            display_trades = get_total_trades(mode=mode)
+            display_profit = float(pnl_stats.get("total_net_profit", 0.0))
+            display_trades = int(pnl_stats.get("total_trades", 0))
+            display_roi = float(pnl_stats.get("roi", 0.0))
+            display_win_rate = float(pnl_stats.get("win_rate", 0.0))
 
         latest_trade = get_latest_trade(mode=mode if mode == "LIVE" else None)
 
@@ -441,6 +448,11 @@ def market_api():
                 "balance": total_balance,
                 "total_profit": display_profit,
                 "total_trades": display_trades,
+                "roi": display_roi,
+                "win_rate": display_win_rate,
+                "total_gas_spent": float(pnl_stats.get("total_gas_spent", 0.0)),
+                "avg_profit": float(pnl_stats.get("avg_profit_per_trade", 0.0)),
+                "treasury_buckets": pnl_stats.get("treasury_buckets", {}),
                 "is_wallet_connected": is_wallet_connected,
                 "emergency_stop": is_emergency,
                 "trading_mode": mode,
@@ -623,6 +635,8 @@ def treasury_status_api():
         total_withdrawn = get_total_withdrawn(mode=mode)
         withdrawable = get_withdrawable_profit(mode=mode)
         withdrawals = get_treasury_withdrawals(limit=25, mode=mode)
+        buckets = get_treasury_buckets_summary()
+        allocations = get_treasury_allocations(limit=15)
 
         treasury_recipient = getattr(config, "WALLET_ADDRESS", "") or getattr(config, "TREASURY_ADDRESS", "")
 
@@ -637,6 +651,8 @@ def treasury_status_api():
             "treasury_address": treasury_recipient,
             "trading_mode": mode,
             "recent_withdrawals": withdrawals,
+            "buckets": buckets,
+            "recent_allocations": allocations,
         })
     except Exception as exc:
         return jsonify({"success": False, "message": f"Treasury error: {str(exc)}"}), 500
@@ -826,6 +842,16 @@ def manual_trade_api():
                 status=audit_status,
                 reason=clean_reason
             )
+        elif result.get("status") == "LIVE_SIGNER_REQUIRED":
+            last_execution_status = "ROUTED_TO_METAMASK: Forwarded for client wallet signature"
+            record_execution_event(
+                event_type="SIGNER_FORWARD",
+                route=route_name,
+                amount_in=amt,
+                net_profit=np,
+                status="METAMASK",
+                reason="Forwarded to connected MetaMask wallet for non-custodial signature"
+            )
         else:
             msg = result.get("message", "Execution error")
             last_execution_status = f"TRADE FAILED: {msg}"
@@ -838,7 +864,7 @@ def manual_trade_api():
                 reason=msg
             )
 
-        status_code = 200 if result.get("success") else 400
+        status_code = 200 if (result.get("success") or result.get("status") == "LIVE_SIGNER_REQUIRED") else 400
         return jsonify(result), status_code
     except Exception as exc:
         return jsonify({"success": False, "message": f"Trade execution error: {str(exc)}"}), 500

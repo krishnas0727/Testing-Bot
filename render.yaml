@@ -1,22 +1,43 @@
 services:
+  # ───────────────────────────────────────────────────────────────────────────
+  # PRODUCTION WEB SERVICE (REST API & DASHBOARD SPA)
+  # ───────────────────────────────────────────────────────────────────────────
   - type: web
-    name: dex-arbitrage-bot
-    runtime: python
-    plan: free
-    region: frankfurt
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 app:app
+    name: dex-arbitrage-api
+    env: node
+    plan: standard
+    region: oregon
+    branch: main
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/src/api/server.js
     healthCheckPath: /api/health
+    autoDeploy: false # Prevent accidental automatic deployments enabling live trading
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.9
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: HOST
+        value: 0.0.0.0
       - key: TRADING_MODE
-        value: MOCK
-      - key: DEFAULT_CHAIN
-        value: base
-      - key: CHAIN_ID
-        value: 8453
+        value: MOCK # Must start in safe MOCK mode
       - key: AUTO_TRADE_ENABLED
+        value: "false"
+      - key: LIVE_TRADING_ARMED
         value: "false"
       - key: EMERGENCY_STOP
         value: "false"
+      - key: CHAIN_ID
+        value: "8453"
+      - key: DEFAULT_CHAIN
+        value: base
+      - key: BASE_RPC_URL
+        sync: false # Set securely in Render dashboard
+      - key: ARBITRAGE_CONTRACT_ADDRESS
+        sync: false
+      - key: TREASURY_CONTRACT_ADDRESS
+        sync: false
+      - key: WALLET_ADDRESS
+        sync: false
+      - key: PRIVATE_KEY
+        sync: false # Injected as secret environment variable

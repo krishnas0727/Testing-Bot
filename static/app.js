@@ -1055,6 +1055,16 @@ function updateDashboardUI(payload) {
     setText("kpiProfit", `${totalProf >= 0 ? "+" : ""}$${totalProf.toFixed(4)}`);
     setText("kpiTrades", totalTrades);
 
+    const winRate = Number(summary.win_rate != null ? summary.win_rate : 100);
+    const roiVal = Number(summary.roi || 0);
+    const gasSpent = Number(summary.total_gas_spent || 0);
+    const treasAlloc = Number(summary.treasury_buckets?.total_allocated || (totalProf > 0 ? totalProf : 0));
+
+    setText("kpiWinRate", `${winRate.toFixed(1)}%`);
+    setText("kpiRoi", `${roiVal >= 0 ? "+" : ""}${roiVal.toFixed(2)}%`);
+    setText("kpiGasSpent", `$${gasSpent.toFixed(4)}`);
+    setText("kpiTreasuryAllocated", `$${treasAlloc.toFixed(4)}`);
+
     let engineStatusText = payload.execution_status || "SCANNING POOLS";
     let statusTitle = engineStatusText;
     let statusSubtitle = "Scanning Liquidity Pools";
@@ -1552,7 +1562,20 @@ async function executeCurrentTrade() {
     // Strict pre-check: Never submit if latest net profit is not strictly positive (> 0)
     if (bestRoute && Number(bestRoute.net_profit_usdt || 0) <= 0) {
         const netLoss = Math.abs(Number(bestRoute.net_profit_usdt || 0));
-        showToast(`Cannot execute trade: Expected net profit is -$${netLoss.toFixed(4)} USDT after gas and slippage. Must be > 0.`, "warning");
+        const activeCid = currentSelectedChainId || 8453;
+        const isTestnet = (activeCid === 11155111 || activeCid === 84532);
+        const advice = isTestnet
+            ? "On Sepolia testnet, DEX pools have small test liquidity. Reduce Trade Amount to $0.50 or $1.00 to avoid high slippage, or switch to MOCK mode for instant risk-free testing."
+            : "Current market spread does not cover DEX fees and gas. Waiting for a profitable opportunity.";
+
+        showExecModal("Execution Guard: Capital Protected", "Verifying profitability against on-chain pool depth...");
+        renderExecutionResult({
+            success: false,
+            status: "TRADE SKIPPED",
+            message: `Trade aborted before transaction submission: Expected net profit is -$${netLoss.toFixed(4)} USDT after gas and slippage. Capital was protected from loss.`,
+            skip_reason: `Negative Net Profit (-$${netLoss.toFixed(4)} USDT). ${advice}`
+        });
+        showToast(`Cannot execute trade: Expected net profit is -$${netLoss.toFixed(4)} USDT. Must be > 0.`, "warning");
         return;
     }
 
@@ -2127,7 +2150,7 @@ async function loadTrades() {
                 : (currentTradeFilter === "SIMULATION"
                     ? "No simulation trades recorded. Click '🔬 Simulate' to test execution."
                     : "No trade history recorded yet.");
-            tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:var(--text-muted); padding:30px;">${emptyMsg}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:var(--text-muted); padding:30px;">${emptyMsg}</td></tr>`;
             return;
         }
 
@@ -2142,6 +2165,10 @@ async function loadTrades() {
             const netProf = Number(t.net_profit || 0);
             const profSign = netProf >= 0 ? "+" : "";
 
+            const amtIn = Number(t.amount_in || t.initial_capital || 0);
+            const roiVal = t.roi != null ? Number(t.roi) : (amtIn > 0 ? (netProf / amtIn * 100) : 0);
+            const roiSign = roiVal >= 0 ? "+" : "";
+
             return `
                 <tr>
                     <td style="font-family:var(--font-mono); font-size:11px;">${hashLink}</td>
@@ -2152,6 +2179,7 @@ async function loadTrades() {
                     <td style="font-family:var(--font-mono); color:var(--profit-color);">+${Number(t.gross_profit || 0).toFixed(4)}</td>
                     <td style="font-family:var(--font-mono); color:var(--text-muted);">$${Number(t.gas_cost_usdt || 0).toFixed(4)}</td>
                     <td style="font-family:var(--font-mono); font-weight:700; color:${netProf >= 0 ? "var(--profit-color)" : "var(--loss-color)"};">${profSign}$${netProf.toFixed(4)}</td>
+                    <td style="font-family:var(--font-mono); font-weight:700; color:${roiVal >= 0 ? "var(--profit-color)" : "var(--loss-color)"};">${roiSign}${roiVal.toFixed(2)}%</td>
                     <td><span class="badge ${t.status === "CONFIRMED" ? "badge-green" : (t.status === "UNPROFITABLE" ? "badge-red" : "badge-yellow")}">${t.status}</span></td>
                     <td style="font-size:11px; color:var(--text-muted);">${(t.created_at || "").slice(0, 19)}</td>
                 </tr>
@@ -2221,9 +2249,24 @@ async function clearTradeHistory() {
 // TOAST NOTIFICATIONS
 // ============================================================
 
+const _recentToastCache = new Map();
+
 function showToast(message, type = "info") {
     const container = document.getElementById("toastContainer");
     if (!container) return;
+
+    // Deduplicate identical toasts within a 3.5s window
+    const now = Date.now();
+    const lastSeen = _recentToastCache.get(message) || 0;
+    if (now - lastSeen < 3500) {
+        return;
+    }
+    _recentToastCache.set(message, now);
+
+    // Limit maximum stacked toasts to 3
+    while (container.children.length >= 3) {
+        container.removeChild(container.firstChild);
+    }
 
     const icons = {
         success: "✅",
@@ -2268,7 +2311,9 @@ function showToast(message, type = "info") {
     setTimeout(() => {
         toast.style.opacity = "0";
         toast.style.transform = "translateY(-8px)";
-        setTimeout(() => toast.remove(), 300);
+        setTimeout(() => {
+            if (toast.parentNode) toast.remove();
+        }, 300);
     }, 4500);
 }
 
@@ -3956,21 +4001,32 @@ let treasuryWithdrawableAmount = 0.0;
 
 async function showTreasuryModal() {
     const modal = document.getElementById("treasuryModalOverlay");
-    if (!modal) return;
+    if (!modal) {
+        console.error("[Treasury] treasuryModalOverlay element not found in DOM");
+        return;
+    }
     modal.style.display = "flex";
+    modal.style.zIndex = "999999";
 
     const recipientInput = document.getElementById("treasuryRecipientInput");
     if (recipientInput && !recipientInput.value && metamaskAccount) {
         recipientInput.value = metamaskAccount;
     }
 
-    await refreshTreasuryStatus();
+    try {
+        await refreshTreasuryStatus();
+    } catch (err) {
+        console.warn("[Treasury] Error refreshing status on open:", err);
+    }
 }
 
 function closeTreasuryModal() {
     const modal = document.getElementById("treasuryModalOverlay");
     if (modal) modal.style.display = "none";
 }
+
+window.showTreasuryModal = showTreasuryModal;
+window.closeTreasuryModal = closeTreasuryModal;
 
 function useConnectedWalletForTreasury() {
     const recipientInput = document.getElementById("treasuryRecipientInput");
@@ -4001,6 +4057,22 @@ async function refreshTreasuryStatus() {
             setText("treasuryTotalProfit", `$${Number(json.total_profit_usdt || 0).toFixed(4)}`);
             setText("treasuryTotalWithdrawn", `$${Number(json.total_withdrawn_usdt || 0).toFixed(4)}`);
             setText("treasuryWithdrawable", `$${treasuryWithdrawableAmount.toFixed(4)}`);
+
+            if (json.buckets) {
+                setText("treasuryTradingCapital", `$${Number(json.buckets.trading_capital || 0).toFixed(4)}`);
+                setText("treasuryReserve", `$${Number(json.buckets.reserve || 0).toFixed(4)}`);
+                setText("treasuryRevenue", `$${Number(json.buckets.revenue || 0).toFixed(4)}`);
+                const totAlloc = Number(json.buckets.total_allocated || 0);
+                const badge = document.getElementById("treasuryTotalAllocatedBadge");
+                if (badge) {
+                    badge.innerText = `Allocated: $${totAlloc.toFixed(4)}`;
+                }
+            } else {
+                const totProf = Number(json.total_profit_usdt || 0);
+                setText("treasuryTradingCapital", `$${(totProf * 0.6).toFixed(4)}`);
+                setText("treasuryReserve", `$${(totProf * 0.2).toFixed(4)}`);
+                setText("treasuryRevenue", `$${(totProf * 0.2).toFixed(4)}`);
+            }
 
             const amtInput = document.getElementById("treasuryAmountInput");
             if (amtInput && (!amtInput.value || parseFloat(amtInput.value) <= 0)) {

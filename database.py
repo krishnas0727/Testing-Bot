@@ -118,6 +118,36 @@ def create_database():
         )
     """)
 
+    # Module 9: Treasury Revenue Allocations Ledger (60% Capital / 20% Reserve / 20% Revenue)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS treasury_allocations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_id INTEGER,
+            tx_hash TEXT DEFAULT '',
+            chain_id INTEGER DEFAULT 11155111,
+            token TEXT DEFAULT 'USDT',
+            gross_profit REAL DEFAULT 0.0,
+            net_profit REAL DEFAULT 0.0,
+            trading_capital REAL DEFAULT 0.0,
+            reserve REAL DEFAULT 0.0,
+            revenue REAL DEFAULT 0.0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Schema migration: Add ROI, initial_capital, and dex_fees to trades table if not present
+    try:
+        cursor.execute("PRAGMA table_info(trades)")
+        cols = [r["name"] for r in cursor.fetchall()]
+        if "roi" not in cols:
+            cursor.execute("ALTER TABLE trades ADD COLUMN roi REAL DEFAULT 0.0")
+        if "initial_capital" not in cols:
+            cursor.execute("ALTER TABLE trades ADD COLUMN initial_capital REAL DEFAULT 0.0")
+        if "dex_fees" not in cols:
+            cursor.execute("ALTER TABLE trades ADD COLUMN dex_fees REAL DEFAULT 0.0")
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -171,36 +201,63 @@ def save_trade(trade_data: Dict[str, Any]) -> int:
     conn = get_connection()
     cursor = conn.cursor()
 
+    amount_in = float(trade_data.get("amount_in", 0.0))
+    net_profit = float(trade_data.get("net_profit", trade_data.get("profit", 0.0)))
+    roi = round((net_profit / amount_in * 100.0), 2) if amount_in > 0 else 0.0
+    dex_fees = float(trade_data.get("dex_fees", amount_in * 0.006))
+    initial_cap = float(trade_data.get("initial_capital", amount_in))
+    tx_hash = trade_data.get("tx_hash", "")
+    mode = trade_data.get("mode", "MOCK")
+    chain_id = int(trade_data.get("chain_id", 1))
+
     cursor.execute("""
         INSERT INTO trades (
             tx_hash, chain_id, buy_dex, sell_dex, token_pair,
             amount_in, amount_out, gross_profit, net_profit,
             gas_used, gas_price_gwei, gas_cost_usdt, price_impact, slippage,
-            status, mode, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            status, mode, created_at, roi, initial_capital, dex_fees
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        trade_data.get("tx_hash", ""),
-        int(trade_data.get("chain_id", 1)),
+        tx_hash,
+        chain_id,
         trade_data.get("buy_dex") or trade_data.get("buy", "Uniswap_V2"),
         trade_data.get("sell_dex") or trade_data.get("sell", "SushiSwap_V2"),
         trade_data.get("token_pair") or trade_data.get("symbol", "WETH/USDT"),
-        float(trade_data.get("amount_in", 0.0)),
+        amount_in,
         float(trade_data.get("amount_out", 0.0)),
         float(trade_data.get("gross_profit", 0.0)),
-        float(trade_data.get("net_profit", trade_data.get("profit", 0.0))),
+        net_profit,
         int(trade_data.get("gas_used", 0)),
         float(trade_data.get("gas_price_gwei", 0.0)),
         float(trade_data.get("gas_cost_usdt", trade_data.get("fees", 0.0))),
         float(trade_data.get("price_impact", 0.0)),
         float(trade_data.get("slippage", 0.0)),
         trade_data.get("status", "CONFIRMED"),
-        trade_data.get("mode", "MOCK"),
-        trade_data.get("created_at") or datetime.now().astimezone().isoformat()
+        mode,
+        trade_data.get("created_at") or datetime.now().astimezone().isoformat(),
+        roi,
+        initial_cap,
+        dex_fees
     ))
 
     trade_id = cursor.lastrowid
     conn.commit()
     conn.close()
+
+    # Module 9: Automatically record revenue allocation if trade confirmed with net profit > 0
+    if trade_data.get("status") == "CONFIRMED" and net_profit > 0:
+        token_sym = "USDT" if "USDT" in str(trade_data.get("token_pair", "")) else "USDC"
+        record_treasury_allocation({
+            "trade_id": trade_id,
+            "tx_hash": tx_hash,
+            "chain_id": chain_id,
+            "token": token_sym,
+            "gross_profit": float(trade_data.get("gross_profit", 0.0)),
+            "net_profit": net_profit,
+            "trading_capital": round(net_profit * 0.60, 4),
+            "reserve": round(net_profit * 0.20, 4),
+            "revenue": round(net_profit * 0.20, 4)
+        })
 
     sync_trades_to_json_backup()
     return trade_id
@@ -314,7 +371,9 @@ def get_live_pnl_summary(mode: Optional[str] = None) -> Dict[str, Any]:
             COALESCE(SUM(gross_profit), 0.0) as total_gross_profit,
             COALESCE(SUM(gas_cost_usdt), 0.0) as total_gas_spent,
             COALESCE(AVG(net_profit), 0.0) as avg_profit_per_trade,
-            COALESCE(MAX(net_profit), 0.0) as max_profit_trade
+            COALESCE(MAX(net_profit), 0.0) as max_profit_trade,
+            COALESCE(SUM(CASE WHEN amount_in > 0 THEN amount_in ELSE initial_capital END), 0.0) as total_capital,
+            COALESCE(SUM(CASE WHEN net_profit > 0 THEN 1 ELSE 0 END), 0) as winning_trades
         FROM trades
         {where_clause}
     """, params)
@@ -325,11 +384,23 @@ def get_live_pnl_summary(mode: Optional[str] = None) -> Dict[str, Any]:
     recent = [dict(r) for r in cursor.fetchall()]
     conn.close()
 
+    total_tr = int(row.get("total_trades", 0))
+    win_tr = int(row.get("winning_trades", 0))
+    tot_net = float(row.get("total_net_profit", 0.0))
+    tot_cap = float(row.get("total_capital", 0.0))
+
+    win_rate = round((win_tr / total_tr * 100.0), 2) if total_tr > 0 else 0.0
+    roi = round((tot_net / tot_cap * 100.0), 2) if tot_cap > 0 else 0.0
+
     row["recent_trades"] = recent
-    row["total_net_profit"] = round(row["total_net_profit"], 4)
-    row["total_gross_profit"] = round(row["total_gross_profit"], 4)
-    row["total_gas_spent"] = round(row["total_gas_spent"], 4)
-    row["avg_profit_per_trade"] = round(row["avg_profit_per_trade"], 4)
+    row["total_net_profit"] = round(tot_net, 4)
+    row["total_gross_profit"] = round(float(row.get("total_gross_profit", 0.0)), 4)
+    row["total_gas_spent"] = round(float(row.get("total_gas_spent", 0.0)), 4)
+    row["avg_profit_per_trade"] = round(float(row.get("avg_profit_per_trade", 0.0)), 4)
+    row["win_rate"] = win_rate
+    row["roi"] = roi
+    row["winning_trades"] = win_tr
+    row["treasury_buckets"] = get_treasury_buckets_summary()
     return row
 
 
@@ -466,4 +537,71 @@ def get_withdrawable_profit(mode: Optional[str] = None) -> float:
     total_profit = get_total_profit(mode=mode)
     total_withdrawn = get_total_withdrawn(mode=mode)
     return round(max(0.0, total_profit - total_withdrawn), 4)
+
+
+def record_treasury_allocation(data: Dict[str, Any]) -> int:
+    """Record a multi-bucket revenue distribution event (Module 9)."""
+    create_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO treasury_allocations (
+            trade_id, tx_hash, chain_id, token, gross_profit, net_profit,
+            trading_capital, reserve, revenue, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        data.get("trade_id", 0),
+        data.get("tx_hash", ""),
+        int(data.get("chain_id", 11155111)),
+        data.get("token", "USDT"),
+        float(data.get("gross_profit", 0.0)),
+        float(data.get("net_profit", 0.0)),
+        float(data.get("trading_capital", 0.0)),
+        float(data.get("reserve", 0.0)),
+        float(data.get("revenue", 0.0)),
+        data.get("created_at") or datetime.now().astimezone().isoformat()
+    ))
+    alloc_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return alloc_id
+
+
+def get_treasury_allocations(limit: int = 50) -> List[Dict[str, Any]]:
+    """Retrieve history of revenue distributions across capital, reserve, and revenue."""
+    create_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM treasury_allocations ORDER BY id DESC LIMIT ?", (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def get_treasury_buckets_summary(token: Optional[str] = None) -> Dict[str, Any]:
+    """Retrieve cumulative breakdown across Trading Capital (60%), Reserve (20%), and Revenue (20%)."""
+    create_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+    query = """
+        SELECT
+            COALESCE(SUM(trading_capital), 0.0) as total_trading_capital,
+            COALESCE(SUM(reserve), 0.0) as total_reserve,
+            COALESCE(SUM(revenue), 0.0) as total_revenue,
+            COALESCE(SUM(net_profit), 0.0) as total_allocated
+        FROM treasury_allocations
+    """
+    params = []
+    if token:
+        query += " WHERE token = ?"
+        params.append(token)
+    cursor.execute(query, tuple(params))
+    row = dict(cursor.fetchone())
+    conn.close()
+    return {
+        "trading_capital": round(float(row["total_trading_capital"]), 4),
+        "reserve": round(float(row["total_reserve"]), 4),
+        "revenue": round(float(row["total_revenue"]), 4),
+        "total_allocated": round(float(row["total_allocated"]), 4),
+    }
 

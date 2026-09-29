@@ -35,8 +35,14 @@ class OnChainDEXStream:
             now = time.time()
             out = {}
             for name, item in self._data.items():
-                x = dict(item)
-                x["age_ms"] = max(0.0, (now - x.get("received_at", now)) * 1000.0)
+                age_ms = max(0.0, (now - x.get("received_at", now)) * 1000.0)
+                x["age_ms"] = round(age_ms, 1)
+                if age_ms <= 6000:
+                    x["freshness"] = "FRESH"
+                elif age_ms <= 30000:
+                    x["freshness"] = "STALE"
+                else:
+                    x["freshness"] = "EXPIRED"
                 out[name] = x
             return out
 
@@ -50,23 +56,31 @@ class OnChainDEXStream:
 
                 for dex_name in config.SUPPORTED_DEXES:
                     res = get_dex_reserves(dex_name, base_sym, quote_sym)
-                    base_res = res["base_reserve"]
-                    quote_res = res["quote_reserve"]
-                    spot = res["spot_price"]
+                    base_res = float(res.get("base_reserve", 0.0))
+                    quote_res = float(res.get("quote_reserve", 0.0))
+                    spot = float(res.get("spot_price", 0.0))
 
-                    weth_for_100_usdt = calculate_amount_out(100.0, quote_res, base_res, config.DEX_PROTOCOL_FEE_PCT)
+                    weth_for_100_usdt = calculate_amount_out(100.0, quote_res, base_res, config.DEX_PROTOCOL_FEE_PCT) if (quote_res > 0 and base_res > 0) else 0.0
                     ask = 100.0 / weth_for_100_usdt if weth_for_100_usdt > 0 else spot
-                    bid = calculate_amount_out(1.0, base_res, quote_res, config.DEX_PROTOCOL_FEE_PCT)
+                    bid = calculate_amount_out(1.0, base_res, quote_res, config.DEX_PROTOCOL_FEE_PCT) if (quote_res > 0 and base_res > 0) else 0.0
+
+                    is_valid = bool(base_res > 0 and quote_res > 0 and spot > 0)
+                    liquidity_usd = round(quote_res * 2.0, 2)
 
                     with self._lock:
                         self._data[dex_name] = {
                             "dex": dex_name,
+                            "pair": f"{base_sym}/{quote_sym}",
                             "bid": round(bid, 2),
                             "ask": round(ask, 2),
                             "last": round(spot, 2),
                             "spot_price": round(spot, 2),
                             "base_reserve": base_res,
                             "quote_reserve": quote_res,
+                            "liquidity_usd": liquidity_usd,
+                            "fee_bps": 30,
+                            "fee_pct": 0.003,
+                            "is_valid": is_valid,
                             "received_at": time.time(),
                             "source": res.get("source", "on-chain-rpc"),
                         }

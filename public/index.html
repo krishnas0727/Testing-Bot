@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DEX Arbitrage & Treasury Terminal</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">⚡</div>
+        <div class="brand-text">
+          <h1>ANTIGRAVITY</h1>
+          <span>Arbitrage & Treasury</span>
+        </div>
+      </div>
+
+      <nav class="nav-menu">
+        <button class="nav-item active" data-page="OVERVIEW">
+          <span class="icon">📊</span> Overview
+        </button>
+        <button class="nav-item" data-page="OPPORTUNITIES">
+          <span class="icon">🎯</span> Opportunities
+          <span class="badge" id="opp-count-badge">0</span>
+        </button>
+        <button class="nav-item" data-page="TRADES">
+          <span class="icon">📜</span> Trades
+        </button>
+        <button class="nav-item" data-page="TREASURY">
+          <span class="icon">🏛️</span> Treasury
+        </button>
+        <button class="nav-item" data-page="HEALTH">
+          <span class="icon">💓</span> System Health
+        </button>
+        <button class="nav-item" data-page="ALERTS">
+          <span class="icon">🔔</span> Alerts
+          <span class="badge alert-badge" id="alert-count-badge" style="display:none;">0</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="network-badge">
+          <span class="dot online"></span>
+          <span id="active-network">Base L2 (8453)</span>
+        </div>
+        <div class="mode-tag" id="trading-mode-tag">MOCK MODE</div>
+        <div class="execution-mode-pill" id="sidebar-exec-mode" style="margin-top: 6px; font-size: 11px; padding: 4px 8px; border-radius: 4px; background: rgba(59, 130, 246, 0.2); color: #60a5fa; font-weight: bold; text-align: center;">
+          USER-SIGNED (DEFAULT)
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="main-container">
+      <!-- TOP NAVBAR -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <div class="bot-status-pill" id="bot-status-indicator">
+            <span class="pulse-dot"></span>
+            <span id="bot-status-text">INITIALIZING...</span>
+          </div>
+          <span class="uptime-text" id="bot-uptime">Uptime: 0s</span>
+        </div>
+
+        <div class="topbar-right">
+          <!-- Live Polling Toggle -->
+          <div class="polling-control">
+            <label class="switch">
+              <input type="checkbox" id="live-refresh-toggle" checked>
+              <span class="slider round"></span>
+            </label>
+            <span class="poll-label">Live Sync (5s)</span>
+          </div>
+
+          <button class="btn btn-secondary btn-sm" id="btn-manual-refresh">
+            🔄 Refresh
+          </button>
+
+          <!-- Role Selector -->
+          <div class="role-selector-container">
+            <span class="role-label">Role:</span>
+            <select id="user-role-select" class="role-select">
+              <option value="VIEWER">VIEWER (Read-Only)</option>
+              <option value="OPERATOR">OPERATOR (Bot Controls)</option>
+              <option value="ADMIN">ADMIN (Full Access)</option>
+            </select>
+          </div>
+
+          <!-- MetaMask Wallet Integration (Phase 17) -->
+          <div class="wallet-control-group">
+            <button class="btn btn-secondary btn-sm" id="btn-connect-wallet">
+              🦊 Connect MetaMask
+            </button>
+            <div id="wallet-connected-pill" class="wallet-badge" style="display:none;">
+              <span class="dot online"></span>
+              <span id="wallet-addr-text">0x...</span>
+              <span id="wallet-bal-text" class="balance-tag">0.00 ETH</span>
+            </div>
+          </div>
+
+          <!-- Emergency Stop -->
+          <button class="btn btn-danger btn-sm" id="btn-emergency-stop">
+            🛑 Emergency Stop
+          </button>
+        </div>
+      </header>
+
+      <!-- ALERT BANNER CONTAINER -->
+      <div id="global-alert-container"></div>
+
+      <!-- PAGES CONTAINER -->
+      <section class="content-body">
+        <!-- 1. OVERVIEW PAGE -->
+        <div id="page-OVERVIEW" class="page-view active">
+          <div class="page-header">
+            <h2>Executive Dashboard & Performance Overview</h2>
+            <div class="period-switcher">
+              <button class="period-btn active" data-period="all">All Time</button>
+              <button class="period-btn" data-period="30d">30 Days</button>
+              <button class="period-btn" data-period="7d">7 Days</button>
+              <button class="period-btn" data-period="24h">24h</button>
+            </div>
+          </div>
+
+          <!-- EXECUTION MODES SEPARATION PANEL (PHASE 24) -->
+          <div class="card" style="margin-bottom: 1.5rem; padding: 1.25rem; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(255, 255, 255, 0.08);">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap: 1rem;">
+              <div>
+                <div style="display:flex; align-items:center; gap: 8px;">
+                  <span style="font-size: 1.1rem; font-weight: 600;">Execution Mode:</span>
+                  <span class="badge" id="exec-mode-display-badge" style="background:#2563eb; color:#fff; font-size:12px; padding:4px 10px;">USER-SIGNED (DEFAULT)</span>
+                  <span class="badge" id="exec-status-display-badge" style="background:rgba(59, 130, 246, 0.2); color:#60a5fa; font-size:12px; padding:4px 10px;">Waiting for Wallet Confirmation</span>
+                </div>
+                <p id="exec-mode-description" class="text-muted" style="margin-top: 4px; font-size: 13px;">
+                  Non-Custodial Mode: The user manually approves every trade through their connected MetaMask wallet. The backend never accesses or stores your private key.
+                </p>
+              </div>
+              <div style="display:flex; gap: 8px; align-items:center;">
+                <button class="btn btn-secondary btn-sm" id="btn-toggle-exec-mode">Switch to Automated Mode</button>
+                <button class="btn btn-secondary btn-sm" id="btn-pause-automated" style="display:none;">Pause Automated</button>
+                <button class="btn btn-danger btn-sm" id="btn-stop-automated" style="display:none;">Stop Automated</button>
+              </div>
+            </div>
+            <!-- Automated Sub-Telemetry (Hidden by default in User-Signed mode) -->
+            <div id="automated-telemetry-strip" style="display:none; margin-top: 12px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.1); font-size: 12px; color: #94a3b8;">
+              <span id="auto-executor-addr">Executor: 0x1111...1111</span> |
+              <span id="auto-limits-info">Limits: Min Net $0.20 | Max Size $100.0 | Max Gas 5.0 Gwei</span> |
+              <span id="auto-stats-info">Success: 0 / Fail: 0</span>
+            </div>
+          </div>
+
+          <!-- KPI METRIC CARDS -->
+          <div class="kpi-grid">
+            <div class="card kpi-card highlight">
+              <div class="kpi-title">Realized Net Profit</div>
+              <div class="kpi-value" id="kpi-net-profit">$0.00</div>
+              <div class="kpi-sub" id="kpi-roi">Average ROI: 0.00%</div>
+            </div>
+            <div class="card kpi-card">
+              <div class="kpi-title">Gross Trading Profit</div>
+              <div class="kpi-value" id="kpi-gross-profit">$0.00</div>
+              <div class="kpi-sub text-muted">Confirmed Arbitrage Returns</div>
+            </div>
+            <div class="card kpi-card">
+              <div class="kpi-title">Total Gas Expenditure</div>
+              <div class="kpi-value text-warning" id="kpi-gas-cost">$0.00</div>
+              <div class="kpi-sub text-muted">On-Chain Execution Fees</div>
+            </div>
+            <div class="card kpi-card">
+              <div class="kpi-title">Execution Win Rate</div>
+              <div class="kpi-value" id="kpi-win-rate">0.0%</div>
+              <div class="kpi-sub" id="kpi-trades-count">0 Successful / 0 Total</div>
+            </div>
+          </div>
+
+          <!-- CAPITAL & TREASURY OVERVIEW -->
+          <div class="section-title">
+            <h3>Treasury & Capital Deployment</h3>
+            <span class="badge" id="treasury-status-badge">Multi-Bucket Sync Active</span>
+          </div>
+
+          <div class="capital-grid">
+            <div class="card capital-card">
+              <div class="cap-header">
+                <span>Total Treasury Vault</span>
+                <span class="icon">🏛️</span>
+              </div>
+              <div class="cap-value" id="cap-total-treasury">$0.00</div>
+              <div class="progress-bar-container">
+                <div class="progress-bar-fill" style="width: 100%"></div>
+              </div>
+              <div class="cap-footer">Multi-Asset Reserve</div>
+            </div>
+            <div class="card capital-card">
+              <div class="cap-header">
+                <span>Trading Capital (60%)</span>
+                <span class="icon">💼</span>
+              </div>
+              <div class="cap-value" id="cap-trading-capital">$0.00</div>
+              <div class="progress-bar-container">
+                <div class="progress-bar-fill tc-fill" style="width: 60%"></div>
+              </div>
+              <div class="cap-footer">Active Liquidity Pool</div>
+            </div>
+            <div class="card capital-card">
+              <div class="cap-header">
+                <span>Reserve Fund (20%)</span>
+                <span class="icon">🛡️</span>
+              </div>
+              <div class="cap-value" id="cap-reserve">$0.00</div>
+              <div class="progress-bar-container">
+                <div class="progress-bar-fill rf-fill" style="width: 20%"></div>
+              </div>
+              <div class="cap-footer">Security & Risk Buffer</div>
+            </div>
+            <div class="card capital-card">
+              <div class="cap-header">
+                <span>Protocol Revenue (20%)</span>
+                <span class="icon">💎</span>
+              </div>
+              <div class="cap-value" id="cap-revenue">$0.00</div>
+              <div class="progress-bar-container">
+                <div class="progress-bar-fill pr-fill" style="width: 20%"></div>
+              </div>
+              <div class="cap-footer">Locked for Governance</div>
+            </div>
+          </div>
+
+          <!-- CHARTS SECTION -->
+          <div class="charts-grid">
+            <div class="card chart-card">
+              <h4>Realized Net Profit Trend ($)</h4>
+              <div class="chart-canvas-container" id="chart-net-profit"></div>
+            </div>
+            <div class="card chart-card">
+              <h4>Trading Volume vs Gas Cost ($)</h4>
+              <div class="chart-canvas-container" id="chart-volume-gas"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. OPPORTUNITIES PAGE -->
+        <div id="page-OPPORTUNITIES" class="page-view">
+          <div class="page-header">
+            <div>
+              <h2>Market Arbitrage Opportunities</h2>
+              <p class="subtitle">Scanned in real-time across Uniswap V2 and SushiSwap V2 AMM pools</p>
+            </div>
+            <div class="filter-group">
+              <input type="number" id="filter-min-profit" placeholder="Min Net Profit ($)" class="input-sm" step="0.1">
+              <select id="filter-opp-status" class="input-sm">
+                <option value="">All Statuses</option>
+                <option value="ACTIVE" selected>ACTIVE Only</option>
+                <option value="EXPIRED">EXPIRED</option>
+                <option value="EXECUTED">EXECUTED</option>
+              </select>
+              <button class="btn btn-primary btn-sm" id="btn-apply-opp-filter">Filter</button>
+            </div>
+          </div>
+
+          <div class="card table-card">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Token Pair</th>
+                  <th>Route Leg 1 (Buy)</th>
+                  <th>Route Leg 2 (Sell)</th>
+                  <th>Trade Size</th>
+                  <th>Est. Gross</th>
+                  <th>Est. Net Profit</th>
+                  <th>Est. ROI</th>
+                  <th>Gas Est.</th>
+                  <th>Risk Status</th>
+                  <th>Age</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="opportunities-tbody">
+                <tr><td colspan="11" class="loading-cell">Loading live opportunities...</td></tr>
+              </tbody>
+            </table>
+            <div class="pagination-footer" id="opp-pagination"></div>
+          </div>
+        </div>
+
+        <!-- 3. TRADES PAGE -->
+        <div id="page-TRADES" class="page-view">
+          <div class="page-header">
+            <div>
+              <h2>Confirmed Trade History</h2>
+              <p class="subtitle">Execution ledger with explicit distinction between Estimated and Realized profits</p>
+            </div>
+            <div class="filter-group">
+              <select id="filter-trade-status" class="input-sm">
+                <option value="">All Statuses</option>
+                <option value="CONFIRMED" selected>CONFIRMED</option>
+                <option value="REVERTED">REVERTED</option>
+              </select>
+              <input type="text" id="filter-trade-token" placeholder="Filter Token (USDC/USDT)" class="input-sm">
+              <button class="btn btn-primary btn-sm" id="btn-apply-trade-filter">Filter</button>
+            </div>
+          </div>
+
+          <div class="card table-card">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Token Pair</th>
+                  <th>Route</th>
+                  <th>Trade Size</th>
+                  <th>Gross Profit</th>
+                  <th>Realized Net Profit</th>
+                  <th>Gas Cost</th>
+                  <th>ROI</th>
+                  <th>Status</th>
+                  <th>Tx Hash / Explorer</th>
+                  <th>Block #</th>
+                </tr>
+              </thead>
+              <tbody id="trades-tbody">
+                <tr><td colspan="11" class="loading-cell">Loading trade ledger...</td></tr>
+              </tbody>
+            </table>
+            <div class="pagination-footer" id="trades-pagination"></div>
+          </div>
+        </div>
+
+        <!-- 4. TREASURY PAGE -->
+        <div id="page-TREASURY" class="page-view">
+          <div class="page-header">
+            <div>
+              <h2>Multi-Bucket Treasury & Revenue Distribution</h2>
+              <p class="subtitle">Enterprise capital segregation and realized profit allocation ledger</p>
+            </div>
+            <div class="policy-pill" id="treasury-policy-badge">
+              Active Policy: 60% TC | 20% Reserve | 20% Revenue
+            </div>
+          </div>
+
+          <!-- PROFIT ACCOUNTING & USER BALANCE BREAKDOWN (PHASE: REALIZED PROFIT -> TREASURY -> WITHDRAWAL) -->
+          <div class="kpi-grid" style="margin-bottom: 1.5rem;">
+            <div class="card kpi-card">
+              <div class="kpi-title" style="color: #60a5fa;">📈 ESTIMATED PROFIT</div>
+              <div class="kpi-value" id="kpi-treasury-estimated-profit">$0.00</div>
+              <div class="kpi-sub text-muted">Projected Arbitrage Return</div>
+            </div>
+            <div class="card kpi-card highlight">
+              <div class="kpi-title" style="color: #34d399;">💰 REALIZED PROFIT</div>
+              <div class="kpi-value" id="kpi-treasury-realized-profit">$0.00</div>
+              <div class="kpi-sub" style="color: #34d399;">Confirmed Mined Trades</div>
+            </div>
+            <div class="card kpi-card">
+              <div class="kpi-title" style="color: #fbbf24;">⏳ PENDING PROFIT</div>
+              <div class="kpi-value" id="kpi-treasury-pending-profit">$0.00</div>
+              <div class="kpi-sub text-muted">Awaiting Final Settlement</div>
+            </div>
+            <div class="card kpi-card highlight">
+              <div class="kpi-title" style="color: #38bdf8;">🏦 WITHDRAWABLE PROFIT</div>
+              <div class="kpi-value" id="kpi-treasury-withdrawable-profit">$0.00</div>
+              <div class="kpi-sub" style="color: #38bdf8;">Available in Treasury</div>
+            </div>
+          </div>
+
+          <!-- NON-CUSTODIAL USER WITHDRAWAL INTERFACE -->
+          <div class="card" style="margin-bottom: 2rem; padding: 1.5rem; background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(56, 189, 248, 0.25);">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap: 1rem; margin-bottom: 1rem; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 0.75rem;">
+              <div>
+                <h3 style="display:flex; align-items:center; gap: 8px; font-size: 1.15rem;">
+                  <span>🦊</span> Non-Custodial User Withdrawal
+                  <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 11px;">MetaMask User-Signed</span>
+                </h3>
+                <p class="text-muted" style="font-size: 12px; margin-top: 4px;">
+                  Withdraw realized profits directly to your connected wallet. Transactions are executed non-custodially via on-chain smart contract checks.
+                </p>
+              </div>
+              <div style="font-size: 12px; color: #94a3b8; display:flex; align-items:center; gap: 6px;">
+                <span>Connected Wallet:</span>
+                <code id="withdraw-connected-wallet" style="color:#38bdf8; background:rgba(255,255,255,0.06); padding:3px 8px; border-radius:4px;">Not Connected</code>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; align-items: end;">
+              <div>
+                <label style="display:block; font-size: 12px; color: #94a3b8; margin-bottom: 6px;">Token Asset</label>
+                <select id="withdraw-token-select" class="input-sm" style="width: 100%; height: 38px; background: #1e293b; border: 1px solid rgba(255,255,255,0.15); color: #fff; border-radius: 6px; padding: 0 10px;">
+                  <option value="USDC" selected>USDC (USD Coin)</option>
+                  <option value="USDT">USDT (Tether USD)</option>
+                  <option value="DAI">DAI (Dai Stablecoin)</option>
+                  <option value="WETH">WETH (Wrapped Ether)</option>
+                </select>
+              </div>
+
+              <div>
+                <div style="display:flex; justify-content:space-between; font-size: 12px; color: #94a3b8; margin-bottom: 6px;">
+                  <span>Withdrawal Amount</span>
+                  <span>Available: <strong id="withdraw-available-amount" style="color: #38bdf8;">$0.00</strong></span>
+                </div>
+                <div style="display: flex; gap: 6px;">
+                  <input type="number" id="withdraw-amount-input" placeholder="0.00" min="0" step="any" class="input-sm" style="flex:1; height: 38px; background: #1e293b; border: 1px solid rgba(255,255,255,0.15); color: #fff; border-radius: 6px; padding: 0 10px;">
+                  <button class="btn btn-secondary btn-sm" id="btn-withdraw-max" style="height: 38px; padding: 0 14px;">MAX</button>
+                </div>
+              </div>
+
+              <div>
+                <button class="btn btn-primary" id="btn-submit-withdrawal" style="width: 100%; height: 38px; font-weight: 600; display:flex; align-items:center; justify-content:center; gap: 6px;">
+                  <span>⚡</span> Withdraw to Wallet
+                </button>
+              </div>
+            </div>
+
+            <!-- WITHDRAWAL STATUS BANNER -->
+            <div id="withdrawal-status-box" style="display:none; margin-top: 1rem; padding: 10px 14px; border-radius: 8px; font-size: 12px; border: 1px solid rgba(255,255,255,0.1);">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span id="withdrawal-status-message">Status: Ready</span>
+                <span id="withdrawal-tx-link-container"></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="treasury-buckets-grid">
+            <div class="card bucket-detail-card">
+              <div class="bucket-header">
+                <h4>💼 Trading Capital</h4>
+                <span class="bucket-pct">60%</span>
+              </div>
+              <div class="bucket-amount" id="bucket-trading-cap">$0.00</div>
+              <p>Dedicated funds for automated flash execution</p>
+            </div>
+            <div class="card bucket-detail-card">
+              <div class="bucket-header">
+                <h4>⛽ Gas Reserve</h4>
+                <span class="bucket-pct">15%</span>
+              </div>
+              <div class="bucket-amount" id="bucket-gas-res">$0.00</div>
+              <p>Reimburses transaction execution costs</p>
+            </div>
+            <div class="card bucket-detail-card">
+              <div class="bucket-header">
+                <h4>🛡️ Profit & Risk Reserve</h4>
+                <span class="bucket-pct">15%</span>
+              </div>
+              <div class="bucket-amount" id="bucket-profit-res">$0.00</div>
+              <p>Capital preservation buffer against slippage</p>
+            </div>
+            <div class="card bucket-detail-card">
+              <div class="bucket-header">
+                <h4>🚨 Emergency Reserve</h4>
+                <span class="bucket-pct">10%</span>
+              </div>
+              <div class="bucket-amount" id="bucket-emergency-res">$0.00</div>
+              <p>Admin recovery vault for circuit breaker events</p>
+            </div>
+            <div class="card bucket-detail-card highlight-revenue">
+              <div class="bucket-header">
+                <h4>💎 Protocol Revenue</h4>
+                <span class="bucket-pct">20%</span>
+              </div>
+              <div class="bucket-amount" id="bucket-revenue-res">$0.00</div>
+              <p>Accumulated protocol earnings (Bot withdrawal blocked)</p>
+            </div>
+          </div>
+
+          <div class="section-title" style="margin-top: 2rem;">
+            <h3>Realized Profit Revenue Allocations</h3>
+          </div>
+
+          <div class="card table-card">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Trade Ref</th>
+                  <th>Token</th>
+                  <th>Net Profit</th>
+                  <th>Trading Allocation (60%)</th>
+                  <th>Reserve Allocation (20%)</th>
+                  <th>Revenue Allocation (20%)</th>
+                  <th>Allocated At</th>
+                  <th>Tx Hash</th>
+                </tr>
+              </thead>
+              <tbody id="revenue-tbody">
+                <tr><td colspan="8" class="loading-cell">Loading revenue allocations...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 5. SYSTEM HEALTH PAGE -->
+        <div id="page-HEALTH" class="page-view">
+          <div class="page-header">
+            <div>
+              <h2>System Health & Diagnostics Matrix</h2>
+              <p class="subtitle">Real-time status across Blockchain RPC, AMM Routers, Database, and Circuit Breakers</p>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="btn-ping-health">Ping Probes</button>
+          </div>
+
+          <div class="health-grid">
+            <div class="card health-card" id="health-card-bot">
+              <div class="health-header">
+                <span class="health-icon">🤖</span>
+                <span class="health-title">Arbitrage Engine</span>
+              </div>
+              <div class="health-status-badge status-good" id="badge-engine">OPERATIONAL</div>
+              <div class="health-detail" id="detail-engine">Auto-trading: Enabled</div>
+            </div>
+
+            <div class="card health-card" id="health-card-rpc">
+              <div class="health-header">
+                <span class="health-icon">⛓️</span>
+                <span class="health-title">Base RPC Provider</span>
+              </div>
+              <div class="health-status-badge status-good" id="badge-rpc">CONNECTED</div>
+              <div class="health-detail" id="detail-rpc">Latency: 42ms</div>
+            </div>
+
+            <div class="card health-card" id="health-card-dex">
+              <div class="health-header">
+                <span class="health-icon">🔄</span>
+                <span class="health-title">DEX Connectivity</span>
+              </div>
+              <div class="health-status-badge status-good" id="badge-dex">ACTIVE (2/2)</div>
+              <div class="health-detail">Uniswap V2 & SushiSwap V2</div>
+            </div>
+
+            <div class="card health-card" id="health-card-db">
+              <div class="health-header">
+                <span class="health-icon">💾</span>
+                <span class="health-title">Database Storage</span>
+              </div>
+              <div class="health-status-badge status-good" id="badge-db">CONNECTED</div>
+              <div class="health-detail">In-Memory Index Operational</div>
+            </div>
+
+            <div class="card health-card" id="health-card-breaker">
+              <div class="health-header">
+                <span class="health-icon">⚡</span>
+                <span class="health-title">Circuit Breaker</span>
+              </div>
+              <div class="health-status-badge status-good" id="badge-breaker">CLOSED (NORMAL)</div>
+              <div class="health-detail">Consecutive Failures: 0</div>
+            </div>
+
+            <div class="card health-card" id="health-card-contracts">
+              <div class="health-header">
+                <span class="health-icon">📜</span>
+                <span class="health-title">Smart Contracts</span>
+              </div>
+              <div class="health-status-badge status-good" id="badge-contracts">UNPAUSED</div>
+              <div class="health-detail">Treasury & ArbitrageExecutor</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 6. ALERTS PAGE -->
+        <div id="page-ALERTS" class="page-view">
+          <div class="page-header">
+            <div>
+              <h2>Operational System Alerts</h2>
+              <p class="subtitle">Critical warnings, gas spikes, circuit breaker trips, and RPC connectivity notices</p>
+            </div>
+            <div class="filter-group">
+              <select id="filter-alert-severity" class="input-sm">
+                <option value="">All Severities</option>
+                <option value="CRITICAL">CRITICAL</option>
+                <option value="WARNING">WARNING</option>
+                <option value="INFO">INFO</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="card alerts-container" id="alerts-list">
+            <div class="loading-cell">Loading system alerts...</div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- EMERGENCY STOP MODAL -->
+  <div class="modal-overlay" id="emergency-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>⚠️ CONFIRM EMERGENCY STOP</h3>
+      </div>
+      <div class="modal-body">
+        <p>Are you sure you want to trigger the <strong>EMERGENCY STOP</strong>?</p>
+        <p class="text-danger">This will immediately trip the circuit breaker and halt all automated trading routes across the network.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btn-cancel-emergency">Cancel</button>
+        <button class="btn btn-danger" id="btn-confirm-emergency">Trigger Emergency Stop</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- USER-SIGNED TRADE CONFIRMATION MODAL (PHASE 5-16 COMPLETE PRODUCTION ARCHITECTURE) -->
+  <div class="modal-overlay" id="user-signed-modal" style="display:none;">
+    <div class="modal-card" style="max-width: 540px; width: 95%;">
+      <div class="modal-header">
+        <h3 style="display:flex; align-items:center; gap: 8px;">
+          <span>🦊</span> Confirm Non-Custodial Arbitrage Trade
+        </h3>
+      </div>
+      <div class="modal-body">
+        <p class="subtitle" style="margin-bottom: 12px; font-size: 13px;">
+          Non-custodial pre-flight checks verified. Backend never holds your private keys. Review the verified on-chain metrics before signing.
+        </p>
+
+        <!-- PRE-FLIGHT VERIFICATION BADGES (PHASE 7, 9, 12, 15) -->
+        <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px;">
+          <span class="badge" id="modal-badge-liquidity" style="background: rgba(16,185,129,0.2); color: #34d399; font-size: 11px;">LIQUIDITY: PASS</span>
+          <span class="badge" id="modal-badge-depth" style="background: rgba(16,185,129,0.2); color: #34d399; font-size: 11px;">LIQUIDITY DEPTH: PASS</span>
+          <span class="badge" id="modal-badge-impact" style="background: rgba(16,185,129,0.2); color: #34d399; font-size: 11px;">PRICE IMPACT: PASS</span>
+          <span class="badge" id="modal-badge-simulation" style="background: rgba(59,130,246,0.2); color: #60a5fa; font-size: 11px;">SIMULATION: PASSED</span>
+        </div>
+
+        <div style="background: rgba(15, 23, 42, 0.7); padding: 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 12px;">
+          <div style="display:flex; justify-content:space-between; margin-bottom: 6px; font-size: 13px;">
+            <span style="color:#94a3b8;">Token Pair:</span>
+            <strong id="modal-trade-pair">USDC / WETH</strong>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-bottom: 6px; font-size: 13px;">
+            <span style="color:#94a3b8;">Input Amount:</span>
+            <strong id="modal-trade-amount">$0.00</strong>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-bottom: 6px; font-size: 13px;">
+            <span style="color:#94a3b8;">DEX Route:</span>
+            <span id="modal-trade-route" style="color: #c084fc; font-weight: 500;">Uniswap V2 → SushiSwap V2</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-bottom: 6px; font-size: 13px;">
+            <span style="color:#94a3b8;">Expected Output:</span>
+            <span id="modal-expected-output" style="color: #e2e8f0;">$0.00</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-bottom: 6px; font-size: 13px;">
+            <span style="color:#94a3b8;">Minimum Received (Slippage Protected):</span>
+            <strong id="modal-min-output" style="color: #facc15;">$0.00</strong>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-bottom: 6px; font-size: 13px;">
+            <span style="color:#94a3b8;">Price Impact:</span>
+            <span id="modal-price-impact" style="color:#e2e8f0;">0.08% (Max: 1.00%)</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-bottom: 6px; font-size: 13px;">
+            <span style="color:#94a3b8;">Slippage Tolerance:</span>
+            <span id="modal-slippage">0.5%</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-bottom: 6px; font-size: 13px;">
+            <span style="color:#94a3b8;">DEX Swap Fees:</span>
+            <span id="modal-dex-fee" style="color:#94a3b8;">$0.02</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-bottom: 6px; font-size: 13px;">
+            <span style="color:#94a3b8;">Gas Cost Estimate:</span>
+            <span id="modal-gas-cost" style="color:#e2e8f0;">$0.25</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-bottom: 6px; font-size: 13px;">
+            <span style="color:#94a3b8;">Transaction Deadline:</span>
+            <span id="modal-deadline" style="color:#94a3b8;">3 mins (~180s)</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-top: 8px; padding-top: 8px; border-top: 1px dashed rgba(255,255,255,0.15);">
+            <span style="color:#4ade80; font-weight:bold;">Expected Net Realized Profit:</span>
+            <strong id="modal-net-profit" style="color:#4ade80; font-size:15px;">+$0.00</strong>
+          </div>
+        </div>
+
+        <div style="background: rgba(30, 41, 59, 0.5); padding: 8px 12px; border-radius: 6px; margin-bottom: 8px; text-align: center;">
+          <span style="font-size: 12px; color: #94a3b8;">Current State: </span>
+          <strong id="modal-signing-status" style="font-size: 12px; color: #60a5fa;">
+            WAITING FOR WALLET
+          </strong>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btn-cancel-user-trade">Cancel</button>
+        <button class="btn btn-primary" id="btn-confirm-user-trade">Confirm & Sign in MetaMask</button>
+      </div>
+    </div>
+  </div>
+
+
+  <script src="/app.js"></script>
+</body>
+</html>

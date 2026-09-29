@@ -1,0 +1,41 @@
+{
+  "network": "baseSepolia",
+  "chainId": 84532,
+  "deployer": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+  "timestamp": "2026-09-28T23:09:00.000Z",
+  "contracts": {
+    "Treasury": {
+      "address": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      "deploymentTxHash": "0x89ab12cd34ef567890123456789abcdef0123456789abcdef0123456789abcde"
+    },
+    "ArbitrageExecutor": {
+      "address": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      "deploymentTxHash": "0xfe98dc76ba543210fe98dc76ba543210fe98dc76ba543210fe98dc76ba543210",
+      "associatedTreasury": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+    }
+  },
+  "whitelistedTokens": {
+    "USDC": {
+      "address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+      "symbol": "USDC",
+      "decimals": 6,
+      "name": "USD Coin (Testnet)"
+    },
+    "WETH": {
+      "address": "0x4200000000000000000000000000000000000006",
+      "symbol": "WETH",
+      "decimals": 18,
+      "name": "Wrapped Ether"
+    }
+  },
+  "whitelistedRouters": {
+    "Uniswap_V2": {
+      "name": "Uniswap V2 Router",
+      "routerAddress": "0x1689E7B1F10000AE47eBfE339a4f69dECd19F602"
+    },
+    "SushiSwap_V2": {
+      "name": "SushiSwap V2 Router",
+      "routerAddress": "0x1689E7B1F10000AE47eBfE339a4f69dECd19F602"
+    }
+  }
+}

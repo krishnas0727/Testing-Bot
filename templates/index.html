@@ -342,6 +342,38 @@
             </div>
         </div>
 
+        <!-- MODULE 12: SECONDARY PERFORMANCE KPIS & TREASURY ALLOCATION BAR -->
+        <div class="kpi-secondary-strip" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-bottom:20px;">
+            <div style="background:#0f172a; border:1px solid #1e293b; border-radius:10px; padding:12px 14px; display:flex; align-items:center; justify-content:space-between;">
+                <div>
+                    <div style="font-size:11px; color:var(--text-muted); font-weight:600; text-transform:uppercase;">Win Rate</div>
+                    <div id="kpiWinRate" style="font-size:16px; font-weight:800; color:var(--profit-color); font-family:var(--font-mono);">100.0%</div>
+                </div>
+                <span style="font-size:18px;">🎯</span>
+            </div>
+            <div style="background:#0f172a; border:1px solid #1e293b; border-radius:10px; padding:12px 14px; display:flex; align-items:center; justify-content:space-between;">
+                <div>
+                    <div style="font-size:11px; color:var(--text-muted); font-weight:600; text-transform:uppercase;">Net ROI</div>
+                    <div id="kpiRoi" style="font-size:16px; font-weight:800; color:#38bdf8; font-family:var(--font-mono);">+0.00%</div>
+                </div>
+                <span style="font-size:18px;">📈</span>
+            </div>
+            <div style="background:#0f172a; border:1px solid #1e293b; border-radius:10px; padding:12px 14px; display:flex; align-items:center; justify-content:space-between;">
+                <div>
+                    <div style="font-size:11px; color:var(--text-muted); font-weight:600; text-transform:uppercase;">Gas Spent</div>
+                    <div id="kpiGasSpent" style="font-size:16px; font-weight:800; color:#f59e0b; font-family:var(--font-mono);">$0.0000</div>
+                </div>
+                <span style="font-size:18px;">⛽</span>
+            </div>
+            <div style="background:#0f172a; border:1px solid #1e293b; border-radius:10px; padding:12px 14px; display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="showTreasuryModal()" title="View Treasury Vault">
+                <div>
+                    <div style="font-size:11px; color:var(--text-muted); font-weight:600; text-transform:uppercase;">Treasury Reserve</div>
+                    <div id="kpiTreasuryAllocated" style="font-size:16px; font-weight:800; color:#34d399; font-family:var(--font-mono);">$0.0000</div>
+                </div>
+                <span style="font-size:18px;">🏦</span>
+            </div>
+        </div>
+
         <!-- WALLET BALANCES PANEL -->
         <div class="panel">
             <div class="panel-header">
@@ -946,12 +978,13 @@
                             <th>Gross Profit</th>
                             <th>Gas Spent</th>
                             <th>Net Profit</th>
+                            <th>ROI %</th>
                             <th>Status</th>
                             <th>Time</th>
                         </tr>
                     </thead>
                     <tbody id="tradesTableBody">
-                        <tr><td colspan="10" style="text-align:center; color:var(--text-muted); padding:30px;">No trades recorded yet.</td></tr>
+                        <tr><td colspan="11" style="text-align:center; color:var(--text-muted); padding:30px;">No trades recorded yet.</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -1325,8 +1358,10 @@
             </button>
         </div>
     </div>
+</div>
+
 <!-- TREASURY & PROFIT WITHDRAWAL MODAL -->
-<div id="treasuryModalOverlay" style="display:none; position:fixed; inset:0; background:rgba(4,9,20,0.85); backdrop-filter:blur(8px); z-index:99999; align-items:center; justify-content:center;">
+<div id="treasuryModalOverlay" style="display:none; position:fixed; inset:0; background:rgba(4,9,20,0.85); backdrop-filter:blur(8px); z-index:99999; align-items:center; justify-content:center;" onclick="if(event.target === this) closeTreasuryModal()">
     <div class="exec-dialog" style="background:#111a2b; border:1px solid #263753; border-radius:16px; width:560px; max-width:92%; padding:24px; box-sizing:border-box; margin:auto; box-shadow:0 25px 50px -12px rgba(0,0,0,0.85);">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
             <div style="display:flex; align-items:center; gap:8px;">
@@ -1355,6 +1390,39 @@
                 <div style="font-size:11px; color:#34d399; font-weight:700; margin-bottom:4px;">Available to Withdraw</div>
                 <div id="treasuryWithdrawable" style="font-size:16px; font-weight:700; color:#34d399;">$0.0000</div>
                 <div style="font-size:10px; color:var(--text-muted);">Net withdrawable</div>
+            </div>
+        </div>
+
+        <!-- MULTI-BUCKET REVENUE ALLOCATION BREAKDOWN (MODULE 8 & 9) -->
+        <div style="background:#090d16; border:1px solid #1e293b; border-radius:10px; padding:14px; margin-bottom:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <span style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Automated Treasury Allocation (60 / 20 / 20)</span>
+                <span id="treasuryTotalAllocatedBadge" style="font-size:10px; font-family:var(--font-mono); color:#38bdf8; background:rgba(56,189,248,0.1); padding:2px 6px; border-radius:4px;">Compounding Engine</span>
+            </div>
+            
+            <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-bottom:10px;">
+                <div style="background:#0f172a; padding:10px; border-radius:6px; border-left:3px solid #3b82f6;">
+                    <div style="font-size:10px; color:var(--text-muted);">Trading Capital (60%)</div>
+                    <div id="treasuryTradingCapital" style="font-size:14px; font-weight:700; color:#60a5fa; font-family:var(--font-mono);">$0.0000</div>
+                    <div style="font-size:9px; color:var(--text-muted);">Auto-compounding</div>
+                </div>
+                <div style="background:#0f172a; padding:10px; border-radius:6px; border-left:3px solid #f59e0b;">
+                    <div style="font-size:10px; color:var(--text-muted);">Reserve / Gas Pool (20%)</div>
+                    <div id="treasuryReserve" style="font-size:14px; font-weight:700; color:#fbbf24; font-family:var(--font-mono);">$0.0000</div>
+                    <div style="font-size:9px; color:var(--text-muted);">Downside buffer</div>
+                </div>
+                <div style="background:#0f172a; padding:10px; border-radius:6px; border-left:3px solid #10b981;">
+                    <div style="font-size:10px; color:var(--text-muted);">Revenue / Staking (20%)</div>
+                    <div id="treasuryRevenue" style="font-size:14px; font-weight:700; color:#34d399; font-family:var(--font-mono);">$0.0000</div>
+                    <div style="font-size:9px; color:var(--text-muted);">Founder & Yield</div>
+                </div>
+            </div>
+
+            <!-- Proportional allocation bar -->
+            <div style="height:6px; background:#1e293b; border-radius:3px; overflow:hidden; display:flex;">
+                <div style="width:60%; background:#3b82f6;" title="Trading Capital 60%"></div>
+                <div style="width:20%; background:#f59e0b;" title="Reserve 20%"></div>
+                <div style="width:20%; background:#10b981;" title="Revenue 20%"></div>
             </div>
         </div>
 
@@ -1408,6 +1476,6 @@
     </div>
 </div>
 
-<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script src="{{ url_for('static', filename='app.js') }}?v=2.4"></script>
 </body>
 </html>

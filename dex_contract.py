@@ -336,3 +336,166 @@ def decode_address(hex_data: str) -> str:
     if len(clean) < 40:
         return "0x0000000000000000000000000000000000000000"
     return "0x" + clean[-40:]
+
+
+# ============================================================
+# MODULE 7: ARBITRAGE EXECUTOR CONTRACT ABI
+# ============================================================
+ARBITRAGE_EXECUTOR_ABI = [
+    {
+        "inputs": [
+            {"internalType": "address", "name": "_admin", "type": "address"},
+            {"internalType": "address", "name": "_treasury", "type": "address"}
+        ],
+        "stateMutability": "nonpayable",
+        "type": "constructor"
+    },
+    {
+        "inputs": [
+            {
+                "components": [
+                    {"internalType": "address", "name": "routerBuy", "type": "address"},
+                    {"internalType": "address", "name": "routerSell", "type": "address"},
+                    {"internalType": "address", "name": "tokenIn", "type": "address"},
+                    {"internalType": "address", "name": "tokenOut", "type": "address"},
+                    {"internalType": "uint256", "name": "amountIn", "type": "uint256"},
+                    {"internalType": "uint256", "name": "minProfit", "type": "uint256"},
+                    {"internalType": "uint256", "name": "deadline", "type": "uint256"}
+                ],
+                "internalType": "struct ArbitrageExecutor.ArbitrageParams",
+                "name": "params",
+                "type": "tuple"
+            }
+        ],
+        "name": "executeArbitrage",
+        "outputs": [{"internalType": "uint256", "name": "netProfit", "type": "uint256"}],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "components": [
+                    {"internalType": "address", "name": "routerBuy", "type": "address"},
+                    {"internalType": "address", "name": "routerSell", "type": "address"},
+                    {"internalType": "address", "name": "tokenIn", "type": "address"},
+                    {"internalType": "address", "name": "tokenOut", "type": "address"},
+                    {"internalType": "uint256", "name": "amountIn", "type": "uint256"},
+                    {"internalType": "uint256", "name": "minProfit", "type": "uint256"},
+                    {"internalType": "uint256", "name": "deadline", "type": "uint256"}
+                ],
+                "internalType": "struct ArbitrageExecutor.ArbitrageParams",
+                "name": "params",
+                "type": "tuple"
+            }
+        ],
+        "name": "simulateArbitrage",
+        "outputs": [
+            {"internalType": "bool", "name": "profitable", "type": "bool"},
+            {"internalType": "uint256", "name": "expectedProfit", "type": "uint256"},
+            {"internalType": "uint256", "name": "leg1Output", "type": "uint256"},
+            {"internalType": "uint256", "name": "leg2Output", "type": "uint256"}
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {"inputs": [], "name": "admin", "outputs": [{"internalType": "address", "name": "", "type": "address"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "treasury", "outputs": [{"internalType": "address", "name": "", "type": "address"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "paused", "outputs": [{"internalType": "bool", "name": "", "type": "bool"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "togglePause", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
+    {"inputs": [{"internalType": "address", "name": "router", "type": "address"}, {"internalType": "bool", "name": "status", "type": "bool"}], "name": "setRouterWhitelist", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
+    {"inputs": [{"internalType": "address", "name": "token", "type": "address"}, {"internalType": "bool", "name": "status", "type": "bool"}], "name": "setTokenWhitelist", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
+    {"inputs": [{"internalType": "address", "name": "executor", "type": "address"}, {"internalType": "bool", "name": "status", "type": "bool"}], "name": "setExecutor", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
+    {"inputs": [{"internalType": "address", "name": "_newTreasury", "type": "address"}], "name": "setTreasury", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
+    {"inputs": [{"internalType": "address", "name": "router", "type": "address"}], "name": "routerWhitelist", "outputs": [{"internalType": "bool", "name": "", "type": "bool"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [{"internalType": "address", "name": "token", "type": "address"}], "name": "tokenWhitelist", "outputs": [{"internalType": "bool", "name": "", "type": "bool"}], "stateMutability": "view", "type": "function"}
+]
+
+# ============================================================
+# MODULE 8: TREASURY SMART CONTRACT ABI
+# ============================================================
+TREASURY_ABI = [
+    {
+        "inputs": [{"internalType": "address", "name": "_admin", "type": "address"}],
+        "stateMutability": "nonpayable",
+        "type": "constructor"
+    },
+    {
+        "inputs": [
+            {"internalType": "address", "name": "token", "type": "address"},
+            {"internalType": "uint256", "name": "amount", "type": "uint256"}
+        ],
+        "name": "depositProfit",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {"internalType": "address", "name": "token", "type": "address"},
+            {"internalType": "uint256", "name": "amount", "type": "uint256"},
+            {"internalType": "address", "name": "recipient", "type": "address"},
+            {"internalType": "uint8", "name": "bucket", "type": "uint8"}
+        ],
+        "name": "withdraw",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {"internalType": "address", "name": "token", "type": "address"},
+            {"internalType": "uint256", "name": "amount", "type": "uint256"},
+            {"internalType": "address", "name": "recipient", "type": "address"}
+        ],
+        "name": "emergencyWithdraw",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [{"internalType": "address payable", "name": "recipient", "type": "address"}],
+        "name": "emergencyWithdrawETH",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {"internalType": "uint256", "name": "_tradingCapitalBps", "type": "uint256"},
+            {"internalType": "uint256", "name": "_reserveBps", "type": "uint256"},
+            {"internalType": "uint256", "name": "_revenueBps", "type": "uint256"}
+        ],
+        "name": "setAllocationBps",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [{"internalType": "address", "name": "_executor", "type": "address"}],
+        "name": "setArbitrageExecutor",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [{"internalType": "address", "name": "token", "type": "address"}],
+        "name": "getBucketBalances",
+        "outputs": [
+            {"internalType": "uint256", "name": "tradingCapital", "type": "uint256"},
+            {"internalType": "uint256", "name": "gasReserve", "type": "uint256"},
+            {"internalType": "uint256", "name": "profitReserve", "type": "uint256"},
+            {"internalType": "uint256", "name": "emergencyReserve", "type": "uint256"},
+            {"internalType": "uint256", "name": "totalRealizedProfit", "type": "uint256"},
+            {"internalType": "uint256", "name": "totalWithdrawn", "type": "uint256"}
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {"inputs": [], "name": "admin", "outputs": [{"internalType": "address", "name": "", "type": "address"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "arbitrageExecutor", "outputs": [{"internalType": "address", "name": "", "type": "address"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "tradingCapitalBps", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "reserveBps", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "revenueBps", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [], "name": "paused", "outputs": [{"internalType": "bool", "name": "", "type": "bool"}], "stateMutability": "view", "type": "function"}
+]

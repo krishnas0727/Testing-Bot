@@ -232,11 +232,15 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
             # If Net Profit <= 0, do not execute.
             # Never bypass gas, liquidity, slippage, approval, and smart-contract safety checks.
             min_profit_threshold = 0.0
+            limit_impact = float(getattr(config, "MAX_PRICE_IMPACT_PCT", 1.0))
+            if config.is_chain_testnet(chain_id_val) or mode == "MOCK":
+                limit_impact = max(limit_impact, 3.0)
+
             is_profitable = (
                 net_profit_usdt > 0.0
                 and net_profit_percent > 0.0
-                and buy_price_impact <= config.MAX_PRICE_IMPACT_PCT
-                and sell_price_impact <= config.MAX_PRICE_IMPACT_PCT
+                and buy_price_impact <= limit_impact
+                and sell_price_impact <= limit_impact
                 and gas_info.get("is_gas_acceptable", True)
             )
 
@@ -257,8 +261,11 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
                 "gross_profit_usdt": round(gross_profit_usdt, 4),
                 "gas_cost_usdt": round(gas_cost_usdt, 4),
                 "gas_price_gwei": gas_price_gwei,
+                "dex_fees_usdt": round(trade_amount * (config.DEX_PROTOCOL_FEE_PCT * 2), 4),
+                "safety_margin_usdt": round(float(getattr(config, "SAFETY_MARGIN_USDT", 0.005)), 4),
                 "net_profit_usdt": round(net_profit_usdt, 4),
                 "net_profit_percent": round(net_profit_percent, 2),
+                "roi_pct": round(net_profit_percent, 2),
                 "spread_usdt": round(spread_usdt, 2),
                 "spread_pct": round(spread_pct, 2),
                 "buy_price_impact_pct": round(buy_price_impact, 3),
@@ -269,6 +276,8 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
                 "min_profit_threshold": round(min_profit_threshold, 6),
                 "is_gas_acceptable": gas_info.get("is_gas_acceptable", True),
                 "is_profitable": is_profitable,
+                "profitability_status": "PROFITABLE" if is_profitable else ("PRICE_IMPACT_EXCEEDED" if (buy_price_impact > limit_impact or sell_price_impact > limit_impact) else ("UNPROFITABLE_NEGATIVE_NET" if net_profit_usdt <= 0 else "BELOW_MIN_PROFIT")),
+                "is_estimate": True,
                 "timestamp": time.time() * 1000,
             }
             opportunities.append(opp)
@@ -487,8 +496,13 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
 
     # Reject immediately if candidate route price impact exceeds maximum tolerance
     passed_impact = float(route.get("max_price_impact_pct", 0.0))
-    if passed_impact > float(getattr(config, "MAX_PRICE_IMPACT_PCT", 1.0)):
-        return _skip(f"Price impact ({passed_impact:.2f}%) exceeds safety limit ({getattr(config, 'MAX_PRICE_IMPACT_PCT', 1.0):.2f}%)")
+    limit_impact = float(getattr(config, "MAX_PRICE_IMPACT_PCT", 1.0))
+    active_cid = int(route.get("chain_id") or getattr(config, "CHAIN_ID", 8453))
+    if config.is_chain_testnet(active_cid) or getattr(config, "TRADING_MODE", "MOCK") == "MOCK":
+        limit_impact = max(limit_impact, 3.0)
+
+    if passed_impact > limit_impact:
+        return _skip(f"Price impact ({passed_impact:.2f}%) exceeds safety limit ({limit_impact:.2f}%)")
 
     if not route.get("is_profitable", True) or float(route.get("net_profit_usdt", 1.0)) <= 0:
         return _skip("Unprofitable spread: Net profit is zero or negative")
@@ -608,8 +622,13 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
 
     # Gate 10: Price impact limit
     max_impact = max(profit_check["max_price_impact_pct"], float(route.get("max_price_impact_pct", 0.0)))
-    if max_impact > float(getattr(config, "MAX_PRICE_IMPACT_PCT", 1.0)):
-        return _skip(f"Price impact ({max_impact:.2f}%) exceeds safety limit ({getattr(config, 'MAX_PRICE_IMPACT_PCT', 1.0):.2f}%)")
+    limit_impact = float(getattr(config, "MAX_PRICE_IMPACT_PCT", 1.0))
+    active_cid = int(route.get("chain_id") or getattr(config, "CHAIN_ID", 8453))
+    if config.is_chain_testnet(active_cid) or mode == "MOCK":
+        limit_impact = max(limit_impact, 3.0)
+
+    if max_impact > limit_impact:
+        return _skip(f"Price impact ({max_impact:.2f}%) exceeds safety limit ({limit_impact:.2f}%)")
 
     # Gate 11: Duplicate trigger guard
     route_key = f"{buy_dex}->{sell_dex}"

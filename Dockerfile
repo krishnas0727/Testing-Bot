@@ -1,24 +1,53 @@
-# Base image
-FROM python:3.11-slim
+# ============================================================
+# MULTI-STAGE DOCKERFILE FOR PRODUCTION DEPLOYMENT
+# ============================================================
 
-# Set working directory inside container
+# Stage 1: Build & Compilation
+FROM node:20-alpine AS builder
+
 WORKDIR /app
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_ROOT_USER_ACTION=ignore \
-    PORT=80
+# Install build dependencies
+COPY package*.json ./
+RUN npm ci
 
-# Install dependencies
-COPY requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy source code and contracts
+COPY tsconfig.json hardhat.config.ts ./
+COPY src/ ./src/
+COPY contracts/ ./contracts/
+COPY public/ ./public/
 
-# Copy application files
-COPY . /app/
+# Compile TypeScript
+RUN npm run build
 
-# Expose container port
-EXPOSE 80
+# Stage 2: Production Runtime
+FROM node:20-alpine AS runner
 
-# Run Flask application using Gunicorn dynamically bound to $PORT
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-80} --workers 1 --threads 4 app:app"]
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PORT=5000
+ENV HOST=0.0.0.0
+ENV TRADING_MODE=MOCK
+ENV LIVE_TRADING_ARMED=false
+ENV AUTO_TRADE_ENABLED=false
+
+# Copy only production dependencies
+COPY package*.json ./
+RUN npm ci --only=production
+
+# Copy compiled artifacts from builder
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/public ./public
+
+# Run as non-root user for container security
+USER node
+
+EXPOSE 5000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:5000/api/health || exit 1
+
+# Start production API server
+CMD ["node", "dist/src/api/server.js"]

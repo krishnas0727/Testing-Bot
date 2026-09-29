@@ -11,6 +11,7 @@ import os
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 
 try:
@@ -561,9 +562,46 @@ def execute_atomic_trade(plan: Dict[str, Any], is_manual: bool = False) -> Dict[
             "message": "Emergency stop is active; execution blocked."
         }
 
-    # Guard 2: Mode validation
+    # Guard 2: Mode validation & safe simulation in MOCK mode
     if mode == "MOCK":
-        return {"success": False, "status": "MOCK_DISABLED", "message": "Mock trades are disabled."}
+        sim = simulate_atomic_arbitrage(plan)
+        if not sim.get("success"):
+            return sim
+
+        amount_in = float(plan.get("amount_in", 5.0))
+        gross_return = float(plan.get("gross_return_usdt", plan.get("gross_return", amount_in)))
+        gross_profit = float(plan.get("gross_profit_usdt", gross_return - amount_in))
+        gas_cost = float(plan.get("gas_cost_usdt", 0.005))
+        net_profit = float(plan.get("net_profit_usdt", gross_profit - gas_cost))
+        mock_hash = f"0xmock_{int(time.time() * 1000)}"
+        trade_record = {
+            "tx_hash": mock_hash,
+            "chain_id": int(plan.get("chain_id", getattr(config, "CHAIN_ID", 8453))),
+            "buy_dex": plan.get("buy_dex", "Uniswap_V2"),
+            "sell_dex": plan.get("sell_dex", "SushiSwap_V2"),
+            "token_pair": getattr(config, "SYMBOL", "WETH/USDT"),
+            "amount_in": amount_in,
+            "amount_out": gross_return,
+            "gross_profit": gross_profit,
+            "net_profit": net_profit,
+            "gas_used": int(sim.get("simulated_gas_used", 250000)),
+            "gas_price_gwei": float(plan.get("gas_price_gwei", 0.01)),
+            "gas_cost_usdt": gas_cost,
+            "price_impact": float(plan.get("max_price_impact_pct", 0.01)),
+            "slippage": float(getattr(config, "SLIPPAGE_PCT", 0.5)),
+            "status": "CONFIRMED",
+            "mode": "MOCK",
+            "created_at": datetime.now().astimezone().isoformat()
+        }
+        return {
+            "success": True,
+            "status": "CONFIRMED",
+            "message": f"MOCK atomic arbitrage simulated successfully: Net profit +${net_profit:.4f} USDT confirmed.",
+            "trade": trade_record,
+            "tx_hash": mock_hash,
+            "gross_return": gross_return,
+            "net_profit": net_profit
+        }
 
     # Guard 3: Live / Testnet execution requires armed state
     if not getattr(config, "LIVE_TRADING_ARMED", False):

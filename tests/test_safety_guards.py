@@ -43,6 +43,22 @@ class DEXSafetyGuardTests(unittest.TestCase):
         self.assertFalse(config.AUTO_TRADE_ENABLED)
         self.assertFalse(config.EMERGENCY_STOP)
 
+    def test_mock_mode_executes_simulation_cleanly(self):
+        with patch.object(config, "TRADING_MODE", "MOCK"), patch.object(config, "EMERGENCY_STOP", False):
+            plan = {
+                "buy_dex": "Uniswap_V2",
+                "sell_dex": "SushiSwap_V2",
+                "amount_in": 100.0,
+                "gross_return_usdt": 102.50,
+                "net_profit_usdt": 1.50,
+            }
+            res = execute_atomic_trade(plan)
+            self.assertTrue(res["success"])
+            self.assertEqual(res["status"], "CONFIRMED")
+            self.assertIn("trade", res)
+            self.assertEqual(res["trade"]["mode"], "MOCK")
+            self.assertGreater(res["trade"]["net_profit"], 0)
+
     def test_live_trading_refuses_execution_when_not_armed(self):
         with patch.object(config, "TRADING_MODE", "LIVE"), patch.object(config, "LIVE_TRADING_ARMED", False), patch.object(config, "EMERGENCY_STOP", False):
             plan = {
