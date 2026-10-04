@@ -6,6 +6,12 @@
 import os
 from typing import Dict, Any, Optional, List, Tuple
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # ============================================================
 # BASE & DATA DIRECTORIES
 # ============================================================

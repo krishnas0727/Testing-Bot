@@ -372,7 +372,7 @@ def require_api_auth(f=None, *, methods=None):
             return f(*args, **kwargs)
 
         expected_token = (
-            getattr(config, "API_AUTH_TOKEN", "") or os.environ.get("API_AUTH_TOKEN", "")
+            os.environ.get("API_AUTH_TOKEN", "") or getattr(config, "API_AUTH_TOKEN", "")
         ).strip()
 
         if not expected_token:
@@ -412,7 +412,7 @@ def require_api_auth(f=None, *, methods=None):
 def is_request_authenticated() -> bool:
     """Return True if the current request presents a valid API token."""
     expected_token = (
-        getattr(config, "API_AUTH_TOKEN", "") or os.environ.get("API_AUTH_TOKEN", "")
+        os.environ.get("API_AUTH_TOKEN", "") or getattr(config, "API_AUTH_TOKEN", "")
     ).strip()
     if not expected_token:
         return False
