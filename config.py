@@ -396,7 +396,10 @@ MIN_PROFIT_PERCENT = float(os.getenv("MIN_PROFIT_PERCENT", "0.005"))
 ARBITRAGE_SPREAD_TARGET_PCT = float(os.getenv("ARBITRAGE_SPREAD_TARGET_PCT", "1.50"))
 
 # DEX protocol swap fee (0.30% each for Uniswap V2 & SushiSwap V2)
+# Fee Percentage: 0.30% (used in UI displays and percentage calculations)
 DEX_PROTOCOL_FEE_PCT = 0.30
+# Decimal Fee Fraction: 0.30% = 0.003 (used in multiplication formulas: $5 * 0.003 = $0.015 per swap)
+DEX_PROTOCOL_FEE_FRACTION = 0.003
 
 # Maximum slippage tolerance (0.50%)
 SLIPPAGE_ENABLED = True

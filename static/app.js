@@ -1433,6 +1433,8 @@ function updateExecutionPlanForAmount(amount) {
     setText("arbAmountOut", `$${grossReturn.toFixed(4)} ${quoteSym}`);
     setText("arbPriceImpact", `0.01%`);
     setText("arbGasCost", `$${gasCost.toFixed(4)} ${quoteSym}`);
+    const dexFees = amount * 0.006;
+    setText("arbDexFees", `$${dexFees.toFixed(4)} ${quoteSym}`);
 
     const netProfEl = document.getElementById("arbNetProfit");
     if (netProfEl) {

@@ -69,6 +69,59 @@ def _skip(reason: str, **details) -> Dict[str, Any]:
     return res
 
 
+def get_dex_fee_fraction(fee_pct: Optional[float] = None) -> float:
+    """Convert fee percentage (e.g. 0.30 for 0.3%) to decimal fraction (0.003).
+    
+    Guarantees:
+    - 0.3% is 0.003 decimal fraction.
+    - If passed 0.3 or 0.30, returns 0.003.
+    - If passed 0.003, returns 0.003 (does not divide twice).
+    """
+    pct = float(fee_pct if fee_pct is not None else getattr(config, "DEX_PROTOCOL_FEE_PCT", 0.30))
+    return (pct / 100.0) if pct >= 0.01 else pct
+
+
+def calculate_dex_swap_fee_usd(amount_in_usd: float, fee_pct: Optional[float] = None) -> float:
+    """Calculate single-swap DEX protocol fee in USD.
+    
+    Formula:
+    fee_usd = amount_in_usd * fee_fraction
+    Example ($5 trade):
+    $5.00 * 0.003 = $0.0150 per swap leg.
+    """
+    if amount_in_usd <= 0:
+        return 0.0
+    return amount_in_usd * get_dex_fee_fraction(fee_pct)
+
+
+def calculate_two_leg_dex_fees_usd(
+    amount_in_usd: float,
+    leg2_amount_usd: Optional[float] = None,
+    fee_pct: Optional[float] = None
+) -> Dict[str, float]:
+    """Calculate complete DEX protocol fees across both swap legs for atomic arbitrage.
+    
+    Leg 1 (Buy Leg): amount_in_usd * fee_fraction (e.g. $5 * 0.003 = $0.015)
+    Leg 2 (Sell Leg): leg2_amount_usd * fee_fraction (e.g. ~$5.07 * 0.003 = ~$0.0152)
+    Total: Leg 1 + Leg 2 (e.g. $0.015 + $0.0152 = ~$0.0302)
+    """
+    fee_fraction = get_dex_fee_fraction(fee_pct)
+    pct = fee_fraction * 100.0
+
+    leg1_fee = amount_in_usd * fee_fraction
+    leg2_base = leg2_amount_usd if (leg2_amount_usd is not None and leg2_amount_usd > 0) else amount_in_usd
+    leg2_fee = leg2_base * fee_fraction
+    total_fee = leg1_fee + leg2_fee
+
+    return {
+        "fee_pct": round(pct, 2),
+        "fee_fraction": fee_fraction,
+        "fee_leg1_usd": round(leg1_fee, 6),
+        "fee_leg2_usd": round(leg2_fee, 6),
+        "total_dex_fees_usd": round(total_fee, 6),
+    }
+
+
 def calculate_dynamic_trade_amount(
     available_balance: float,
     requested_amount: Optional[float] = None,
@@ -274,7 +327,7 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
                 "gross_profit_usdt": round(gross_profit_usdt, 4),
                 "gas_cost_usdt": round(gas_cost_usdt, 4),
                 "gas_price_gwei": gas_price_gwei,
-                "dex_fees_usdt": round(trade_amount * (config.DEX_PROTOCOL_FEE_PCT * 2), 4),
+                "dex_fees_usdt": round(calculate_two_leg_dex_fees_usd(trade_amount, usdt_returned, config.DEX_PROTOCOL_FEE_PCT)["total_dex_fees_usd"], 4),
                 "safety_margin_usdt": round(float(getattr(config, "SAFETY_MARGIN_USDT", 0.005)), 4),
                 "net_profit_usdt": round(net_profit_usdt, 4),
                 "net_profit_percent": round(net_profit_percent, 2),
@@ -378,7 +431,8 @@ def _calculate_net_profit(trade_amt: float, buy_q: dict, sell_q: dict, gas_price
 
     Returns a dict with all cost components + is_profitable flag.
     """
-    fee_pct = float(getattr(config, "DEX_PROTOCOL_FEE_PCT", 0.003))
+    fee_pct = float(getattr(config, "DEX_PROTOCOL_FEE_PCT", 0.30))
+    fee_fraction = get_dex_fee_fraction(fee_pct)
 
     # Leg 1: USDT → WETH on buy DEX (with 0.3% DEX fee applied by constant-product formula)
     weth_out = calculate_amount_out(
@@ -400,9 +454,9 @@ def _calculate_net_profit(trade_amt: float, buy_q: dict, sell_q: dict, gas_price
     if usdt_out <= 0:
         return {"is_profitable": False, "net_profit_usdt": -999.0, "skip_reason": "Zero USDT output on sell leg"}
 
-    # Total DEX protocol fees paid (0.3% per leg × 2 legs)
-    fee_leg1_usdt = trade_amt * fee_pct
-    fee_leg2_usdt = weth_out * sell_q.get("spot_price", 1.0) * fee_pct
+    # Total DEX protocol fees paid (0.3% per leg × 2 legs = 0.6% total)
+    fee_leg1_usdt = trade_amt * fee_fraction
+    fee_leg2_usdt = (weth_out * sell_q.get("spot_price", 1.0)) * fee_fraction
     total_dex_fees_usdt = fee_leg1_usdt + fee_leg2_usdt
 
     # Price impact on both legs
@@ -446,6 +500,10 @@ def _calculate_net_profit(trade_amt: float, buy_q: dict, sell_q: dict, gas_price
         "usdt_out": round(usdt_out, 6),
         "gross_profit_usdt": round(gross_profit_usdt, 6),
         "dex_fees_usdt": round(total_dex_fees_usdt, 6),
+        "dex_fee_pct": round(fee_fraction * 100.0, 2),
+        "dex_fee_fraction": fee_fraction,
+        "dex_fee_leg1_usdt": round(fee_leg1_usdt, 6),
+        "dex_fee_leg2_usdt": round(fee_leg2_usdt, 6),
         "gas_cost_usdt": round(gas_cost_usdt, 6),
         "slippage_cost_usdt": round(slippage_cost_usdt, 6),
         "net_profit_usdt": round(net_profit_usdt, 6),

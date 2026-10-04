@@ -391,10 +391,17 @@ def get_dex_reserves(dex_name: str, base_sym: str = "WETH", quote_sym: str = "US
 # ============================================================
 
 def calculate_amount_out(amount_in: float, reserve_in: float, reserve_out: float, fee_pct: float = 0.30) -> float:
-    """Uniswap V2 constant-product swap formula: dy = (dx * (1-fee) * y) / (x + dx * (1-fee))."""
+    """Uniswap V2 constant-product swap formula: dy = (dx * (1-fee) * y) / (x + dx * (1-fee)).
+    
+    Accepts fee_pct as a percentage (e.g. 0.30 for 0.30%) or decimal fraction (e.g. 0.003).
+    Ensures fee is never divided by 100 twice:
+    - If fee_pct >= 0.01 (e.g. 0.30), fee_fraction = 0.30 / 100.0 = 0.003 (multiplier = 0.997).
+    - If fee_pct < 0.01 (e.g. 0.003), fee_fraction = 0.003 (multiplier = 0.997).
+    """
     if amount_in <= 0 or reserve_in <= 0 or reserve_out <= 0:
         return 0.0
-    multiplier = 1.0 - (fee_pct / 100.0)
+    fee_fraction = (fee_pct / 100.0) if fee_pct >= 0.01 else fee_pct
+    multiplier = 1.0 - fee_fraction
     amount_in_with_fee = amount_in * multiplier
     numerator = amount_in_with_fee * reserve_out
     denominator = reserve_in + amount_in_with_fee
