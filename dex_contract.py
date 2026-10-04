@@ -275,8 +275,8 @@ SELECTOR_DECIMALS = "0x313ce567"
 SELECTOR_SYMBOL = "0x95d89b41"
 SELECTOR_ALLOWANCE = "0xdd62ed3e"
 SELECTOR_APPROVE = "0x095ea7b3"
-SELECTOR_SIMULATE_ARBITRAGE = "0x973a8f5c"
-SELECTOR_EXECUTE_ARBITRAGE = "0x7593c20c"
+SELECTOR_SIMULATE_ARBITRAGE = "0xd3723749"   # FIXED (keccak of simulateArbitrage((address,address,address,address,uint256,uint256,uint256)))
+SELECTOR_EXECUTE_ARBITRAGE = "0xb73e5fe0"   # FIXED (was wrong)
 
 
 def pad_address(address: str) -> str:

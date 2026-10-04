@@ -352,6 +352,7 @@ SYMBOL = os.getenv("TRADING_SYMBOL", _active_chain_info.get("default_symbol", "W
 WALLET_ADDRESS = os.getenv("WALLET_ADDRESS", "")
 PRIVATE_KEY = os.getenv("PRIVATE_KEY", "")
 ARBITRAGE_CONTRACT_ADDRESS = os.getenv("ARBITRAGE_CONTRACT_ADDRESS", "")
+TREASURY_CONTRACT_ADDRESS = os.getenv("TREASURY_CONTRACT_ADDRESS", "")
 
 
 # ============================================================
@@ -365,7 +366,7 @@ TRADING_MODE = os.getenv("TRADING_MODE", "MOCK").upper()
 AUTO_TRADE_ENABLED = os.getenv("AUTO_TRADE_ENABLED", "false").lower() == "true"
 
 # Live execution arm switch
-LIVE_TRADING_ARMED = os.getenv("LIVE_TRADING_ARMED", "true").lower() == "true"
+LIVE_TRADING_ARMED = os.getenv("LIVE_TRADING_ARMED", "false").lower() == "true"   # FIXED: was default "true"
 
 # Emergency kill switch (safe default: False; toggleable via UI or API)
 EMERGENCY_STOP = os.getenv("EMERGENCY_STOP", "false").lower() == "true"
@@ -377,7 +378,7 @@ EMERGENCY_STOP = os.getenv("EMERGENCY_STOP", "false").lower() == "true"
 
 DEFAULT_TRADE_AMOUNT = float(os.getenv("DEFAULT_TRADE_AMOUNT", "5.0"))
 MIN_TRADE_AMOUNT = float(os.getenv("MIN_TRADE_AMOUNT", "0.0001"))
-MAX_TRADE_AMOUNT = float(os.getenv("MAX_TRADE_AMOUNT", "5000.0"))
+MAX_TRADE_AMOUNT = float(os.getenv("MAX_TRADE_AMOUNT", "20.0"))   # FIXED: was 5000
 
 
 # ============================================================
@@ -405,7 +406,7 @@ SLIPPAGE_PCT = float(os.getenv("SLIPPAGE_PCT", "0.50"))
 MAX_PRICE_IMPACT_PCT = float(os.getenv("MAX_PRICE_IMPACT_PCT", "1.00"))
 
 # Gas price ceiling in Gwei
-MAX_GAS_PRICE_GWEI = float(os.getenv("MAX_GAS_PRICE_GWEI", "50.0"))
+MAX_GAS_PRICE_GWEI = float(os.getenv("MAX_GAS_PRICE_GWEI", "50.0"))   # set ~1-5 in .env for Base / L2
 
 # Estimated gas units for 2-hop atomic smart contract swap
 ESTIMATED_GAS_UNITS = int(os.getenv("ESTIMATED_GAS_UNITS", "250000"))
@@ -426,6 +427,23 @@ ON_CHAIN_STREAM_ENABLED = os.getenv("ON_CHAIN_STREAM_ENABLED", "true").lower() =
 
 
 # ============================================================
+# LIVE EXECUTION (live_executor.py)
+# ============================================================
+
+# Optional dedicated RPC just for sending/reading the trade tx (e.g. Base Flashblocks: https://mainnet-preconf.base.org)
+LIVE_EXEC_RPC_URL = os.getenv("LIVE_EXEC_RPC_URL", "")
+# Required net profit AFTER gas, in stable units. Enforced on-chain via minProfit.
+LIVE_MIN_NET_PROFIT_USDT = float(os.getenv("LIVE_MIN_NET_PROFIT_USDT", "0.01"))
+LIVE_GAS_SAFETY_MULT = float(os.getenv("LIVE_GAS_SAFETY_MULT", "1.5"))
+LIVE_GAS_LIMIT_BUFFER = float(os.getenv("LIVE_GAS_LIMIT_BUFFER", "1.3"))
+LIVE_MAX_PRIORITY_GWEI = float(os.getenv("LIVE_MAX_PRIORITY_GWEI", "0.05"))
+LIVE_L1_FEE_USD = float(os.getenv("LIVE_L1_FEE_USD", "0.005"))   # OP-stack L1 data fee estimate (Base)
+LIVE_DEADLINE_SEC = int(os.getenv("LIVE_DEADLINE_SEC", "20"))
+LIVE_RECEIPT_TIMEOUT_SEC = float(os.getenv("LIVE_RECEIPT_TIMEOUT_SEC", "30"))
+LIVE_RECEIPT_POLL_SEC = float(os.getenv("LIVE_RECEIPT_POLL_SEC", "0.05"))
+
+
+# ============================================================
 # ATOMIC FLASHLOAN ARBITRAGE ADAPTER
 # ============================================================
 
@@ -438,9 +456,10 @@ DEX_FLASHLOAN_FEE_PCT = 0.05
 # FLASK WEB SERVER CONFIGURATION
 # ============================================================
 
-HOST = os.getenv("HOST", "0.0.0.0")
+HOST = os.getenv("HOST", "127.0.0.1")
 PORT = int(os.getenv("PORT", "5000"))
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN", "").strip()
 
 
 # ============================================================

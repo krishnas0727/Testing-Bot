@@ -4,6 +4,8 @@ Connects the user interface to decentralized exchanges (Uniswap V2, SushiSwap V2
 via Web3 JSON-RPC. Completely eliminates all centralized exchange code, APIs,
 and credentials. Supports MOCK, TESTNET, and LIVE trading modes.
 """
+import functools
+import hmac
 import os
 import sys
 import threading
@@ -103,15 +105,21 @@ try:
         config.RPC_URL = str(_saved["rpc_url"]).strip()
     if "wallet_address" in _saved and _saved["wallet_address"]:
         config.WALLET_ADDRESS = str(_saved["wallet_address"]).strip()
-    if "private_key" in _saved and _saved["private_key"]:
-        config.PRIVATE_KEY = str(_saved["private_key"]).strip()
-        if not getattr(config, "WALLET_ADDRESS", ""):
-            try:
-                from eth_account import Account
-                _acct = Account.from_key(config.PRIVATE_KEY)
-                config.WALLET_ADDRESS = _acct.address
-            except Exception:
-                pass
+    # Phase 3 Security Mandate: PRIVATE_KEY is loaded exclusively from environment (.env), never SQLite.
+    _env_pk = getattr(config, "PRIVATE_KEY", "").strip()
+    if _env_pk and not getattr(config, "WALLET_ADDRESS", "").strip():
+        try:
+            from eth_account import Account
+            _acct = Account.from_key(_env_pk)
+            config.WALLET_ADDRESS = _acct.address
+        except Exception:
+            pass
+    # Auto-scrub any legacy plaintext private keys from SQLite
+    try:
+        from database import scrub_legacy_private_keys
+        scrub_legacy_private_keys()
+    except Exception:
+        pass
     if "contract_address" in _saved and _saved["contract_address"]:
         config.ARBITRAGE_CONTRACT_ADDRESS = str(_saved["contract_address"]).strip()
     if "chain_id" in _saved:
@@ -122,11 +130,21 @@ try:
         except Exception:
             pass
     if "emergency_stop" in _saved:
-        config.EMERGENCY_STOP = bool(_saved["emergency_stop"])
-    if "live_trading_armed" in _saved:
-        config.LIVE_TRADING_ARMED = bool(_saved["live_trading_armed"])
+        config.EMERGENCY_STOP = bool(_saved["emergency_stop"]) or getattr(config, "EMERGENCY_STOP", False)
 except Exception as _e:
     print(f"⚠️ Error restoring saved DEX settings: {_e}", flush=True)
+
+# LIVE trading MUST NEVER start armed on application startup or restart.
+# Independent safety control: requires an explicit authenticated arm action after every boot.
+config.LIVE_TRADING_ARMED = False
+try:
+    save_bot_setting("live_trading_armed", False)
+except Exception:
+    pass
+
+# Safety Invariant (Phase 4): Emergency stop takes precedence over all settings
+if config.EMERGENCY_STOP:
+    config.LIVE_TRADING_ARMED = False
 
 
 # =====================================================
@@ -329,6 +347,64 @@ def start_background_auto_trader():
 
 
 start_background_auto_trader()
+
+
+# =====================================================
+# API AUTHENTICATION & SECURITY GUARDS
+# =====================================================
+
+def require_api_auth(f=None, *, methods=None):
+    """Secure API Authentication Decorator.
+
+    Enforces Bearer token authentication against config.API_AUTH_TOKEN (from .env).
+    Safely rejects unauthorized requests with HTTP 401 (missing/unconfigured)
+    or HTTP 403 (invalid token) using constant-time comparison to prevent timing attacks.
+    Never exposes API tokens, private keys, or internal details in responses or logs.
+    """
+    if f is None:
+        return lambda fn: require_api_auth(fn, methods=methods)
+
+    @functools.wraps(f)
+    def decorated_function(*args, **kwargs):
+        if methods and request.method not in methods:
+            return f(*args, **kwargs)
+
+        expected_token = (
+            getattr(config, "API_AUTH_TOKEN", "") or os.environ.get("API_AUTH_TOKEN", "")
+        ).strip()
+
+        if not expected_token:
+            return jsonify({
+                "success": False,
+                "message": "Unauthorized: API_AUTH_TOKEN is not configured on the server."
+            }), 401
+
+        auth_header = request.headers.get("Authorization", "").strip()
+        token = ""
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:].strip()
+        elif auth_header.startswith("bearer "):
+            token = auth_header[7:].strip()
+        elif auth_header:
+            token = auth_header
+        else:
+            token = (request.headers.get("X-API-Token") or request.headers.get("X-API-Key") or "").strip()
+
+        if not token:
+            return jsonify({
+                "success": False,
+                "message": "Unauthorized: Missing Authorization header (expected 'Authorization: Bearer <API_AUTH_TOKEN>')."
+            }), 401
+
+        if not hmac.compare_digest(token, expected_token):
+            return jsonify({
+                "success": False,
+                "message": "Forbidden: Invalid API authentication token."
+            }), 403
+
+        return f(*args, **kwargs)
+
+    return decorated_function
 
 
 # =====================================================
@@ -626,7 +702,7 @@ def verify_profit_api():
 def treasury_status_api():
     """Retrieve treasury metrics: total profit, withdrawn amount, withdrawable balance, and recent history."""
     try:
-        mode = getattr(config, "TRADING_MODE", "LIVE")
+        mode = request.args.get("mode") or getattr(config, "TRADING_MODE", "LIVE")
         active_cid = getattr(config, "CHAIN_ID", 11155111)
         chain_info = config.CHAIN_REGISTRY.get(active_cid, {})
         contract_addr = getattr(config, "ARBITRAGE_CONTRACT_ADDRESS", "") or chain_info.get("arbitrage_contract", "")
@@ -659,63 +735,259 @@ def treasury_status_api():
 
 
 @app.route("/api/treasury/withdraw", methods=["POST"])
+@require_api_auth
 def treasury_withdraw_api():
-    """Execute or record a profit withdrawal to the user's wallet or designated treasury address."""
+    """Execute or record a truthful profit withdrawal to the user's wallet or designated treasury address.
+    
+    Adheres strictly to Phase 5:
+    - Never invents fake transaction hashes.
+    - Never marks a withdrawal as CONFIRMED without a verified on-chain transaction receipt.
+    - Validates token, recipient address, amount, and contract balance.
+    - If real blockchain withdrawal cannot be performed, returns 400 with 'Real blockchain withdrawal is not configured.'
+    - Simulation mode is kept separate (status = 'SIMULATED', tx_hash = '').
+    """
     try:
         data = request.get_json(force=True, silent=True) or {}
-        amount = float(data.get("amount", 0.0))
-        token = (data.get("token") or "USDT").upper()
+        try:
+            amount = float(data.get("amount", 0.0))
+        except (ValueError, TypeError):
+            return jsonify({"success": False, "status": "INVALID_AMOUNT", "message": "Withdrawal amount must be a valid number greater than 0."}), 400
+
+        token = (data.get("token") or "USDT").upper().strip()
         recipient = (data.get("recipient_address") or data.get("wallet_address") or getattr(config, "WALLET_ADDRESS", "")).strip()
-        tx_hash = (data.get("tx_hash") or "").strip()
+        client_tx_hash = (data.get("tx_hash") or "").strip()
         chain_id_val = int(data.get("chain_id") or getattr(config, "CHAIN_ID", 11155111))
-        mode = getattr(config, "TRADING_MODE", "LIVE")
+        
+        # Check trading mode / simulation flag
+        req_mode = str(data.get("mode", "")).upper().strip()
+        is_simulation = bool(data.get("simulation", False)) or (req_mode == "MOCK")
+        mode = "MOCK" if is_simulation else (req_mode or getattr(config, "TRADING_MODE", "LIVE"))
 
+        # 1. Validate Amount
         if amount <= 0.0:
-            return jsonify({"success": False, "message": "Withdrawal amount must be greater than 0."}), 400
+            return jsonify({"success": False, "status": "INVALID_AMOUNT", "message": "Withdrawal amount must be greater than 0."}), 400
 
+        # 2. Validate Recipient Address
         if not recipient or not recipient.startswith("0x") or len(recipient) != 42:
-            return jsonify({"success": False, "message": "Valid recipient Ethereum/Web3 0x address is required."}), 400
+            return jsonify({"success": False, "status": "INVALID_RECIPIENT", "message": "Valid recipient Ethereum/Web3 0x address is required."}), 400
 
-        withdrawable = get_withdrawable_profit(mode=mode)
-        if not tx_hash and amount > withdrawable and mode == "LIVE":
+        # 2b. Validate Client Tx Hash Format (if provided)
+        if client_tx_hash:
+            if not client_tx_hash.startswith("0x") or len(client_tx_hash) != 66:
+                return jsonify({
+                    "success": False,
+                    "status": "INVALID_TX_HASH",
+                    "message": "Invalid transaction hash. Must be a 66-character 0x-prefixed hex string."
+                }), 400
+
+        # 3. Emergency Stop Check (Blocks live withdrawals)
+        if (getattr(config, "EMERGENCY_STOP", False) or emergency_stop_active()) and mode == "LIVE":
             return jsonify({
                 "success": False,
+                "status": "BLOCKED_EMERGENCY_STOP",
+                "message": "Treasury withdrawal blocked: Emergency Stop is active."
+            }), 400
+
+        # 4. Check available withdrawable profit
+        withdrawable = get_withdrawable_profit(mode=mode)
+        if amount > withdrawable:
+            return jsonify({
+                "success": False,
+                "status": "INSUFFICIENT_PROFIT",
                 "message": f"Requested amount (${amount:.4f}) exceeds available withdrawable profit (${withdrawable:.4f})."
             }), 400
 
-        generated_tx = tx_hash or f"0xtreasury_{int(time.time())}_{os.urandom(4).hex()}"
+        # 5. Handle MOCK / Simulation Mode
+        if mode == "MOCK" or is_simulation:
+            # Paper mode: Truthfully record as SIMULATED, with NO fake hash
+            record_id = record_treasury_withdrawal({
+                "tx_hash": "",
+                "chain_id": chain_id_val,
+                "token": token,
+                "amount": amount,
+                "recipient_address": recipient,
+                "status": "SIMULATED",
+                "mode": "MOCK",
+                "notes": f"Paper simulated withdrawal of ${amount:.4f} {token} (No blockchain funds moved)"
+            })
+            new_withdrawable = get_withdrawable_profit(mode="MOCK")
+            new_total_withdrawn = get_total_withdrawn(mode="MOCK")
+            return jsonify({
+                "success": True,
+                "status": "SIMULATED",
+                "simulated": True,
+                "message": f"Simulated withdrawal of ${amount:.4f} {token} recorded. No blockchain funds were moved.",
+                "withdrawal": {
+                    "id": record_id,
+                    "tx_hash": "",
+                    "token": token,
+                    "amount": amount,
+                    "recipient_address": recipient,
+                    "chain_id": chain_id_val,
+                    "status": "SIMULATED",
+                    "mode": "MOCK"
+                },
+                "total_withdrawn_usdt": new_total_withdrawn,
+                "withdrawable_profit_usdt": new_withdrawable
+            }), 200
 
+        # 6. LIVE Mode: Must submit or verify a REAL blockchain transaction
+        if client_tx_hash:
+            if not client_tx_hash.startswith("0x") or len(client_tx_hash) != 66:
+                return jsonify({
+                    "success": False,
+                    "status": "INVALID_TX_HASH",
+                    "message": "Invalid transaction hash. Must be a 66-character 0x-prefixed hex string."
+                }), 400
+            
+            # Verify client-provided hash on-chain
+            from dex_engine import rpc_call
+            receipt = rpc_call("eth_getTransactionReceipt", [client_tx_hash])
+            if not receipt:
+                return jsonify({
+                    "success": False,
+                    "pending": True,
+                    "status": "PENDING",
+                    "message": "Withdrawal transaction is still pending confirmation on the blockchain."
+                }), 202
+
+            status_val = receipt.get("status")
+            is_success = (status_val == "0x1" or status_val == 1 or status_val is True)
+            if not is_success:
+                record_id = record_treasury_withdrawal({
+                    "tx_hash": client_tx_hash,
+                    "chain_id": chain_id_val,
+                    "token": token,
+                    "amount": amount,
+                    "recipient_address": recipient,
+                    "status": "FAILED",
+                    "mode": "LIVE",
+                    "notes": f"On-chain transaction {client_tx_hash} reverted"
+                })
+                return jsonify({
+                    "success": False,
+                    "status": "FAILED",
+                    "tx_hash": client_tx_hash,
+                    "message": f"Withdrawal transaction {client_tx_hash} reverted on-chain (status 0x0)."
+                }), 400
+
+            # Verified successful receipt!
+            record_id = record_treasury_withdrawal({
+                "tx_hash": client_tx_hash,
+                "chain_id": chain_id_val,
+                "token": token,
+                "amount": amount,
+                "recipient_address": recipient,
+                "status": "CONFIRMED",
+                "mode": "LIVE",
+                "notes": f"Confirmed on-chain withdrawal of ${amount:.4f} {token} to {recipient[:6]}...{recipient[-4:]}"
+            })
+            return jsonify({
+                "success": True,
+                "status": "CONFIRMED",
+                "message": f"Successfully verified on-chain withdrawal of ${amount:.4f} {token}.",
+                "withdrawal": {
+                    "id": record_id,
+                    "tx_hash": client_tx_hash,
+                    "token": token,
+                    "amount": amount,
+                    "recipient_address": recipient,
+                    "chain_id": chain_id_val,
+                    "status": "CONFIRMED",
+                    "mode": "LIVE"
+                },
+                "total_withdrawn_usdt": get_total_withdrawn(mode="LIVE"),
+                "withdrawable_profit_usdt": get_withdrawable_profit(mode="LIVE")
+            }), 200
+
+        # Subcase B2: Server execution
+        # Check if contract and signing key are configured
+        contract_address = (
+            getattr(config, "TREASURY_CONTRACT_ADDRESS", "")
+            or getattr(config, "ARBITRAGE_CONTRACT_ADDRESS", "")
+        ).strip()
+        private_key = (
+            getattr(config, "PRIVATE_KEY", "")
+            or os.environ.get("PRIVATE_KEY", "")
+        ).strip()
+
+        missing = []
+        if not contract_address or not contract_address.startswith("0x") or len(contract_address) != 42:
+            missing.append("Smart contract address (TREASURY_CONTRACT_ADDRESS or ARBITRAGE_CONTRACT_ADDRESS)")
+        if not private_key:
+            missing.append("Wallet signing private key (PRIVATE_KEY)")
+
+        if missing:
+            return jsonify({
+                "success": False,
+                "status": "NOT_CONFIGURED",
+                "message": f"Real blockchain withdrawal is not configured. Missing: {', '.join(missing)}."
+            }), 400
+
+        # Execute real on-chain withdrawal
+        from treasury_execution import submit_blockchain_withdrawal
+        exec_result = submit_blockchain_withdrawal(
+            contract_address=contract_address,
+            private_key=private_key,
+            token_symbol=token,
+            amount=amount,
+            recipient=recipient,
+            chain_id=chain_id_val
+        )
+
+        real_tx = exec_result.get("tx_hash", "")
+
+        if not exec_result.get("success"):
+            if real_tx:
+                record_treasury_withdrawal({
+                    "tx_hash": real_tx,
+                    "chain_id": chain_id_val,
+                    "token": token,
+                    "amount": amount,
+                    "recipient_address": recipient,
+                    "status": "FAILED",
+                    "mode": "LIVE",
+                    "notes": f"On-chain execution failed: {exec_result.get('message', '')}"
+                })
+            return jsonify({
+                "success": False,
+                "status": exec_result.get("status", "FAILED"),
+                "tx_hash": real_tx,
+                "message": exec_result.get("message", "Blockchain withdrawal execution failed.")
+            }), 400
+
+        # Transaction succeeded and receipt status is confirmed
         record_id = record_treasury_withdrawal({
-            "tx_hash": generated_tx,
+            "tx_hash": real_tx,
             "chain_id": chain_id_val,
             "token": token,
             "amount": amount,
             "recipient_address": recipient,
             "status": "CONFIRMED",
-            "mode": mode,
-            "notes": f"Profit withdrawal of ${amount:.4f} {token} to {recipient[:6]}...{recipient[-4:]}"
+            "mode": "LIVE",
+            "notes": f"Confirmed on-chain withdrawal of ${amount:.4f} {token} to {recipient[:6]}...{recipient[-4:]}"
         })
-
-        new_withdrawable = get_withdrawable_profit(mode=mode)
-        new_total_withdrawn = get_total_withdrawn(mode=mode)
 
         return jsonify({
             "success": True,
-            "message": f"Successfully processed withdrawal of ${amount:.4f} {token} to {recipient[:6]}...{recipient[-4:]}.",
+            "status": "CONFIRMED",
+            "message": f"Successfully executed on-chain withdrawal of ${amount:.4f} {token} to {recipient[:6]}...{recipient[-4:]}.",
             "withdrawal": {
                 "id": record_id,
-                "tx_hash": generated_tx,
+                "tx_hash": real_tx,
                 "token": token,
                 "amount": amount,
                 "recipient_address": recipient,
                 "chain_id": chain_id_val,
-                "status": "CONFIRMED"
+                "status": "CONFIRMED",
+                "mode": "LIVE"
             },
-            "total_withdrawn_usdt": new_total_withdrawn,
-            "withdrawable_profit_usdt": new_withdrawable
-        })
+            "total_withdrawn_usdt": get_total_withdrawn(mode="LIVE"),
+            "withdrawable_profit_usdt": get_withdrawable_profit(mode="LIVE")
+        }), 200
+
     except Exception as exc:
-        return jsonify({"success": False, "message": f"Withdrawal failed: {str(exc)}"}), 500
+        return jsonify({"success": False, "status": "ERROR", "message": f"Withdrawal error: {str(exc)}"}), 500
 
 
 @app.route("/api/prices", methods=["GET"])
@@ -759,6 +1031,7 @@ def prices_api():
 # =====================================================
 
 @app.route("/api/trade", methods=["POST"])
+@require_api_auth
 def manual_trade_api():
     global last_execution_status, last_background_trade_result
     try:
@@ -767,6 +1040,14 @@ def manual_trade_api():
                 "success": False,
                 "status": "BLOCKED_EMERGENCY_STOP",
                 "message": "Emergency Stop is active; trading is blocked."
+            }), 400
+
+        mode = getattr(config, "TRADING_MODE", "MOCK")
+        if mode == "LIVE" and not getattr(config, "LIVE_TRADING_ARMED", False):
+            return jsonify({
+                "success": False,
+                "status": "NOT_ARMED",
+                "message": "LIVE trading is not armed. Both trading_mode == LIVE and live_trading_armed == true are required."
             }), 400
 
         req_data = request.get_json(silent=True) or {}
@@ -871,6 +1152,7 @@ def manual_trade_api():
 
 
 @app.route("/api/trade/confirm-live", methods=["POST"])
+@require_api_auth
 def confirm_live_trade_api():
     """Verify and commit a real on-chain transaction executed via MetaMask or direct Web3 wallet.
     
@@ -879,6 +1161,13 @@ def confirm_live_trade_api():
     and commits the genuine live trade to the database.
     """
     try:
+        if emergency_stop_active():
+            return jsonify({
+                "success": False,
+                "status": "BLOCKED_EMERGENCY_STOP",
+                "message": "Emergency Stop is active; trade confirmation blocked."
+            }), 400
+
         req = request.get_json(silent=True) or {}
         tx_hash = (req.get("tx_hash") or "").strip()
         if not tx_hash or not tx_hash.startswith("0x") or len(tx_hash) != 66:
@@ -1061,6 +1350,7 @@ def wallet_api():
 
 
 @app.route("/api/wallet/connect", methods=["POST"])
+@require_api_auth
 def wallet_connect_api():
     """Register client-connected MetaMask wallet address."""
     try:
@@ -1101,6 +1391,7 @@ def wallet_connect_api():
 
 
 @app.route("/api/wallet/disconnect", methods=["POST"])
+@require_api_auth
 def wallet_disconnect_api():
     """Disconnect active wallet and reset session to non-custodial zero balance."""
     try:
@@ -1194,9 +1485,14 @@ def current_settings() -> Dict[str, Any]:
 
 
 @app.route("/api/settings", methods=["GET", "POST"])
+@require_api_auth(methods=["POST"])
 def settings_api():
     if request.method == "POST":
         data = request.get_json(silent=True) or {}
+        # Security: never allow writing or modifying API tokens via settings
+        data.pop("api_auth_token", None)
+        data.pop("api_token", None)
+        data.pop("auth_token", None)
 
         if "auto_trade" in data:
             val = bool(data["auto_trade"])
@@ -1205,17 +1501,26 @@ def settings_api():
 
         if "trading_mode" in data and str(data["trading_mode"]).upper() in {"MOCK", "TESTNET", "LIVE"}:
             val = str(data["trading_mode"]).upper()
+            prev_mode = getattr(config, "TRADING_MODE", "MOCK")
             config.TRADING_MODE = val
             save_bot_setting("trading_mode", val)
-            if "live_trading_armed" not in data:
-                armed_val = (val in ("TESTNET", "LIVE"))
-                config.LIVE_TRADING_ARMED = armed_val
-                save_bot_setting("live_trading_armed", armed_val)
+            # Safety requirement: Changing or setting trading_mode must NEVER automatically arm live trading.
+            # If mode changes away from LIVE or is switched, ensure live_trading_armed remains disarmed.
+            if val != prev_mode or val != "LIVE":
+                config.LIVE_TRADING_ARMED = False
+                save_bot_setting("live_trading_armed", False)
 
+        # Disarming is permitted through settings, but arming requires explicit confirm_live=True
+        # or the dedicated /api/trade/arm endpoint.
         if "live_trading_armed" in data:
             val = bool(data["live_trading_armed"])
-            config.LIVE_TRADING_ARMED = val
-            save_bot_setting("live_trading_armed", val)
+            if not val:
+                config.LIVE_TRADING_ARMED = False
+                save_bot_setting("live_trading_armed", False)
+            elif val and (data.get("confirm_live") is True or data.get("confirm") is True):
+                if not emergency_stop_active():
+                    config.LIVE_TRADING_ARMED = True
+                    save_bot_setting("live_trading_armed", True)
 
         if "min_profit" in data:
             try:
@@ -1271,13 +1576,13 @@ def settings_api():
             save_bot_setting("wallet_address", config.WALLET_ADDRESS)
 
         if "private_key" in data:
-            pk = str(data["private_key"]).strip()
+            pk = str(data.pop("private_key")).strip()
             if pk:
                 if not pk.startswith("0x") and len(pk) == 64:
                     pk = "0x" + pk
                 if len(pk) == 66:
+                    # In-memory session key only — NEVER persisted to SQLite database
                     config.PRIVATE_KEY = pk
-                    save_bot_setting("private_key", pk)
                     try:
                         from eth_account import Account
                         acct = Account.from_key(pk)
@@ -1287,7 +1592,11 @@ def settings_api():
                         pass
             elif pk == "":
                 config.PRIVATE_KEY = ""
-                save_bot_setting("private_key", "")
+                try:
+                    from database import scrub_legacy_private_keys
+                    scrub_legacy_private_keys()
+                except Exception:
+                    pass
 
         if "contract_address" in data:
             config.ARBITRAGE_CONTRACT_ADDRESS = str(data["contract_address"]).strip()
@@ -1317,6 +1626,7 @@ def settings_api():
 
 
 @app.route("/api/chain/switch", methods=["POST"])
+@require_api_auth
 def switch_chain_api():
     """Switch active blockchain network on-the-fly (e.g. Base L2, Arbitrum, Polygon, Ethereum)."""
     try:
@@ -1355,6 +1665,7 @@ def get_chains_api():
 
 
 @app.route("/api/emergency-stop", methods=["GET", "POST"])
+@require_api_auth(methods=["POST"])
 def emergency_stop_api():
     if request.method == "POST":
         req_data = request.get_json(silent=True) or {}
@@ -1364,10 +1675,84 @@ def emergency_stop_api():
             config.EMERGENCY_STOP = not config.EMERGENCY_STOP
         save_bot_setting("emergency_stop", config.EMERGENCY_STOP)
 
+        # Emergency stop overrides any arm state: immediately disarm live trading
+        if config.EMERGENCY_STOP:
+            config.LIVE_TRADING_ARMED = False
+            save_bot_setting("live_trading_armed", False)
+
     return jsonify({
         "success": True,
         "emergency_stop": emergency_stop_active(),
+        "live_trading_armed": getattr(config, "LIVE_TRADING_ARMED", False),
         "message": "Emergency stop is active; trading is blocked." if emergency_stop_active() else "Emergency stop is deactivated.",
+    })
+
+
+@app.route("/api/trade/arm", methods=["GET", "POST"])
+@app.route("/api/arm-live", methods=["GET", "POST"])
+@require_api_auth(methods=["POST"])
+def arm_live_trading_api():
+    """Explicit arming action for LIVE trading.
+    
+    Safety rules:
+    - Arming requires an authenticated request (Bearer token).
+    - Arming requires explicit confirmation: confirm_live=true (or confirm=true).
+    - Arming is blocked if Emergency Stop is active.
+    - Disarming (arm=false) is always permitted.
+    """
+    if request.method == "GET":
+        return jsonify({
+            "success": True,
+            "trading_mode": getattr(config, "TRADING_MODE", "MOCK"),
+            "live_trading_armed": getattr(config, "LIVE_TRADING_ARMED", False),
+            "emergency_stop": emergency_stop_active(),
+        })
+
+    req_data = request.get_json(silent=True) or {}
+    arm_requested = req_data.get("arm", req_data.get("armed", True))
+    if isinstance(arm_requested, str):
+        arm_requested = arm_requested.lower() in ("true", "1", "yes")
+    else:
+        arm_requested = bool(arm_requested)
+
+    if not arm_requested:
+        config.LIVE_TRADING_ARMED = False
+        save_bot_setting("live_trading_armed", False)
+        return jsonify({
+            "success": True,
+            "status": "DISARMED",
+            "live_trading_armed": False,
+            "message": "Live trading has been safely disarmed."
+        })
+
+    # Cannot arm while emergency stop is active
+    if emergency_stop_active():
+        config.LIVE_TRADING_ARMED = False
+        save_bot_setting("live_trading_armed", False)
+        return jsonify({
+            "success": False,
+            "status": "BLOCKED_EMERGENCY_STOP",
+            "message": "Cannot arm live trading while Emergency Stop is active."
+        }), 400
+
+    # Explicit confirmation value required
+    confirm_live = req_data.get("confirm_live") or req_data.get("confirm")
+    is_confirmed = (confirm_live is True) or (isinstance(confirm_live, str) and confirm_live.lower() in ("true", "1", "yes"))
+    if not is_confirmed:
+        return jsonify({
+            "success": False,
+            "status": "CONFIRMATION_REQUIRED",
+            "message": "Explicit confirmation required: 'confirm_live=true' must be provided to arm live trading."
+        }), 400
+
+    config.LIVE_TRADING_ARMED = True
+    save_bot_setting("live_trading_armed", True)
+    return jsonify({
+        "success": True,
+        "status": "ARMED",
+        "live_trading_armed": True,
+        "trading_mode": getattr(config, "TRADING_MODE", "MOCK"),
+        "message": "Live trading is now ARMED. Real on-chain transactions are enabled."
     })
 
 
@@ -1390,6 +1775,7 @@ def trades_api():
 
 @app.route("/api/trades/clear", methods=["POST"])
 @app.route("/api/clear-trades", methods=["POST"])
+@require_api_auth
 def clear_trades_api():
     delete_all_trades()
     return jsonify({
@@ -1408,6 +1794,7 @@ def live_verification_status_route():
 
 
 @app.route("/api/live-verification/run", methods=["POST"])
+@require_api_auth
 def live_verification_run_route():
     data = request.get_json(silent=True) or {}
     explicit = data.get("explicit_confirmation", False) or data.get("confirm_live_money", False)
@@ -1521,6 +1908,7 @@ def all_pairs_api():
 
 
 @app.route("/api/pair/switch", methods=["POST"])
+@require_api_auth
 def switch_pair_api():
     """Quick-switch active trading pair."""
     try:
@@ -1683,6 +2071,16 @@ def health_check():
     })
 
 
+@app.route("/api/auth/verify", methods=["POST"])
+@require_api_auth
+def verify_auth_api():
+    """Verify that the provided API authentication token is valid."""
+    return jsonify({
+        "success": True,
+        "message": "API authentication token is valid."
+    })
+
+
 # =====================================================
 # ERROR HANDLERS
 # =====================================================
@@ -1702,6 +2100,7 @@ def handle_500(e):
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", getattr(config, "PORT", 5000)))
+    host = os.environ.get("HOST", getattr(config, "HOST", "127.0.0.1"))
     app.run(host=host, port=port, debug=False)
+

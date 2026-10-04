@@ -122,52 +122,17 @@ contract DexArbitrage {
         if (params.tokenIn == params.tokenOut) revert IdenticalTokens();
         if (params.amountIn == 0) revert InsufficientAmountIn();
 
-        IERC20 tokenInContract = IERC20(params.tokenIn);
-        IERC20 tokenOutContract = IERC20(params.tokenOut);
+        uint256 balanceBefore = _fundContract(params.tokenIn, params.amountIn);
 
-        uint256 balanceBefore = tokenInContract.balanceOf(address(this));
+        // Leg 1: tokenIn -> tokenOut on routerBuy (real min-out check is the final profit check)
+        uint256 received = _swap(params.routerBuy, params.tokenIn, params.tokenOut, params.amountIn, params.deadline);
+        // Leg 2: tokenOut -> tokenIn on routerSell
+        _swap(params.routerSell, params.tokenOut, params.tokenIn, received, params.deadline);
 
-        // If contract does not already hold amountIn, pull from caller
-        if (balanceBefore < params.amountIn) {
-            uint256 needed = params.amountIn - balanceBefore;
-            bool success = tokenInContract.transferFrom(msg.sender, address(this), needed);
-            if (!success) revert TransferFailed();
-            balanceBefore = tokenInContract.balanceOf(address(this));
-        }
-
-        // Leg 1: Swap TokenIn -> TokenOut on routerBuy
-        address[] memory pathBuy = new address[](2);
-        pathBuy[0] = params.tokenIn;
-        pathBuy[1] = params.tokenOut;
-
-        _safeApprove(tokenInContract, params.routerBuy, params.amountIn);
-        uint256[] memory amountsOutLeg1 = IUniswapV2Router(params.routerBuy).swapExactTokensForTokens(
-            params.amountIn,
-            0, // Verified at leg 2 / net profit check
-            pathBuy,
-            address(this),
-            params.deadline
-        );
-        uint256 intermediateReceived = amountsOutLeg1[1];
-
-        // Leg 2: Swap TokenOut -> TokenIn on routerSell
-        address[] memory pathSell = new address[](2);
-        pathSell[0] = params.tokenOut;
-        pathSell[1] = params.tokenIn;
-
-        _safeApprove(tokenOutContract, params.routerSell, intermediateReceived);
-        IUniswapV2Router(params.routerSell).swapExactTokensForTokens(
-            intermediateReceived,
-            0, // Verified at net profit check below
-            pathSell,
-            address(this),
-            params.deadline
-        );
-
-        uint256 balanceAfter = tokenInContract.balanceOf(address(this));
+        uint256 balanceAfter = IERC20(params.tokenIn).balanceOf(address(this));
         uint256 minRequired = balanceBefore + params.minProfit;
 
-        // Atomic safety check: Revert everything if profitability condition is not satisfied
+        // Atomic safety check: revert everything if not profitable
         if (balanceAfter < minRequired) {
             revert UnprofitableArbitrage(balanceAfter, minRequired);
         }
@@ -185,8 +150,38 @@ contract DexArbitrage {
             netProfit,
             block.timestamp
         );
+    }
 
-        return netProfit;
+    /// @dev Ensure the contract holds `amountIn` of `token`, pulling the shortfall from the owner.
+    function _fundContract(address token, uint256 amountIn) internal returns (uint256 balanceBefore) {
+        balanceBefore = IERC20(token).balanceOf(address(this));
+        if (balanceBefore < amountIn) {
+            bool success = IERC20(token).transferFrom(msg.sender, address(this), amountIn - balanceBefore);
+            if (!success) revert TransferFailed();
+            balanceBefore = IERC20(token).balanceOf(address(this));
+        }
+    }
+
+    /// @dev Single V2 swap; returns the amount of `tokenTo` received.
+    function _swap(
+        address router,
+        address tokenFrom,
+        address tokenTo,
+        uint256 amountIn,
+        uint256 deadline
+    ) internal returns (uint256 amountOut) {
+        address[] memory path = new address[](2);
+        path[0] = tokenFrom;
+        path[1] = tokenTo;
+        _safeApprove(IERC20(tokenFrom), router, amountIn);
+        uint256[] memory amounts = IUniswapV2Router(router).swapExactTokensForTokens(
+            amountIn,
+            0,
+            path,
+            address(this),
+            deadline
+        );
+        amountOut = amounts[1];
     }
 
     /**

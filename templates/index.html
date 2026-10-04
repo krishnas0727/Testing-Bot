@@ -1173,6 +1173,27 @@
                             <small style="color:var(--text-muted); font-size:11px;">MOCK mode fetches real on-chain quotes without broadcasting transactions.</small>
                         </div>
 
+                        <!-- EXPLICIT LIVE TRADING ARMING SAFETY CONTROL -->
+                        <div class="form-group" id="liveArmingControlSection" style="padding:12px; border-radius:8px; background:rgba(30,41,59,0.5); border:1px solid var(--border);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                                <label style="margin:0; font-weight:700; color:var(--text-primary);">Live Trading Arm State</label>
+                                <span id="liveArmedStatusBadge" class="badge badge-gray" style="font-size:10px;">DISARMED</span>
+                            </div>
+                            <div id="liveArmedStatusText" style="font-size:11px; margin-bottom:10px; line-height:1.4;">
+                                <span style="color:#94a3b8;">DISARMED: Live trades are blocked until explicitly armed with confirmation.</span>
+                            </div>
+                            <div style="margin-bottom:10px;">
+                                <label style="display:flex; align-items:flex-start; gap:8px; font-size:11px; color:#cbd5e1; cursor:pointer;">
+                                    <input type="checkbox" id="chkConfirmLiveArm" style="margin-top:2px;">
+                                    <span>I understand the risks and explicitly confirm arming real on-chain execution (confirm_live=true).</span>
+                                </label>
+                            </div>
+                            <div style="display:flex; gap:8px;">
+                                <button type="button" id="btnArmLiveTrading" class="btn" style="background:#dc2626; color:#ffffff; font-weight:700; font-size:11.5px; padding:6px 14px; border:none; border-radius:6px; cursor:pointer;" onclick="armLiveTrading()">⚠️ Arm Live Trading</button>
+                                <button type="button" id="btnDisarmLiveTrading" class="btn btn-secondary" style="display:none; font-weight:600; font-size:11.5px; padding:6px 14px;" onclick="disarmLiveTrading()">🛡️ Disarm Live Trading</button>
+                            </div>
+                        </div>
+
                         <div class="form-group">
                             <label>Web3 JSON-RPC Endpoint URL</label>
                             <div style="display:flex; gap:8px;">
@@ -1189,8 +1210,21 @@
 
                         <div class="form-group">
                             <label>Server Autonomous Execution Private Key (Optional)</label>
-                            <input type="password" id="cfgPrivateKey" class="form-control" placeholder="0x... (Optional: Only if running autonomous background bot on server)">
-                            <small id="cfgPrivateKeyStatus" style="color:var(--text-muted); font-size:11px;">If left blank, trades execute non-custodially via your connected MetaMask wallet.</small>
+                            <div style="display:flex; gap:8px;">
+                                <input type="password" id="cfgPrivateKey" class="form-control" placeholder="0x... (Optional: Only if running autonomous background bot on server)">
+                                <button type="button" class="btn btn-secondary" onclick="clearPrivateKey()" style="white-space:nowrap;" title="Clear key from server memory and scrub SQLite database">Clear / Scrub</button>
+                            </div>
+                            <small id="cfgPrivateKeyStatus" style="color:var(--text-muted); font-size:11px;">Preferred: set PRIVATE_KEY in .env. Never persisted in SQLite. If left blank, trades execute non-custodially via MetaMask.</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label>API Authentication Token (<span style="color:#10b981; font-weight:normal;">API_AUTH_TOKEN</span>)</label>
+                            <div style="display:flex; gap:8px;">
+                                <input type="password" id="cfgApiAuthToken" class="form-control" placeholder="Enter API_AUTH_TOKEN from .env">
+                                <button type="button" class="btn btn-secondary" onclick="saveApiTokenFromSettings()" style="white-space:nowrap;">Save Token</button>
+                                <button type="button" class="btn btn-secondary" onclick="testApiTokenFromSettings()" style="white-space:nowrap;">Verify</button>
+                            </div>
+                            <small id="cfgApiTokenStatus" style="color:var(--text-muted); font-size:11px;">Stored securely in your local browser session to authenticate protected API requests.</small>
                         </div>
 
                         <div class="form-group">

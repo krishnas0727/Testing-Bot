@@ -80,6 +80,11 @@ def get_token_decimals(token_addr: str, fallback_decimals: int = 18) -> int:
     return fallback_decimals
 
 
+def _is_mock_mode() -> bool:
+    """Synthetic pools / fake spread / price clamps are allowed ONLY in MOCK mode."""
+    return getattr(config, "TRADING_MODE", "MOCK").upper() == "MOCK"
+
+
 _rpc_id_counter = 0
 
 
@@ -297,6 +302,18 @@ def get_dex_reserves(dex_name: str, base_sym: str = "WETH", quote_sym: str = "US
         except Exception:
             onchain_success = False
 
+    if not onchain_success and not _is_mock_mode():
+        raise RuntimeError(
+            f"On-chain reserves unavailable for {dex_name} {base_sym}/{quote_sym} "
+            f"(pair={pair_addr}). Refusing to use simulated pools outside MOCK mode."
+        )
+
+    if onchain_success and not _is_mock_mode():
+        # dust / empty pool guard (real data only)
+        if base_reserve <= 0 or quote_reserve <= 0 or quote_reserve < 1000.0:
+            raise RuntimeError(f"{dex_name} {base_sym}/{quote_sym} pool has negligible liquidity "
+                               f"({base_reserve} / {quote_reserve}); skipping.")
+
     if not onchain_success:
         # Resilient fallback mock pool reserves with realistic market oscillation
         defaults = MOCK_POOL_STATE.get(dex_name, {}).get((base_sym, quote_sym), {
@@ -334,7 +351,7 @@ def get_dex_reserves(dex_name: str, base_sym: str = "WETH", quote_sym: str = "US
             raw_quote = int(quote_reserve * (10 ** quote_dec))
 
     # Sanity guard: If pool reserves are dust/empty causing abnormal spot price, clamp to live market benchmark
-    if "ETH" in base_sym.upper() and (spot_price > 20_000.0 or spot_price < 500.0):
+    if _is_mock_mode() and "ETH" in base_sym.upper() and (spot_price > 20_000.0 or spot_price < 500.0):
         spot_price = _last_uniswap_spot if (500.0 <= _last_uniswap_spot <= 10_000.0) else 2740.0
         quote_reserve = base_reserve * spot_price
         raw_quote = int(quote_reserve * (10 ** quote_dec))
@@ -346,7 +363,7 @@ def get_dex_reserves(dex_name: str, base_sym: str = "WETH", quote_sym: str = "US
     # Arbitrage Opportunity Spread Model:
     # Calibrate SushiSwap spot price with target arbitrage spread (default 1.50% ± dynamic oscillation)
     target_spread_pct = getattr(config, "ARBITRAGE_SPREAD_TARGET_PCT", 1.50)
-    if "sushi" in dex_name.lower() and target_spread_pct > 0 and 500.0 <= _last_uniswap_spot <= 20_000.0:
+    if _is_mock_mode() and "sushi" in dex_name.lower() and target_spread_pct > 0 and 500.0 <= _last_uniswap_spot <= 20_000.0:
         t = time.time()
         osc_spread = target_spread_pct + (math.sin(t / 12.0) * 0.12)
         calibrated_spot = round(_last_uniswap_spot * (1.0 + osc_spread / 100.0), 2)
@@ -611,13 +628,19 @@ def execute_atomic_trade(plan: Dict[str, Any], is_manual: bool = False) -> Dict[
             "message": f"{mode} trading is not armed. Enable LIVE_TRADING_ARMED to submit transactions."
         }
 
-    # In LIVE / TESTNET mode, real on-chain execution requires a configured signer.
-    # We strictly NEVER generate fake live transaction hashes or pretend real trades executed without money.
-    return {
-        "success": False,
-        "status": "LIVE_SIGNER_REQUIRED",
-        "message": (
-            f"Server bot has no private key configured. Real money {mode} trades cannot execute without funds & signature. "
-            "Connect a funded MetaMask wallet to sign on-chain transactions."
-        )
-    }
+    # LIVE / TESTNET: sign + broadcast with the server key (live_executor.py)
+    if not getattr(config, "PRIVATE_KEY", "").strip():
+        return {
+            "success": False,
+            "status": "LIVE_SIGNER_REQUIRED",
+            "message": f"No PRIVATE_KEY configured for server-side {mode} signing."
+        }
+
+    # chain / mode consistency
+    if mode == "LIVE" and config.is_chain_testnet():
+        return {"success": False, "status": "BLOCKED_MODE_CHAIN", "message": "TRADING_MODE=LIVE but active chain is a testnet."}
+    if mode == "TESTNET" and not config.is_chain_testnet():
+        return {"success": False, "status": "BLOCKED_MODE_CHAIN", "message": "TRADING_MODE=TESTNET but active chain is a mainnet."}
+
+    import live_executor
+    return live_executor.execute_live(plan)

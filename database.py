@@ -10,13 +10,15 @@ import json
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
+import config
 from config import DATABASE_NAME, BACKUP_JSON_PATH
 
 os.makedirs(os.path.dirname(DATABASE_NAME), exist_ok=True)
 
 
 def get_connection():
-    conn = sqlite3.connect(DATABASE_NAME, timeout=30.0)
+    target_db = getattr(config, "DATABASE_NAME", DATABASE_NAME)
+    conn = sqlite3.connect(target_db, timeout=30.0)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -148,8 +150,55 @@ def create_database():
     except Exception:
         pass
 
+    # Risk-control ledger table (Phase 4): Dedicated immutable ledger for risk calculations.
+    # Independent of UI trades table; never wiped by /api/trades/clear.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS risk_ledger (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_id INTEGER,
+            tx_hash TEXT NOT NULL,
+            chain_id INTEGER DEFAULT 11155111,
+            amount_in REAL NOT NULL,
+            net_profit REAL NOT NULL,
+            mode TEXT NOT NULL DEFAULT 'LIVE',
+            status TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Backfill legacy LIVE trades if not yet present in risk_ledger
+    try:
+        cursor.execute("""
+            INSERT INTO risk_ledger (trade_id, tx_hash, chain_id, amount_in, net_profit, mode, status, created_at)
+            SELECT id, tx_hash, chain_id, amount_in, net_profit, mode, status, created_at
+            FROM trades
+            WHERE mode = 'LIVE' AND id NOT IN (SELECT trade_id FROM risk_ledger WHERE trade_id IS NOT NULL)
+        """)
+    except Exception:
+        pass
+
+    # Security mandate (Phase 3): Scrub any legacy plaintext private keys or API tokens
+    try:
+        cursor.execute("DELETE FROM bot_settings WHERE LOWER(key) IN ('private_key', 'priv_key', 'pk', 'secret_key', 'api_auth_token', 'api_token', 'auth_token')")
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
+
+
+def scrub_legacy_private_keys() -> int:
+    """Permanently delete any legacy plaintext private keys or API tokens from SQLite without reading or logging them."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM bot_settings WHERE LOWER(key) IN ('private_key', 'priv_key', 'pk', 'secret_key', 'api_auth_token', 'api_token', 'auth_token')")
+        affected = cursor.rowcount
+        conn.commit()
+        conn.close()
+        return max(0, affected)
+    except Exception:
+        return 0
 
 
 # ============================================================
@@ -157,6 +206,10 @@ def create_database():
 # ============================================================
 
 def save_bot_setting(key: str, value: Any):
+    # Security invariant: Never persist raw private keys or API tokens to SQLite database
+    k_lower = str(key).lower()
+    if k_lower in ("private_key", "priv_key", "secret_key", "pk", "api_auth_token", "api_token", "auth_token"):
+        return
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -170,7 +223,7 @@ def save_bot_setting(key: str, value: Any):
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"⚠️ Error saving setting {key}: {e}", flush=True)
+        print(f"⚠️ Error saving setting: {e}", flush=True)
 
 
 def load_all_bot_settings() -> Dict[str, Any]:
@@ -182,10 +235,13 @@ def load_all_bot_settings() -> Dict[str, Any]:
         conn.close()
         settings = {}
         for row in rows:
+            k = row["key"]
+            if str(k).lower() in ("private_key", "priv_key", "secret_key", "pk", "api_auth_token", "api_token", "auth_token"):
+                continue
             try:
-                settings[row["key"]] = json.loads(row["value"])
+                settings[k] = json.loads(row["value"])
             except Exception:
-                settings[row["key"]] = row["value"]
+                settings[k] = row["value"]
         return settings
     except Exception as e:
         print(f"⚠️ Error loading bot settings: {e}", flush=True)
@@ -241,6 +297,27 @@ def save_trade(trade_data: Dict[str, Any]) -> int:
     ))
 
     trade_id = cursor.lastrowid
+
+    # Phase 4 Risk Mandate: Record all LIVE trades to the immutable risk_ledger
+    if mode == "LIVE":
+        try:
+            cursor.execute("""
+                INSERT INTO risk_ledger (
+                    trade_id, tx_hash, chain_id, amount_in, net_profit, mode, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                trade_id,
+                tx_hash,
+                chain_id,
+                amount_in,
+                net_profit,
+                "LIVE",
+                trade_data.get("status", "CONFIRMED"),
+                trade_data.get("created_at") or datetime.now().astimezone().isoformat(),
+            ))
+        except Exception as e:
+            print(f"⚠️ Error recording to risk ledger: {e}", flush=True)
+
     conn.commit()
     conn.close()
 
@@ -318,21 +395,29 @@ def get_total_profit(mode: Optional[str] = None) -> float:
     return round(float(total), 4)
 
 
-def get_today_live_profit(mode: Optional[str] = None) -> float:
+def get_today_live_profit(mode: Optional[str] = "LIVE") -> float:
+    """Return cumulative net profit/loss for today used by risk controls and daily loss breaker.
+    
+    Phase 4 Invariants:
+    1. Daily loss calculations use LIVE trades only (sourced from immutable risk_ledger).
+    2. MOCK / PAPER trades NEVER affect live daily loss calculations.
+    3. Clearing UI trade history (/api/trades/clear) does NOT reset the risk-control state.
+    4. Survives application restarts.
+    """
     create_database()
     conn = get_connection()
     cursor = conn.cursor()
-    if mode and mode != "ALL":
+    if mode == "MOCK":
         cursor.execute("""
             SELECT COALESCE(SUM(net_profit), 0.0)
             FROM trades
-            WHERE DATE(created_at) = DATE('now') AND mode = ? AND status = 'CONFIRMED'
-        """, (mode,))
+            WHERE DATE(created_at) = DATE('now') AND mode = 'MOCK' AND status IN ('CONFIRMED','REVERTED','UNPROFITABLE')
+        """)
     else:
         cursor.execute("""
             SELECT COALESCE(SUM(net_profit), 0.0)
-            FROM trades
-            WHERE DATE(created_at) = DATE('now') AND status = 'CONFIRMED'
+            FROM risk_ledger
+            WHERE DATE(created_at) = DATE('now') AND mode = 'LIVE' AND status IN ('CONFIRMED','REVERTED','UNPROFITABLE')
         """)
     today_profit = cursor.fetchone()[0]
     conn.close()
@@ -474,7 +559,21 @@ def restore_trades_from_json_backup():
 # ============================================================
 
 def record_treasury_withdrawal(data: Dict[str, Any]) -> int:
-    """Record a profit withdrawal to user's wallet or treasury recipient."""
+    """Record a profit withdrawal to user's wallet or treasury recipient.
+    
+    Phase 5 Safety Requirement:
+    - Never mark as CONFIRMED without a verified 66-character EVM transaction hash.
+    - Explicitly rejects fake/invented hashes (such as 0xtreasury_...).
+    """
+    status = str(data.get("status", "CONFIRMED")).upper().strip()
+    tx_hash = str(data.get("tx_hash", "")).strip()
+
+    if status == "CONFIRMED":
+        if not tx_hash or tx_hash.startswith("0xtreasury_") or len(tx_hash) != 66 or not tx_hash.startswith("0x"):
+            raise ValueError(
+                f"Cannot record withdrawal as CONFIRMED without a verified 66-character EVM transaction hash (got: '{tx_hash}')"
+            )
+
     create_database()
     conn = get_connection()
     cursor = conn.cursor()
@@ -483,12 +582,12 @@ def record_treasury_withdrawal(data: Dict[str, Any]) -> int:
             tx_hash, chain_id, token, amount, recipient_address, status, mode, notes, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        data.get("tx_hash", ""),
+        tx_hash,
         int(data.get("chain_id", 11155111)),
         data.get("token", "USDT"),
         float(data.get("amount", 0.0)),
         data.get("recipient_address", ""),
-        data.get("status", "CONFIRMED"),
+        status,
         data.get("mode", "LIVE"),
         data.get("notes", ""),
         data.get("created_at") or datetime.now().astimezone().isoformat()

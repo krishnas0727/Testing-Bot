@@ -21,10 +21,15 @@ from app import app
 class MultiChainVerificationTests(unittest.TestCase):
     def setUp(self):
         self.client = app.test_client()
+        self.test_token = "multichain-test-token"
+        self.orig_token = getattr(config, "API_AUTH_TOKEN", "")
+        config.API_AUTH_TOKEN = self.test_token
+        self.client.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {self.test_token}"
         # Always start from Base L2
         config.set_active_chain(8453)
 
     def tearDown(self):
+        config.API_AUTH_TOKEN = self.orig_token
         # Reset back to Base L2
         config.set_active_chain(8453)
 

@@ -11,8 +11,15 @@ class DEXApiTests(unittest.TestCase):
     def setUp(self):
         self.client = app.test_client()
         self.client.testing = True
+        self.test_token = "dex-api-test-token"
+        self.orig_token = getattr(config, "API_AUTH_TOKEN", "")
+        config.API_AUTH_TOKEN = self.test_token
+        self.client.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {self.test_token}"
         config.WALLET_ADDRESS = ""
         database.save_bot_setting("wallet_address", "")
+
+    def tearDown(self):
+        config.API_AUTH_TOKEN = self.orig_token
 
     def test_health_check(self):
         res = self.client.get("/api/health")

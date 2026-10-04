@@ -32,12 +32,25 @@ last_trade_time = 0
 last_trade_key = None
 
 
+def _effective_gas_cost_usd(raw_gas_usd: float, trade_amount: float) -> float:
+    """MOCK keeps the old tiny-cost model. LIVE/TESTNET uses the REAL gas cost (+ L1 data fee on OP-stack chains).
+
+    The original code capped gas at 0.05% of the trade size in every mode, which hides the real cost and
+    makes unprofitable trades look profitable.
+    """
+    if getattr(config, "TRADING_MODE", "MOCK").upper() == "MOCK":
+        return min(raw_gas_usd, max(0.0001, trade_amount * 0.0005))
+    l1 = float(getattr(config, "LIVE_L1_FEE_USD", 0.005)) if getattr(config, "CHAIN_ID", 0) in (8453, 84532) else 0.0
+    return raw_gas_usd + l1
+
+
 def emergency_stop_active() -> bool:
     return bool(getattr(config, "EMERGENCY_STOP", True))
 
 
 def daily_loss_limit_reached() -> bool:
-    daily_profit = get_today_live_profit()
+    # Phase 4 Invariant: Strictly LIVE trades from the risk ledger; MOCK trades NEVER count.
+    daily_profit = get_today_live_profit("LIVE")
     limit = float(getattr(config, "MAX_DAILY_LOSS_USDT", 10.0))
     return limit >= 0 and daily_profit <= -limit
 
@@ -115,7 +128,7 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
                 from wallet_manager import get_wallet_balances
                 wb = get_wallet_balances()
                 if wb.get("is_connected") and float(wb.get("total_stable_usdt", 0.0)) > 0.0:
-                    trade_amount = calculate_dynamic_trade_amount(float(wb.get("total_stable_usdt", 0.0)))
+                    trade_amount = calculate_dynamic_trade_amount(float(wb.get("total_stable_usdt", 0.0)), requested_amount=trade_amount)
             except Exception:
                 pass
 
@@ -167,7 +180,7 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
 
     # Calculate realistic on-chain execution fee (Layer-2 rollup / dynamic micro-fee for atomic arbitrage)
     # Scales proportionally with trade size ($0.0005 on $1, $0.0025 on $5, capped realistically)
-    gas_cost_usdt = round(min(gas_info["gas_cost_usd"], max(0.0001, trade_amount * 0.0005)), 4)
+    gas_cost_usdt = round(_effective_gas_cost_usd(gas_info["gas_cost_usd"], trade_amount), 4)
 
     opportunities = []
 
@@ -407,8 +420,7 @@ def _calculate_net_profit(trade_amt: float, buy_q: dict, sell_q: dict, gas_price
     GAS_UNITS_ESTIMATE = 250_000
     gas_cost_eth = (GAS_UNITS_ESTIMATE * gas_price_gwei * 1e-9)
     gas_cost_usdt = gas_cost_eth * eth_price_usdt
-    # Cap gas cost for L2 networks where gas is sub-cent
-    gas_cost_usdt = min(gas_cost_usdt, max(0.0001, trade_amt * 0.002))
+    gas_cost_usdt = _effective_gas_cost_usd(gas_cost_usdt, trade_amt)
 
     # Gross profit = raw output − input (before all costs)
     gross_profit_usdt = usdt_out - trade_amt
@@ -420,8 +432,9 @@ def _calculate_net_profit(trade_amt: float, buy_q: dict, sell_q: dict, gas_price
 
     is_gas_ok = gas_price_gwei <= float(getattr(config, "MAX_GAS_PRICE_GWEI", 50.0))
     is_impact_ok = max_impact <= float(getattr(config, "MAX_PRICE_IMPACT_PCT", 1.0))
+    required_margin = 0.0 if getattr(config, "TRADING_MODE", "MOCK").upper() == "MOCK" else float(getattr(config, "LIVE_MIN_NET_PROFIT_USDT", 0.01))
     is_profitable = (
-        net_profit_usdt > 0.0
+        net_profit_usdt > required_margin
         and net_profit_pct > 0.0
         and is_gas_ok
         and is_impact_ok
@@ -479,6 +492,11 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
     if emergency_stop_active():
         return _skip("Emergency stop is active")
 
+    # Gate 1b: Live trading arm requirement (LIVE mode must be explicitly armed)
+    mode = getattr(config, "TRADING_MODE", "MOCK")
+    if mode == "LIVE" and not getattr(config, "LIVE_TRADING_ARMED", False):
+        return _skip("LIVE trading is not armed. Both trading_mode == LIVE and live_trading_armed == true are required.")
+
     # Gate 2: Daily loss limit
     if daily_loss_limit_reached():
         return _skip("Daily net loss limit reached")
@@ -535,7 +553,7 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
                 f"(Need >= 0.0001 ETH). Transaction aborted."
             )
 
-        req_val = float(custom_amount) if custom_amount is not None else None
+        req_val = float(custom_amount) if custom_amount is not None else float(route.get("amount_in", getattr(config, "DEFAULT_TRADE_AMOUNT", 5.0)))
         trade_amt = calculate_dynamic_trade_amount(stable_bal, requested_amount=req_val)
 
         if trade_amt <= 0.0 or stable_bal < trade_amt:
@@ -636,7 +654,7 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
         return _skip("Duplicate route suppression")
 
     # Gate 12: Token Allowance Check
-    if mode in ("LIVE", "TESTNET") and getattr(config, "ARBITRAGE_CONTRACT_ADDRESS", ""):
+    if mode in ("LIVE", "TESTNET") and getattr(config, "ARBITRAGE_CONTRACT_ADDRESS", "") and not getattr(config, "PRIVATE_KEY", "").strip():
         from wallet_manager import check_token_allowance
         token_to_spend = "USDT" if "USDT" in config.SYMBOL else "USDC"
         allowance = check_token_allowance(addr, config.ARBITRAGE_CONTRACT_ADDRESS, token_to_spend)
@@ -665,6 +683,9 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
         "is_profitable": True,
         "is_gas_acceptable": True,
         "verified_at_execution": True,
+        "token_pair": config.SYMBOL,
+        "eth_price_usdt": avg_eth_price,
+        "detected_at_ms": float(route.get("timestamp", 0.0)),
     }
 
     result = execute_atomic_trade(execution_route, is_manual=is_manual)
@@ -699,6 +720,14 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
                     save_trade(trade_data)
     else:
         print(f"[TRADE FAILED] {result.get('message', 'Unknown error')} — NOT recording profit.", flush=True)
+        if result.get("status") == "REVERTED" and result.get("tx_hash"):
+            gas_lost = float(result.get("gas_cost_usdt", 0.0))
+            save_trade({
+                "tx_hash": result["tx_hash"], "chain_id": active_cid, "buy_dex": buy_dex, "sell_dex": sell_dex,
+                "token_pair": config.SYMBOL, "amount_in": trade_amt, "amount_out": trade_amt,
+                "gross_profit": 0.0, "net_profit": -gas_lost, "gas_used": int(result.get("gas_used", 0)),
+                "gas_cost_usdt": gas_lost, "status": "REVERTED", "mode": mode,
+            })
 
     return result
 

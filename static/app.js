@@ -71,6 +71,70 @@ const safeStorage = {
 };
 
 // ============================================================
+// API AUTHENTICATION & SECURITY INTERCEPTOR
+// Attaches Bearer token to API requests without hardcoding secrets
+// ============================================================
+
+function getApiAuthToken() {
+    return safeStorage.getItem("api_auth_token") || "";
+}
+
+function setApiAuthToken(token) {
+    if (token && token.trim()) {
+        safeStorage.setItem("api_auth_token", token.trim());
+    } else {
+        safeStorage.removeItem("api_auth_token");
+    }
+}
+
+// Intercept window.fetch to automatically include API_AUTH_TOKEN header on /api/ calls
+(function() {
+    const _originalFetch = window.fetch;
+    window.fetch = async function(resource, init) {
+        init = init || {};
+        let url = "";
+        if (typeof resource === "string") {
+            url = resource;
+        } else if (resource && resource.url) {
+            url = resource.url;
+        }
+
+        if (url && (url.startsWith("/api/") || url.includes("/api/"))) {
+            const token = getApiAuthToken();
+            if (token) {
+                if (!init.headers) {
+                    init.headers = {};
+                }
+                if (init.headers instanceof Headers) {
+                    if (!init.headers.has("Authorization")) {
+                        init.headers.set("Authorization", "Bearer " + token);
+                    }
+                } else if (!init.headers["Authorization"] && !init.headers["authorization"]) {
+                    init.headers["Authorization"] = "Bearer " + token;
+                }
+            }
+        }
+
+        const response = await _originalFetch.call(this, resource, init);
+
+        if ((response.status === 401 || response.status === 403) && url.includes("/api/")) {
+            try {
+                const clone = response.clone();
+                const errData = await clone.json().catch(() => null);
+                if (errData && errData.message) {
+                    console.warn(`[API Security] ${response.status} from ${url}:`, errData.message);
+                    if (typeof showToast === "function") {
+                        showToast(`API Auth (${response.status}): ${errData.message}`, "error");
+                    }
+                }
+            } catch (_) {}
+        }
+
+        return response;
+    };
+})();
+
+// ============================================================
 // CENTRALIZED MULTI-CHAIN SPECIFICATIONS & TOKEN REGISTRY
 // Single Source of Truth for Global Selected-Chain State
 // ============================================================
@@ -1926,13 +1990,11 @@ async function triggerEmergencyStop() {
 
 async function quickSwitchMode(newMode) {
     try {
-        const isLiveOrTestnet = (newMode === "LIVE" || newMode === "TESTNET");
         const res = await fetch("/api/settings", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                trading_mode: newMode,
-                live_trading_armed: isLiveOrTestnet
+                trading_mode: newMode
             })
         });
         const json = await res.json();
@@ -2017,20 +2079,172 @@ async function loadSettings() {
         const pkInput = document.getElementById("cfgPrivateKey");
         const pkStatus = document.getElementById("cfgPrivateKeyStatus");
         if (s.has_private_key) {
-            if (pkInput) pkInput.placeholder = "•••••••••••••••• (Active on Server)";
+            if (pkInput) pkInput.placeholder = "•••••••••••••••• (Active in Server Memory / .env)";
             if (pkStatus) {
-                pkStatus.textContent = "✓ Server private key is active. Autonomous background trading is enabled.";
+                pkStatus.textContent = "✓ Server private key is active (loaded from .env or session memory; never stored in SQLite).";
                 pkStatus.style.color = "var(--profit-color)";
             }
         } else {
             if (pkInput) pkInput.placeholder = "0x... (Optional: Only if running autonomous background bot on server)";
             if (pkStatus) {
-                pkStatus.textContent = "If left blank, trades execute non-custodially via your connected MetaMask wallet.";
+                pkStatus.textContent = "Preferred: set PRIVATE_KEY in .env. If left blank, trades execute non-custodially via MetaMask.";
                 pkStatus.style.color = "var(--text-muted)";
             }
         }
+
+        updateApiTokenUI();
+        updateLiveArmedUI(Boolean(s.live_trading_armed), s.trading_mode, Boolean(s.emergency_stop));
     } catch (err) {
         console.warn("Settings load error:", err);
+    }
+}
+
+function updateLiveArmedUI(isArmed, mode, emergencyStop) {
+    const armedBadge = document.getElementById("liveArmedStatusBadge");
+    const armBtn = document.getElementById("btnArmLiveTrading");
+    const disarmBtn = document.getElementById("btnDisarmLiveTrading");
+    const confirmBox = document.getElementById("chkConfirmLiveArm");
+    const statusText = document.getElementById("liveArmedStatusText");
+
+    if (armedBadge) {
+        if (isArmed) {
+            armedBadge.innerText = "ARMED";
+            armedBadge.className = "badge badge-red";
+            armedBadge.style.background = "#dc2626";
+            armedBadge.style.color = "#ffffff";
+        } else {
+            armedBadge.innerText = "DISARMED";
+            armedBadge.className = "badge badge-gray";
+            armedBadge.style.background = "rgba(100, 116, 139, 0.2)";
+            armedBadge.style.color = "#94a3b8";
+        }
+    }
+
+    if (statusText) {
+        if (isArmed) {
+            statusText.innerHTML = '<span style="color:#ef4444; font-weight:700;">⚠️ ARMED: Live transactions with real funds are enabled.</span>';
+        } else {
+            statusText.innerHTML = '<span style="color:#94a3b8;">DISARMED: Live trades are blocked until explicitly armed with confirmation.</span>';
+        }
+    }
+
+    if (armBtn) armBtn.style.display = isArmed ? "none" : "inline-flex";
+    if (disarmBtn) disarmBtn.style.display = isArmed ? "inline-flex" : "none";
+    if (confirmBox && !isArmed) confirmBox.checked = false;
+}
+
+async function armLiveTrading() {
+    const chk = document.getElementById("chkConfirmLiveArm");
+    if (!chk || !chk.checked) {
+        showToast("Confirmation required: check 'I confirm that I want to arm live trading' before arming.", "warning");
+        return;
+    }
+
+    try {
+        const res = await fetch("/api/trade/arm", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                arm: true,
+                confirm_live: true
+            })
+        });
+        const json = await res.json();
+        if (json.success && json.live_trading_armed) {
+            showToast("LIVE TRADING ARMED: Real transactions are now enabled.", "warning");
+            updateLiveArmedUI(true);
+            if (typeof loadSettings === "function") loadSettings();
+        } else {
+            showToast(json.message || "Failed to arm live trading", "error");
+        }
+    } catch (err) {
+        showToast("Error arming live trading: " + (err.message || err), "error");
+    }
+}
+
+async function disarmLiveTrading() {
+    try {
+        const res = await fetch("/api/trade/arm", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                arm: false
+            })
+        });
+        const json = await res.json();
+        if (json.success) {
+            showToast("Live trading safely disarmed.", "success");
+            updateLiveArmedUI(false);
+            if (typeof loadSettings === "function") loadSettings();
+        } else {
+            showToast(json.message || "Failed to disarm live trading", "error");
+        }
+    } catch (err) {
+        showToast("Error disarming live trading: " + (err.message || err), "error");
+    }
+}
+
+function updateApiTokenUI() {
+    const token = getApiAuthToken();
+    const input = document.getElementById("cfgApiAuthToken");
+    const statusEl = document.getElementById("cfgApiTokenStatus");
+    if (input && !input.value && token) {
+        input.value = token;
+    }
+    if (statusEl) {
+        if (token) {
+            statusEl.innerHTML = '<span style="color:var(--profit-color);">✓ Token saved in browser session (click Verify to check)</span>';
+        } else {
+            statusEl.innerHTML = '<span style="color:#f59e0b;">⚠ No token configured. Protected actions require API_AUTH_TOKEN.</span>';
+        }
+    }
+}
+
+async function saveApiTokenFromSettings() {
+    const input = document.getElementById("cfgApiAuthToken");
+    const val = input ? input.value.trim() : "";
+    if (!val) {
+        setApiAuthToken("");
+        updateApiTokenUI();
+        if (typeof showToast === "function") showToast("API token cleared from browser storage", "info");
+        return;
+    }
+    setApiAuthToken(val);
+    updateApiTokenUI();
+    await testApiTokenFromSettings();
+}
+
+async function testApiTokenFromSettings() {
+    const token = getApiAuthToken();
+    const statusEl = document.getElementById("cfgApiTokenStatus");
+    if (!token) {
+        if (statusEl) {
+            statusEl.innerHTML = '<span style="color:#ef4444;">No API token configured in browser.</span>';
+        }
+        if (typeof showToast === "function") showToast("Please enter an API token first.", "warning");
+        return;
+    }
+    try {
+        const res = await fetch("/api/auth/verify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) {
+            if (statusEl) {
+                statusEl.innerHTML = '<span style="color:var(--profit-color);">✓ API Token Verified & Active</span>';
+            }
+            if (typeof showToast === "function") showToast("API Token verified successfully!", "success");
+        } else {
+            if (statusEl) {
+                statusEl.innerHTML = `<span style="color:#ef4444;">✗ Verification Failed (${res.status}): ${data.message || 'Invalid token'}</span>`;
+            }
+            if (typeof showToast === "function") showToast(`API Token verification failed: ${data.message || 'Invalid token'}`, "error");
+        }
+    } catch (e) {
+        if (statusEl) {
+            statusEl.innerHTML = `<span style="color:#ef4444;">✗ Connection error: ${e.message}</span>`;
+        }
     }
 }
 
@@ -2044,7 +2258,6 @@ async function saveSettings(event) {
     const payload = {
         chain_id: parseInt(document.getElementById("cfgChainId")?.value || "8453", 10),
         trading_mode: document.getElementById("cfgTradingMode").value,
-        live_trading_armed: (document.getElementById("cfgTradingMode")?.value === "LIVE" || document.getElementById("cfgTradingMode")?.value === "TESTNET"),
         rpc_url: document.getElementById("cfgRpcUrl").value,
         wallet_address: document.getElementById("cfgWalletAddress").value,
         contract_address: document.getElementById("cfgContractAddress").value,
@@ -2069,6 +2282,8 @@ async function saveSettings(event) {
         const json = await res.json();
         if (json.success) {
             showToast("DEX settings saved successfully!", "success");
+            const pkField = document.getElementById("cfgPrivateKey");
+            if (pkField) pkField.value = "";
             fetchMarketData();
             if (typeof loadSettings === "function") loadSettings();
         } else {
@@ -2076,6 +2291,30 @@ async function saveSettings(event) {
         }
     } catch (err) {
         showToast("Settings save error: " + err, "error");
+    }
+}
+
+async function clearPrivateKey() {
+    try {
+        const res = await fetch("/api/settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ private_key: "" })
+        });
+        const json = await res.json();
+        if (json.success) {
+            showToast("Private key cleared from server memory and database scrubbed.", "success");
+            const pkInput = document.getElementById("cfgPrivateKey");
+            if (pkInput) {
+                pkInput.value = "";
+                pkInput.placeholder = "0x... (Optional: Only if running autonomous background bot on server)";
+            }
+            if (typeof loadSettings === "function") loadSettings();
+        } else {
+            showToast(json.message || "Failed to clear private key", "error");
+        }
+    } catch (err) {
+        showToast("Error clearing private key: " + err, "error");
     }
 }
 

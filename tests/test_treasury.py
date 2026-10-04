@@ -27,8 +27,23 @@ class TreasurySystemTests(unittest.TestCase):
 
         self.client = app.test_client()
         app.config["TESTING"] = True
+        self.test_token = "treasury-test-token"
+        self.orig_token = getattr(config, "API_AUTH_TOKEN", "")
+        config.API_AUTH_TOKEN = self.test_token
+        self.client.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {self.test_token}"
+
+        self.orig_mode = getattr(config, "TRADING_MODE", "MOCK")
+        config.TRADING_MODE = "LIVE"
+        self.orig_armed = getattr(config, "LIVE_TRADING_ARMED", False)
+        config.LIVE_TRADING_ARMED = True
+        self.orig_emergency = getattr(config, "EMERGENCY_STOP", False)
+        config.EMERGENCY_STOP = False
 
     def tearDown(self):
+        config.API_AUTH_TOKEN = self.orig_token
+        config.TRADING_MODE = self.orig_mode
+        config.LIVE_TRADING_ARMED = self.orig_armed
+        config.EMERGENCY_STOP = self.orig_emergency
         database.DATABASE_NAME = self.orig_db
         config.DATABASE_NAME = self.orig_db
         self.tmp_dir.cleanup()
@@ -58,7 +73,7 @@ class TreasurySystemTests(unittest.TestCase):
 
         # Withdraw 4.00
         database.record_treasury_withdrawal({
-            "tx_hash": "0xtx1",
+            "tx_hash": "0x" + "a" * 64,
             "chain_id": 11155111,
             "token": "USDC",
             "amount": 4.0,
@@ -119,7 +134,9 @@ class TreasurySystemTests(unittest.TestCase):
         self.assertEqual(res.status_code, 400)
         self.assertIn("exceeds available withdrawable profit", res.get_json()["message"])
 
-    def test_treasury_withdraw_api_success(self):
+    @patch("dex_engine.rpc_call")
+    def test_treasury_withdraw_api_success(self, mock_rpc):
+        mock_rpc.return_value = {"status": "0x1"}
         # Add 25.0 profit
         database.save_trade({
             "tx_hash": "0x333",
@@ -136,15 +153,19 @@ class TreasurySystemTests(unittest.TestCase):
         })
 
         recipient = "0x9cb6b2c1205a16ba947b783ed99569234decfcc0"
+        tx_hash = "0x" + "b" * 64
         res = self.client.post("/api/treasury/withdraw", json={
             "amount": 15.0,
             "token": "USDC",
             "recipient_address": recipient,
-            "chain_id": 11155111
+            "chain_id": 11155111,
+            "tx_hash": tx_hash
         })
         self.assertEqual(res.status_code, 200)
         json_data = res.get_json()
         self.assertTrue(json_data["success"])
+        self.assertEqual(json_data["withdrawal"]["status"], "CONFIRMED")
+        self.assertEqual(json_data["withdrawal"]["tx_hash"], tx_hash)
         self.assertEqual(json_data["total_withdrawn_usdt"], 15.0)
         self.assertEqual(json_data["withdrawable_profit_usdt"], 10.0)
 
