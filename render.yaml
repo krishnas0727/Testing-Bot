@@ -39,3 +39,5 @@ services:
         sync: false
       - key: PRIVATE_KEY
         sync: false # Injected as secret environment variable
+      - key: API_AUTH_TOKEN
+        sync: false # Required secret auth token for protected API endpoints (e.g. /api/trade)
