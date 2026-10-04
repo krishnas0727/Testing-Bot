@@ -39,6 +39,7 @@ from dex_contract import DEX_ARBITRAGE_ABI
 from live_verification import get_live_verification_status, run_live_verification
 from market_stream import public_bbo_stream
 from wallet_manager import get_wallet_balances
+from trader_lock import acquire_auto_trader_lock, release_auto_trader_lock
 from database import (
     create_database,
     get_all_trades,
@@ -223,23 +224,11 @@ def get_engine_status(chain_id: Optional[int] = None) -> str:
     return f"ACTIVE - SCANNING {chain_label.upper()} POOLS (SIMULATION)"
 
 
-def _acquire_auto_trader_lock() -> bool:
-    """Prevent duplicate trader loops across WSGI workers."""
-    path = getattr(config, "AUTO_TRADER_LOCK_PATH", "auto_trader.lock")
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    try:
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.write(fd, str(os.getpid()).encode("utf-8"))
-        os.close(fd)
-        return True
-    except FileExistsError:
-        return False
-    except Exception:
-        return False
+_acquire_auto_trader_lock = acquire_auto_trader_lock
 
 
 def start_background_auto_trader():
-    if not _acquire_auto_trader_lock():
+    if not acquire_auto_trader_lock():
         return
 
     def auto_trader_loop():
@@ -343,7 +332,14 @@ def start_background_auto_trader():
 
             time.sleep(getattr(config, "REFRESH_INTERVAL", 2))
 
-    threading.Thread(target=auto_trader_loop, daemon=True).start()
+    def auto_trader_runner():
+        try:
+            auto_trader_loop()
+        finally:
+            release_auto_trader_lock()
+            print("[DEX Auto-Trader] Background loop stopped and lock released.", flush=True)
+
+    threading.Thread(target=auto_trader_runner, daemon=True).start()
 
 
 start_background_auto_trader()
