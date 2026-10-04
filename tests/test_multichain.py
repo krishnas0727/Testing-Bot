@@ -318,18 +318,17 @@ class MultiChainVerificationTests(unittest.TestCase):
             self.assertIn("BASE L2 MAINNET", status)
 
     def test_settings_api_preserves_armed_state_on_mode_change(self):
-        """Verify switching mode via /api/settings correctly arms TESTNET and LIVE."""
+        """Verify switching mode via /api/settings does not automatically arm LIVE (Phase 2 mandate)."""
         # Switch to TESTNET without explicit live_trading_armed
         res = self.client.post("/api/settings", json={"trading_mode": "TESTNET"})
         self.assertEqual(res.status_code, 200)
         self.assertEqual(config.TRADING_MODE, "TESTNET")
-        self.assertTrue(config.LIVE_TRADING_ARMED)
 
-        # Switch to LIVE
+        # Switch to LIVE - Phase 2 mandate: must NOT auto-arm
         res = self.client.post("/api/settings", json={"trading_mode": "LIVE"})
         self.assertEqual(res.status_code, 200)
         self.assertEqual(config.TRADING_MODE, "LIVE")
-        self.assertTrue(config.LIVE_TRADING_ARMED)
+        self.assertFalse(config.LIVE_TRADING_ARMED)
 
 
 if __name__ == "__main__":

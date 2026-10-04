@@ -4,7 +4,7 @@
 # ============================================================
 
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Tuple
 
 # ============================================================
 # BASE & DATA DIRECTORIES
@@ -273,14 +273,12 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
             "https://base-sepolia.blockpi.network/v1/rpc/public",
             "https://1rpc.io/base-sepolia",
         ],
-        "dexes": ["Uniswap_V2", "SushiSwap_V2"],
+        "dexes": ["Uniswap_V2"],
         "routers": {
             "Uniswap_V2": "0x1662C4Ca803B6d5d42C85d552318b7625038923d",
-            "SushiSwap_V2": "0x1662C4Ca803B6d5d42C85d552318b7625038923d",
         },
         "factories": {
             "Uniswap_V2": "0xF62c03E08ada871A0bEb309762E260a7a6a880E6",
-            "SushiSwap_V2": "0xF62c03E08ada871A0bEb309762E260a7a6a880E6",
         },
         "tokens": {
             "WETH": {"address": "0x4200000000000000000000000000000000000006", "decimals": 18, "symbol": "WETH"},
@@ -469,6 +467,103 @@ API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN", "").strip()
 # CONFIG VALIDATION
 # ============================================================
 
+def is_valid_ethereum_address(address: Any) -> bool:
+    """Check if address is a valid 42-character 0x hex EVM address."""
+    if not isinstance(address, str):
+        return False
+    clean = address.strip()
+    if len(clean) != 42 or not clean.startswith("0x"):
+        return False
+    try:
+        int(clean[2:], 16)
+        return True
+    except ValueError:
+        return False
+
+
+def validate_chain_dex_routers(
+    chain_id: Optional[int] = None,
+    routers: Optional[Dict[str, str]] = None,
+    dexes: Optional[List[str]] = None,
+) -> Tuple[bool, str, List[str]]:
+    """Validate that a chain configuration has at least two unique, valid DEX router addresses.
+
+    Returns:
+        (is_valid, reason, valid_dex_names)
+    """
+    if chain_id is not None and routers is None:
+        chain_info = CHAIN_REGISTRY.get(chain_id)
+        if not chain_info:
+            return False, "Arbitrage unavailable: fewer than two valid DEX routers configured.", []
+        routers = chain_info.get("routers", {})
+        if dexes is None:
+            dexes = chain_info.get("dexes", list(routers.keys()))
+    elif routers is None:
+        routers = DEX_ROUTERS
+        if dexes is None:
+            dexes = SUPPORTED_DEXES
+
+    if dexes is None:
+        dexes = list(routers.keys())
+
+    # Map normalized lowercase router addresses to assigned DEX names
+    address_to_dexes: Dict[str, List[str]] = {}
+    valid_dexes: List[str] = []
+
+    for dex in dexes:
+        addr = routers.get(dex)
+        if not addr or not is_valid_ethereum_address(addr):
+            continue
+        norm_addr = addr.strip().lower()
+        if norm_addr not in address_to_dexes:
+            address_to_dexes[norm_addr] = []
+        address_to_dexes[norm_addr].append(dex)
+        valid_dexes.append(dex)
+
+    # Check for identical router addresses assigned across distinct DEXes
+    for norm_addr, assigned_dexes in address_to_dexes.items():
+        if len(assigned_dexes) > 1:
+            print(
+                f"[ROUTER VALIDATION] Identical router address {norm_addr} configured for multiple DEXes: {assigned_dexes}",
+                flush=True
+            )
+
+    unique_router_count = len(address_to_dexes)
+    if unique_router_count < 2:
+        return False, "Arbitrage unavailable: fewer than two valid DEX routers configured.", valid_dexes
+
+    return True, "Valid DEX routers configured.", valid_dexes
+
+
+def validate_all_chain_configurations() -> Dict[int, Dict[str, Any]]:
+    """Inspect and validate DEX routers across all registered chains on startup.
+
+    Logs configuration status for each chain and ensures no identical routers are silently permitted.
+    """
+    results = {}
+    for cid, info in CHAIN_REGISTRY.items():
+        is_valid, reason, valid_dexes = validate_chain_dex_routers(cid)
+        results[cid] = {
+            "name": info.get("name", ""),
+            "label": info.get("label", ""),
+            "is_valid": is_valid,
+            "reason": reason,
+            "valid_dexes": valid_dexes,
+            "routers": info.get("routers", {}),
+        }
+        if not is_valid:
+            print(
+                f"[STARTUP ROUTER VALIDATION] Chain {cid} ({info.get('name')}): {reason}",
+                flush=True
+            )
+        else:
+            print(
+                f"[STARTUP ROUTER VALIDATION] Chain {cid} ({info.get('name')}): OK ({len(valid_dexes)} DEXes)",
+                flush=True
+            )
+    return results
+
+
 def validate_config():
     valid_modes = {"MOCK", "TESTNET", "LIVE"}
     if TRADING_MODE not in valid_modes:
@@ -482,6 +577,15 @@ def validate_config():
     for dex in SUPPORTED_DEXES:
         if dex not in DEX_ROUTERS:
             raise RuntimeError(f"Router address not configured for DEX: {dex}")
+
+    # Startup inspection of all registered chain DEX routers
+    validate_all_chain_configurations()
+
+    # Enforce router uniqueness in active chain if LIVE
+    if TRADING_MODE == "LIVE":
+        is_valid, reason, _ = validate_chain_dex_routers(CHAIN_ID)
+        if not is_valid:
+            raise RuntimeError(f"Cannot start in LIVE mode on chain {CHAIN_ID}: {reason}")
 
     if DEFAULT_TRADE_AMOUNT <= 0:
         raise RuntimeError("DEFAULT_TRADE_AMOUNT must be greater than zero.")

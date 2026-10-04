@@ -121,6 +121,12 @@ try:
         scrub_legacy_private_keys()
     except Exception:
         pass
+
+    # Startup inspection: validate DEX routers across all registered chains
+    try:
+        config.validate_all_chain_configurations()
+    except Exception as _r_err:
+        print(f"[DEX App] Router configuration check warning: {_r_err}", flush=True)
     if "contract_address" in _saved and _saved["contract_address"]:
         config.ARBITRAGE_CONTRACT_ADDRESS = str(_saved["contract_address"]).strip()
     if "chain_id" in _saved:
@@ -455,6 +461,10 @@ def market_api():
                 "message": "Unable to fetch on-chain DEX reserves. Check RPC node status."
             }), 503
 
+        if not market.get("arbitrage_available", True):
+            market["timestamp"] = time.time() * 1000
+            return jsonify(market), 200
+
         market["timestamp"] = time.time() * 1000
 
         # Calculate live wallet equity
@@ -592,6 +602,17 @@ def verify_profit_api():
         active_chain_id = getattr(config, "CHAIN_ID", 8453)
         chain_info = config.CHAIN_REGISTRY.get(active_chain_id, {})
 
+        # Phase 8 Router Uniqueness Guard
+        is_routers_valid, router_reason, _ = config.validate_chain_dex_routers(active_chain_id)
+        if not is_routers_valid:
+            return jsonify({
+                "is_profitable": False,
+                "arbitrage_available": False,
+                "net_profit_usdt": 0.0,
+                "skip_reason": router_reason,
+                "message": router_reason,
+            })
+
         parts = config.SYMBOL.split("/")
         base_sym = parts[0] if len(parts) > 0 else "WETH"
         quote_sym = parts[1] if len(parts) > 1 else "USDT"
@@ -612,8 +633,10 @@ def verify_profit_api():
         if len(quotes) < 2:
             return jsonify({
                 "is_profitable": False,
+                "arbitrage_available": False,
                 "net_profit_usdt": 0.0,
-                "skip_reason": "INSUFFICIENT_PROFIT: Less than 2 DEXes available for arbitrage",
+                "skip_reason": "Arbitrage unavailable: fewer than two valid DEX routers configured.",
+                "message": "Arbitrage unavailable: fewer than two valid DEX routers configured.",
             })
 
         # Find the best buy/sell pair
@@ -1075,9 +1098,26 @@ def manual_trade_api():
             except Exception:
                 pass
 
+        # Router validation guard (Phase 8)
+        active_cid = getattr(config, "CHAIN_ID", 8453)
+        is_routers_valid, router_reason, _ = config.validate_chain_dex_routers(active_cid)
+        if not is_routers_valid:
+            return jsonify({
+                "success": False,
+                "status": "ARBITRAGE_UNAVAILABLE",
+                "message": router_reason
+            }), 400
+
         market = analyze_market(custom_amount=custom_amount)
         if not market:
             return jsonify({"success": False, "message": "Unable to fetch on-chain DEX reserves."}), 503
+
+        if not market.get("arbitrage_available", True):
+            return jsonify({
+                "success": False,
+                "status": "ARBITRAGE_UNAVAILABLE",
+                "message": market.get("message", "Arbitrage unavailable: fewer than two valid DEX routers configured.")
+            }), 400
 
         result = execute_real_trade(market, custom_amount=custom_amount, is_manual=True)
         last_background_trade_result = result
@@ -1177,6 +1217,14 @@ def confirm_live_trade_api():
             }), 400
 
         target_chain_id = int(req.get("chain_id") or config.CHAIN_ID)
+        is_routers_valid, router_reason, _ = config.validate_chain_dex_routers(target_chain_id)
+        if not is_routers_valid:
+            return jsonify({
+                "success": False,
+                "status": "ARBITRAGE_UNAVAILABLE",
+                "message": router_reason
+            }), 400
+
         if target_chain_id in config.CHAIN_REGISTRY and target_chain_id != config.CHAIN_ID:
             config.set_active_chain(target_chain_id)
 

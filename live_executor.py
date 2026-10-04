@@ -263,6 +263,14 @@ def execute_live(plan: Dict[str, Any]) -> Dict[str, Any]:
         dec = int(quote_tok["decimals"])
 
         buy_dex, sell_dex = plan["buy_dex"], plan["sell_dex"]
+        cid = int(plan.get("chain_id", getattr(config, "CHAIN_ID", 8453)))
+        is_valid_routers, router_reason, _ = config.validate_chain_dex_routers(cid)
+        if not is_valid_routers:
+            return _fail("TRADE SKIPPED", router_reason)
+
+        if buy_dex == sell_dex or config.DEX_ROUTERS.get(buy_dex, "").lower() == config.DEX_ROUTERS.get(sell_dex, "").lower():
+            return _fail("TRADE SKIPPED", "Arbitrage unavailable: fewer than two valid DEX routers configured.")
+
         router_buy = Web3.to_checksum_address(config.DEX_ROUTERS[buy_dex])
         router_sell = Web3.to_checksum_address(config.DEX_ROUTERS[sell_dex])
         token_in = Web3.to_checksum_address(quote_tok["address"])

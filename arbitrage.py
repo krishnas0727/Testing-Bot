@@ -200,6 +200,26 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
     base_sym = parts[0] if len(parts) > 0 else "WETH"
     quote_sym = parts[1] if len(parts) > 1 else "USDT"
 
+    # Phase 8 Router Uniqueness & Availability Gate
+    is_routers_valid, router_reason, valid_dexes = config.validate_chain_dex_routers(chain_id_val)
+    if not is_routers_valid:
+        return {
+            "success": False,
+            "arbitrage_available": False,
+            "status": "ARBITRAGE_UNAVAILABLE",
+            "message": router_reason,
+            "skip_reason": router_reason,
+            "chain_id": chain_id_val,
+            "chain_name": chain_name_val,
+            "chain_label": chain_label_val,
+            "routes": [],
+            "best_route": None,
+            "is_profitable": False,
+            "net_profit_usdt": 0.0,
+            "prices": {},
+            "timestamp": time.time() * 1000
+        }
+
     now = time.time()
     cache_key = f"{chain_id_val}_{round(trade_amount, 4)}_{base_sym}_{quote_sym}"
     if cache_key in _MARKET_CACHE:
@@ -214,7 +234,22 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
         return None
 
     if len(quotes) < 2:
-        return None
+        return {
+            "success": False,
+            "arbitrage_available": False,
+            "status": "ARBITRAGE_UNAVAILABLE",
+            "message": "Arbitrage unavailable: fewer than two valid DEX routers configured.",
+            "skip_reason": "Arbitrage unavailable: fewer than two valid DEX routers configured.",
+            "chain_id": chain_id_val,
+            "chain_name": chain_name_val,
+            "chain_label": chain_label_val,
+            "routes": [],
+            "best_route": None,
+            "is_profitable": False,
+            "net_profit_usdt": 0.0,
+            "prices": {},
+            "timestamp": time.time() * 1000
+        }
 
     prices = {}
     reserves = {}
@@ -565,10 +600,16 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
     if not is_manual and (now - last_trade_time) < cooldown:
         return _skip(f"Cooldown active ({int(cooldown - (now - last_trade_time))}s remaining)")
 
-    # Gate 4: Route availability & profitability check
+    # Gate 4: Route availability, router validation & profitability check
     route = market.get("best_route") if "best_route" in market else market
     if not route:
         return _skip("No valid DEX route available")
+
+    # Gate 4a: Router validation & uniqueness guard (Phase 8)
+    active_cid = int(route.get("chain_id") or getattr(config, "CHAIN_ID", 8453))
+    is_routers_valid, router_reason, _ = config.validate_chain_dex_routers(active_cid)
+    if not is_routers_valid:
+        return _skip(router_reason)
 
     # Reject immediately if candidate route price impact exceeds maximum tolerance
     passed_impact = float(route.get("max_price_impact_pct", 0.0))
@@ -627,6 +668,15 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
 
     buy_dex = route.get("buy_dex", "")
     sell_dex = route.get("sell_dex", "")
+
+    if buy_dex == sell_dex:
+        return _skip("Arbitrage unavailable: fewer than two valid DEX routers configured.")
+
+    chain_routers = config.CHAIN_REGISTRY.get(active_cid, {}).get("routers", getattr(config, "DEX_ROUTERS", {}))
+    buy_r = chain_routers.get(buy_dex, "")
+    sell_r = chain_routers.get(sell_dex, "")
+    if buy_r and sell_r and buy_r.lower() == sell_r.lower():
+        return _skip("Arbitrage unavailable: fewer than two valid DEX routers configured.")
 
     # ============================================================
     # Gate 6+7+8: FRESH QUOTE + FULL PROFIT RECALCULATION

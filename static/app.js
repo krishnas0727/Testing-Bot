@@ -286,8 +286,7 @@ const CLIENT_ROUTER_ADDRESSES = {
         SushiSwap_V2: "0xeaBcE3E74EF41FB40024a21Cc2ee2F5dDc615791"
     },
     84532: { // Base Sepolia Testnet
-        Uniswap_V2: "0x1662C4Ca803B6d5d42C85d552318b7625038923d",
-        SushiSwap_V2: "0x1662C4Ca803B6d5d42C85d552318b7625038923d"
+        Uniswap_V2: "0x1662C4Ca803B6d5d42C85d552318b7625038923d"
     }
 };
 
@@ -313,8 +312,7 @@ const CLIENT_FACTORY_ADDRESSES = {
         SushiSwap_V2: "0x734583F62bB6acE3c9bA9Bd5a53143CA2CE8c55a"
     },
     84532: {
-        Uniswap_V2: "0xF62c03E08ada871A0bEb309762E260a7a6a880E6",
-        SushiSwap_V2: "0xF62c03E08ada871A0bEb309762E260a7a6a880E6"
+        Uniswap_V2: "0xF62c03E08ada871A0bEb309762E260a7a6a880E6"
     }
 };
 
@@ -3807,6 +3805,18 @@ async function executeMetaMaskOnChainTrade(options = {}) {
                 status: "CONFIGURATION_ERROR",
                 message: `No token or router contracts registered for ${targetChainInfo.name}.`
             });
+            return;
+        }
+
+        const routerAddresses = Object.values(routers).filter(a => typeof a === 'string' && a.length === 42);
+        const uniqueRouters = new Set(routerAddresses.map(a => a.toLowerCase()));
+        if (uniqueRouters.size < 2) {
+            renderExecutionResult({
+                success: false,
+                status: "ARBITRAGE_UNAVAILABLE",
+                message: "Arbitrage unavailable: fewer than two valid DEX routers configured."
+            });
+            showToast("Arbitrage unavailable: fewer than two valid DEX routers configured.", "warning");
             return;
         }
 

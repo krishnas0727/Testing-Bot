@@ -539,11 +539,19 @@ def simulate_atomic_arbitrage(plan: Dict[str, Any]) -> Dict[str, Any]:
     expected_profit = float(plan.get("net_profit_usdt", 0))
     buy_dex = plan.get("buy_dex")
     sell_dex = plan.get("sell_dex")
+    cid = int(plan.get("chain_id", getattr(config, "CHAIN_ID", 8453)))
+    chain_routers = config.CHAIN_REGISTRY.get(cid, {}).get("routers", getattr(config, "DEX_ROUTERS", {}))
+    buy_r = chain_routers.get(buy_dex, "")
+    sell_r = chain_routers.get(sell_dex, "")
 
     if amount_in <= 0:
         return {"success": False, "status": "SIMULATION_FAILED", "message": "Amount must be positive."}
-    if buy_dex == sell_dex:
-        return {"success": False, "status": "SIMULATION_FAILED", "message": "Buy and sell DEX must differ."}
+    if buy_dex == sell_dex or (buy_r and sell_r and buy_r.lower() == sell_r.lower()):
+        return {
+            "success": False,
+            "status": "SIMULATION_FAILED",
+            "message": "Arbitrage unavailable: fewer than two valid DEX routers configured."
+        }
 
     # Verify atomic profitability condition:
     # final_return must exceed amount_in and expected net profit must be strictly positive (> 0).
@@ -584,6 +592,16 @@ def execute_atomic_trade(plan: Dict[str, Any], is_manual: bool = False) -> Dict[
             "success": False,
             "status": "BLOCKED_EMERGENCY_STOP",
             "message": "Emergency stop is active; execution blocked."
+        }
+
+    # Guard 1b: Router uniqueness & availability guard (Phase 8)
+    cid = int(plan.get("chain_id", getattr(config, "CHAIN_ID", 8453)))
+    is_valid_routers, router_reason, _ = config.validate_chain_dex_routers(cid)
+    if not is_valid_routers:
+        return {
+            "success": False,
+            "status": "ARBITRAGE_UNAVAILABLE",
+            "message": router_reason
         }
 
     # Guard 2: Mode validation & safe simulation in MOCK mode
