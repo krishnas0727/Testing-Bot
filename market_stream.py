@@ -35,6 +35,7 @@ class OnChainDEXStream:
             now = time.time()
             out = {}
             for name, item in self._data.items():
+                x = dict(item)
                 age_ms = max(0.0, (now - x.get("received_at", now)) * 1000.0)
                 x["age_ms"] = round(age_ms, 1)
                 if age_ms <= 6000:

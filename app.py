@@ -1859,12 +1859,14 @@ def live_verification_run_route():
 @app.route("/api/pnl", methods=["GET"])
 def pnl_api():
     try:
-        pnl = get_live_pnl_summary()
+        mode_param = request.args.get("mode") or getattr(config, "TRADING_MODE", "LIVE")
+        pnl = get_live_pnl_summary(mode=mode_param if mode_param != "ALL" else None)
         uptime = max(0, int(time.time() - SERVER_STARTED_AT))
         pnl["uptime_seconds"] = uptime
         pnl["uptime_text"] = f"{uptime // 3600}h {(uptime % 3600) // 60}m {uptime % 60}s"
         pnl["engine_status"] = get_engine_status()
         pnl["last_execution_status"] = globals().get("last_execution_status", get_engine_status())
+        pnl["mode"] = mode_param
         return jsonify({"success": True, **pnl})
     except Exception as exc:
         return jsonify({"success": False, "message": str(exc)}), 500

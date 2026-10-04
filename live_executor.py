@@ -305,15 +305,16 @@ def execute_live(plan: Dict[str, Any]) -> Dict[str, Any]:
             f_wbal = _pool.submit(lambda: erc.functions.balanceOf(acct.address).call())
             f_cbal = _pool.submit(lambda: erc.functions.balanceOf(contract_addr).call())
             f_alw = _pool.submit(lambda: erc.functions.allowance(acct.address, contract_addr).call())
+            f_eth_bal = _pool.submit(lambda: w3.eth.get_balance(acct.address))
 
             # balances first (cheap, decides whether the trade is even fundable)
             wallet_bal, contract_bal, allowance = f_wbal.result(), f_cbal.result(), f_alw.result()
             shortfall = max(0, amount_in_raw - contract_bal)
             if shortfall > wallet_bal:
-                return _fail("INSUFFICIENT BALANCE",
+                return _fail("INSUFFICIENT_TOKEN_BALANCE",
                              f"Need {amount_in_f} {quote_sym}; wallet has {wallet_bal / 10 ** dec:.4f} and contract holds {contract_bal / 10 ** dec:.4f}.")
             if shortfall > 0 and allowance < shortfall:
-                return _fail("TOKEN ALLOWANCE REQUIRED",
+                return _fail("TOKEN_ALLOWANCE_REQUIRED",
                              f"Approve the contract to spend {quote_sym} (python setup_live.py approve), or transfer {quote_sym} to the contract.")
 
             try:
@@ -324,14 +325,14 @@ def execute_live(plan: Dict[str, Any]) -> Dict[str, Any]:
             quoted_profit = (leg2_raw - amount_in_raw) / 10 ** dec      # before gas; can be negative
             exp_profit = max(0.0, exp_profit_raw / 10 ** dec)
             if not profitable or exp_profit_raw < min_profit_raw:
-                return _fail("TRADE SKIPPED",
+                return _fail("SIMULATION_FAILED",
                              f"On-chain router quote: {quoted_profit:+.4f} {quote_sym} before gas, need >= "
                              f"{min_profit_raw / 10 ** dec:.4f} (gas + margin). Spread gone / too thin. Nothing sent, no gas spent.", t)
 
             try:
                 gas_est = f_gas.result()
             except Exception as exc:
-                return _fail("SIMULATION_REVERTED", f"eth_estimateGas reverted -> tx would fail. Nothing sent. Detail: {exc}", t)
+                return _fail("GAS_ESTIMATION_FAILED", f"eth_estimateGas reverted -> tx would fail. Nothing sent. Detail: {exc}", t)
             t["gas_sim"] = _now_ms() - t1
 
             # ---- fees -----------------------------------------------------------------------
@@ -343,9 +344,17 @@ def execute_live(plan: Dict[str, Any]) -> Dict[str, Any]:
             max_fee = int(base_fee * 2 + tip)
             gwei = max_fee / 1e9
             if gwei > float(_cfg("MAX_GAS_PRICE_GWEI", 50.0)):
-                return _fail("TRADE SKIPPED", f"Gas {gwei:.4f} Gwei exceeds MAX_GAS_PRICE_GWEI.", t)
+                return _fail("TRADE_SKIPPED", f"Gas {gwei:.4f} Gwei exceeds MAX_GAS_PRICE_GWEI.", t)
 
             gas_limit = int(gas_est * float(_cfg("LIVE_GAS_LIMIT_BUFFER", 1.3)))
+
+            # Gas balance check (Requirement 5)
+            required_gas_wei = int(gas_limit * max_fee)
+            signer_eth_bal = f_eth_bal.result()
+            if signer_eth_bal < required_gas_wei:
+                return _fail("INSUFFICIENT_GAS_BALANCE",
+                             f"Signer has {signer_eth_bal / 1e18:.6f} ETH for gas; need at least {required_gas_wei / 1e18:.6f} ETH.", t)
+
             tx = arb.functions.executeArbitrage(params).build_transaction({
                 "from": acct.address, "nonce": f_nonce.result(), "chainId": config.CHAIN_ID,
                 "gas": gas_limit, "maxFeePerGas": max_fee, "maxPriorityFeePerGas": tip, "type": 2,
@@ -439,7 +448,7 @@ def execute_live(plan: Dict[str, Any]) -> Dict[str, Any]:
             "gross_profit": actual_profit, "net_profit": net_profit, "gas_used": gas_used,
             "gas_price_gwei": round(eff_price / 1e9, 6), "gas_cost_usdt": round(gas_usd, 6),
             "price_impact": float(plan.get("max_price_impact_pct", 0.0)), "slippage": float(_cfg("SLIPPAGE_PCT", 0.5)),
-            "status": "CONFIRMED" if net_profit > 0 else "UNPROFITABLE",
+            "status": "CONFIRMED" if net_profit > 0 else "FAILED",
             "mode": _cfg("TRADING_MODE", "LIVE"), "created_at": datetime.now().astimezone().isoformat(),
             "timings_ms": {k: round(v, 1) for k, v in t.items()},
         }

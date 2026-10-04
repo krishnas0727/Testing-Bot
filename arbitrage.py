@@ -521,9 +521,13 @@ def _calculate_net_profit(trade_amt: float, buy_q: dict, sell_q: dict, gas_price
 
     is_gas_ok = gas_price_gwei <= float(getattr(config, "MAX_GAS_PRICE_GWEI", 50.0))
     is_impact_ok = max_impact <= float(getattr(config, "MAX_PRICE_IMPACT_PCT", 1.0))
-    required_margin = 0.0 if getattr(config, "TRADING_MODE", "MOCK").upper() == "MOCK" else float(getattr(config, "LIVE_MIN_NET_PROFIT_USDT", 0.01))
+    min_profit_threshold = float(getattr(config, "MIN_PROFIT_USDT", 0.005))
+    if getattr(config, "TRADING_MODE", "MOCK").upper() != "MOCK":
+        min_profit_threshold = max(min_profit_threshold, float(getattr(config, "LIVE_MIN_NET_PROFIT_USDT", 0.01)))
+
     is_profitable = (
-        net_profit_usdt > required_margin
+        net_profit_usdt > 0.0
+        and net_profit_usdt >= min_profit_threshold
         and net_profit_pct > 0.0
         and is_gas_ok
         and is_impact_ok
@@ -551,9 +555,9 @@ def _calculate_net_profit(trade_amt: float, buy_q: dict, sell_q: dict, gas_price
         "is_gas_acceptable": is_gas_ok,
         "is_impact_acceptable": is_impact_ok,
         "skip_reason": "" if is_profitable else (
-            f"INSUFFICIENT_PROFIT: Net ${net_profit_usdt:.6f} USDT "
+            f"INSUFFICIENT_PROFIT: Net ${net_profit_usdt:.6f} USDT is below threshold (${min_profit_threshold:.6f} USDT) "
             f"(Gross ${gross_profit_usdt:.6f} - Gas ${gas_cost_usdt:.6f} - Slip ${slippage_cost_usdt:.6f})"
-            if not is_gas_ok is False and not is_impact_ok is False
+            if is_gas_ok and is_impact_ok
             else (f"Gas too high ({gas_price_gwei:.2f} Gwei)" if not is_gas_ok
                   else f"Price impact too high ({max_impact:.2f}%)")
         ),
@@ -610,6 +614,17 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
     is_routers_valid, router_reason, _ = config.validate_chain_dex_routers(active_cid)
     if not is_routers_valid:
         return _skip(router_reason)
+
+    buy_dex = route.get("buy_dex", "")
+    sell_dex = route.get("sell_dex", "")
+    if buy_dex and sell_dex:
+        if buy_dex == sell_dex:
+            return _skip("Arbitrage unavailable: fewer than two valid DEX routers configured.")
+        chain_routers = config.CHAIN_REGISTRY.get(active_cid, {}).get("routers", getattr(config, "DEX_ROUTERS", {}))
+        buy_r = chain_routers.get(buy_dex, "")
+        sell_r = chain_routers.get(sell_dex, "")
+        if buy_r and sell_r and buy_r.lower() == sell_r.lower():
+            return _skip("Arbitrage unavailable: fewer than two valid DEX routers configured.")
 
     # Reject immediately if candidate route price impact exceeds maximum tolerance
     passed_impact = float(route.get("max_price_impact_pct", 0.0))
@@ -732,8 +747,12 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
     )
 
     # Gate 8: Net profit must be > 0 after ALL costs (gas + slippage + fees)
-    if not profit_check["is_profitable"]:
-        reason = profit_check.get("skip_reason", "INSUFFICIENT_PROFIT")
+    min_profit_threshold = float(getattr(config, "MIN_PROFIT_USDT", 0.005))
+    if mode == "LIVE":
+        min_profit_threshold = max(min_profit_threshold, float(getattr(config, "LIVE_MIN_NET_PROFIT_USDT", 0.01)))
+
+    if not profit_check.get("is_profitable") or float(profit_check.get("net_profit_usdt", 0.0)) <= 0 or float(profit_check.get("net_profit_usdt", 0.0)) < min_profit_threshold:
+        reason = profit_check.get("skip_reason") or f"INSUFFICIENT_PROFIT: Net profit (${profit_check.get('net_profit_usdt', 0.0):.6f} USDT) is not above threshold (${min_profit_threshold:.6f} USDT)"
         print(f"[PROFIT CHECK] BLOCKED: {reason}", flush=True)
         return _skip(reason,
                      gross_profit_usdt=profit_check["gross_profit_usdt"],
@@ -812,29 +831,28 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
             trade_data["verified_net_profit"] = profit_check["net_profit_usdt"]
 
             # Final safety check: NEVER record a trade as successful if net profit is <= 0
-            if profit_check["net_profit_usdt"] <= 0:
-                print(f"[TRADE BLOCKED] Net profit is negative or zero (${profit_check['net_profit_usdt']:.6f} USDT). Not saving as confirmed.", flush=True)
-                trade_data["status"] = "UNPROFITABLE"
+            actual_net = float(trade_data.get("net_profit", profit_check["net_profit_usdt"]))
+            if actual_net <= 0:
+                print(f"[TRADE BLOCKED] Net profit is negative or zero (${actual_net:.6f} USDT). Not saving as confirmed.", flush=True)
+                trade_data["status"] = "FAILED"
                 result["success"] = False
                 result["status"] = "INSUFFICIENT_PROFIT"
-                result["message"] = f"Trade aborted: Net profit was not positive (${profit_check['net_profit_usdt']:.6f} USDT)."
+                result["message"] = f"Trade aborted: Net profit was not positive (${actual_net:.6f} USDT)."
             else:
+                trade_data["status"] = "CONFIRMED"
                 tx_hash = trade_data.get("tx_hash") or result.get("tx_hash")
                 if tx_hash:
-                    print(f"[TRADE CONFIRMED] tx={tx_hash} net_profit=${profit_check['net_profit_usdt']:.6f} USDT", flush=True)
-                    save_trade(trade_data)
-                else:
-                    # MOCK / simulation — save for record
-                    save_trade(trade_data)
+                    print(f"[TRADE CONFIRMED] tx={tx_hash} net_profit=${actual_net:.6f} USDT", flush=True)
+                save_trade(trade_data)
     else:
         print(f"[TRADE FAILED] {result.get('message', 'Unknown error')} — NOT recording profit.", flush=True)
-        if result.get("status") == "REVERTED" and result.get("tx_hash"):
+        if result.get("status") in ("REVERTED", "FAILED") and result.get("tx_hash"):
             gas_lost = float(result.get("gas_cost_usdt", 0.0))
             save_trade({
                 "tx_hash": result["tx_hash"], "chain_id": active_cid, "buy_dex": buy_dex, "sell_dex": sell_dex,
                 "token_pair": config.SYMBOL, "amount_in": trade_amt, "amount_out": trade_amt,
                 "gross_profit": 0.0, "net_profit": -gas_lost, "gas_used": int(result.get("gas_used", 0)),
-                "gas_cost_usdt": gas_lost, "status": "REVERTED", "mode": mode,
+                "gas_cost_usdt": gas_lost, "status": "FAILED", "mode": mode,
             })
 
     return result
