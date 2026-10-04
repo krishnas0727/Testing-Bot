@@ -36,6 +36,8 @@ ENV/
 
 # Database & SQLite
 data/
+data_localtest/
+.pytest_cache/
 *.db
 *.sqlite
 *.sqlite3

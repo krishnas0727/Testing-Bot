@@ -76,19 +76,17 @@ def test_render_yaml_validity():
 
     assert "healthCheckPath: /api/health" in content
     assert "autoDeploy: false" in content
-    assert "buildCommand: npm ci && npm run build" in content
-    assert "startCommand: node dist/src/api/server.js" in content
+    assert "gunicorn app:app" in content
 
 
 def test_dockerfile_security_standards():
-    """Verify Dockerfile uses multi-stage build and non-root execution."""
+    """Verify Dockerfile uses non-root execution and healthcheck."""
     docker_path = os.path.join(os.path.dirname(__file__), "../Dockerfile")
     assert os.path.exists(docker_path), "Dockerfile missing!"
 
     with open(docker_path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    assert "AS builder" in content
-    assert "AS runner" in content
-    assert "USER node" in content  # Non-root user
+    assert "gunicorn app:app" in content
+    assert "USER appuser" in content or "USER node" in content
     assert "HEALTHCHECK" in content

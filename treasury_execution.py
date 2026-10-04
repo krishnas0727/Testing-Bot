@@ -1,9 +1,9 @@
 """Real Blockchain Treasury Withdrawal Module.
 
-Executes genuine on-chain withdrawals from deployed Treasury or DexArbitrage smart contracts.
+Executes genuine on-chain withdrawals from deployed DexArbitrage smart contracts.
 Strictly adheres to Phase 5 requirements:
 - Validates token, recipient, amount
-- Validates contract token balance on-chain
+- Validates contract token balance on-chain and caps withdrawal to actual balance
 - Submits actual signed transaction to Web3 RPC
 - Waits for receipt and verifies EVM status == 0x1
 - Never invents fake transaction hashes
@@ -38,16 +38,12 @@ ERC20_ABI = [
     }
 ]
 
-TREASURY_WITHDRAW_ABI = [
+DEX_ARBITRAGE_ABI = [
     {
-        "inputs": [
-            {"internalType": "address", "name": "token", "type": "address"},
-            {"internalType": "uint256", "name": "amount", "type": "uint256"},
-            {"internalType": "address", "name": "recipient", "type": "address"}
-        ],
-        "name": "withdraw",
-        "outputs": [],
-        "stateMutability": "nonpayable",
+        "inputs": [],
+        "name": "owner",
+        "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+        "stateMutability": "view",
         "type": "function"
     },
     {
@@ -56,6 +52,13 @@ TREASURY_WITHDRAW_ABI = [
             {"internalType": "uint256", "name": "amount", "type": "uint256"}
         ],
         "name": "withdrawToken",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "withdrawETH",
         "outputs": [],
         "stateMutability": "nonpayable",
         "type": "function"
@@ -71,7 +74,7 @@ def check_contract_balance(
 ) -> float:
     """Query on-chain ERC20 token balance held by the contract."""
     try:
-        if token_address == "0x0000000000000000000000000000000000000000" or token_address.lower() == "eth":
+        if token_address == "0x0000000000000000000000000000000000000000" or str(token_address).lower() == "eth":
             raw_bal = w3.eth.get_balance(Web3.to_checksum_address(contract_address))
             return float(raw_bal) / 1e18
 
@@ -123,7 +126,6 @@ def submit_blockchain_withdrawal(
             "message": f"Invalid signing private key: {e}"
         }
 
-    chain_info = config.CHAIN_REGISTRY.get(chain_id, {})
     tokens_map = chain_info.get("tokens", {})
     token_info = tokens_map.get(token_symbol, {})
     token_address = token_info.get("address", "")
@@ -136,7 +138,37 @@ def submit_blockchain_withdrawal(
             "message": f"Token contract address for {token_symbol} not found on chain {chain_id}."
         }
 
-    # Verify contract balance on-chain
+    contract = w3.eth.contract(
+        address=Web3.to_checksum_address(contract_address),
+        abi=DEX_ARBITRAGE_ABI
+    )
+
+    # 1. Verify that the signer is the contract owner
+    try:
+        contract_owner = contract.functions.owner().call()
+    except Exception as exc:
+        return {
+            "success": False,
+            "status": "CONTRACT_CALL_FAILED",
+            "message": f"Failed to query contract owner: {exc}"
+        }
+
+    if Web3.to_checksum_address(signer_address) != Web3.to_checksum_address(contract_owner):
+        return {
+            "success": False,
+            "status": "UNAUTHORIZED_SIGNER",
+            "message": f"Signer {signer_address} is not the contract owner ({contract_owner})."
+        }
+
+    # 2. Check recipient: funds go to owner wallet via withdrawToken
+    if recipient and Web3.to_checksum_address(recipient) != Web3.to_checksum_address(contract_owner):
+        return {
+            "success": False,
+            "status": "INVALID_RECIPIENT",
+            "message": f"DexArbitrage withdrawToken sends funds to owner ({contract_owner}); recipient {recipient} cannot be used. Actual destination is {contract_owner}."
+        }
+
+    # 3. Verify contract balance on-chain and cap amount
     contract_bal = check_contract_balance(w3, contract_address, token_address, decimals)
     if contract_bal < amount:
         return {
@@ -148,49 +180,54 @@ def submit_blockchain_withdrawal(
             )
         }
 
-    amount_raw = int(amount * (10 ** decimals))
-    contract = w3.eth.contract(address=Web3.to_checksum_address(contract_address), abi=TREASURY_WITHDRAW_ABI)
+    token_contract = w3.eth.contract(
+        address=Web3.to_checksum_address(token_address),
+        abi=ERC20_ABI
+    )
+    raw_balance = token_contract.functions.balanceOf(Web3.to_checksum_address(contract_address)).call()
+    amount_raw = min(int(amount * (10 ** decimals)), raw_balance)
 
     try:
-        # Build transaction (try 3-arg withdraw(token, amount, recipient) or 2-arg withdrawToken)
         nonce = w3.eth.get_transaction_count(signer_address, "pending")
-        gas_price = w3.eth.gas_price
 
-        # Check function existence
-        tx_data = None
+        # EIP-1559 fees (as in live_executor.py)
+        latest_block = w3.eth.get_block("latest")
+        base_fee = int(latest_block.get("baseFeePerGas", 0))
         try:
-            tx_data = contract.functions.withdraw(
-                Web3.to_checksum_address(token_address),
-                amount_raw,
-                Web3.to_checksum_address(recipient)
-            ).build_transaction({
-                "from": signer_address,
-                "nonce": nonce,
-                "gasPrice": gas_price,
-                "chainId": chain_id
-            })
+            tip = int(w3.eth.max_priority_fee)
         except Exception:
-            tx_data = contract.functions.withdrawToken(
-                Web3.to_checksum_address(token_address),
-                amount_raw
-            ).build_transaction({
-                "from": signer_address,
-                "nonce": nonce,
-                "gasPrice": gas_price,
-                "chainId": chain_id
-            })
+            tip = 1_000_000  # 0.001 gwei fallback
+        max_tip = int(float(getattr(config, "LIVE_MAX_PRIORITY_GWEI", 0.05)) * 1e9)
+        tip = max(1, min(tip, max_tip))
+        max_fee = int(base_fee * 2 + tip)
 
-        # Estimate gas
+        tx_data = contract.functions.withdrawToken(
+            Web3.to_checksum_address(token_address),
+            amount_raw
+        ).build_transaction({
+            "from": signer_address,
+            "nonce": nonce,
+            "maxFeePerGas": max_fee,
+            "maxPriorityFeePerGas": tip,
+            "type": 2,
+            "chainId": chain_id
+        })
+
+        # Run estimate_gas first. If it raises, return status GAS_ESTIMATION_FAILED and send nothing.
         try:
             estimated_gas = w3.eth.estimate_gas(tx_data)
-            tx_data["gas"] = int(estimated_gas * 1.3)
-        except Exception:
-            tx_data["gas"] = 150000
+            tx_data["gas"] = int(estimated_gas * float(getattr(config, "LIVE_GAS_LIMIT_BUFFER", 1.3)))
+        except Exception as exc:
+            return {
+                "success": False,
+                "status": "GAS_ESTIMATION_FAILED",
+                "message": f"Gas estimation failed (tx would revert): {exc}"
+            }
 
-        # Sign transaction
+        # Sign transaction using eth_account
         signed_tx = w3.eth.account.sign_transaction(tx_data, private_key)
-        # Broadcast transaction
-        tx_hash_bytes = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+        # Broadcast transaction using raw_transaction
+        tx_hash_bytes = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
         real_tx_hash = "0x" + tx_hash_bytes.hex().lower().removeprefix("0x")
 
         # Wait for receipt
@@ -211,7 +248,9 @@ def submit_blockchain_withdrawal(
             "status": "CONFIRMED",
             "tx_hash": real_tx_hash,
             "block_number": receipt.get("blockNumber"),
-            "gas_used": receipt.get("gasUsed")
+            "gas_used": receipt.get("gasUsed"),
+            "recipient": contract_owner,
+            "message": f"Successfully executed on-chain withdrawal of {amount:.4f} {token_symbol} to owner {contract_owner}."
         }
 
     except Exception as exc:

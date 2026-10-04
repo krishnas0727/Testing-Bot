@@ -409,6 +409,35 @@ def require_api_auth(f=None, *, methods=None):
     return decorated_function
 
 
+def is_request_authenticated() -> bool:
+    """Return True if the current request presents a valid API token."""
+    expected_token = (
+        getattr(config, "API_AUTH_TOKEN", "") or os.environ.get("API_AUTH_TOKEN", "")
+    ).strip()
+    if not expected_token:
+        return False
+    auth_header = request.headers.get("Authorization", "").strip()
+    token = ""
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header[7:].strip()
+    elif auth_header:
+        token = auth_header
+    else:
+        token = (request.headers.get("X-API-Token") or request.headers.get("X-API-Key") or "").strip()
+    if not token:
+        return False
+    return hmac.compare_digest(token, expected_token)
+
+
+def mask_sensitive_address(addr: str) -> str:
+    """Redact or mask a sensitive blockchain address when unauthenticated."""
+    if not addr:
+        return ""
+    if len(addr) >= 10:
+        return f"{addr[:6]}...{addr[-4:]} [REDACTED]"
+    return "[REDACTED]"
+
+
 # =====================================================
 # FRONTEND PAGES (SPA)
 # =====================================================
@@ -732,21 +761,60 @@ def treasury_status_api():
 
         total_profit = get_total_profit(mode=mode)
         total_withdrawn = get_total_withdrawn(mode=mode)
-        withdrawable = get_withdrawable_profit(mode=mode)
+
+        profit_source = "database"
+        if mode == "MOCK":
+            withdrawable = get_withdrawable_profit(mode="MOCK")
+            profit_source = "database"
+        else:
+            rpc_url = chain_info.get("rpc_url") or getattr(config, "RPC_URL", "")
+            if contract_addr and rpc_url:
+                try:
+                    from treasury_execution import check_contract_balance
+                    from web3 import Web3
+                    w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 5}))
+                    sym = getattr(config, "SYMBOL", "WETH/USDC")
+                    quote_sym = sym.split("/")[1] if "/" in sym else "USDC"
+                    tokens_map = chain_info.get("tokens", {})
+                    token_info = tokens_map.get(quote_sym, {})
+                    token_addr = token_info.get("address", "")
+                    decimals = int(token_info.get("decimals", 6 if quote_sym in ("USDC", "USDT") else 18))
+                    if w3.is_connected() and token_addr:
+                        on_chain_bal = check_contract_balance(w3, contract_addr, token_addr, decimals)
+                        withdrawable = round(float(on_chain_bal), 4)
+                        profit_source = "contract_on_chain"
+                    else:
+                        withdrawable = get_withdrawable_profit(mode=mode)
+                        profit_source = "database"
+                except Exception:
+                    withdrawable = get_withdrawable_profit(mode=mode)
+                    profit_source = "database"
+            else:
+                withdrawable = get_withdrawable_profit(mode=mode)
+                profit_source = "database"
+
         withdrawals = get_treasury_withdrawals(limit=25, mode=mode)
         buckets = get_treasury_buckets_summary()
         allocations = get_treasury_allocations(limit=15)
 
         treasury_recipient = getattr(config, "WALLET_ADDRESS", "") or getattr(config, "TREASURY_ADDRESS", "")
+        resp_contract_addr = contract_addr
+        if not is_request_authenticated():
+            if treasury_recipient:
+                treasury_recipient = mask_sensitive_address(treasury_recipient)
+            if resp_contract_addr:
+                resp_contract_addr = mask_sensitive_address(resp_contract_addr)
 
         return jsonify({
             "success": True,
             "chain_id": active_cid,
             "chain_name": chain_info.get("name", "sepolia"),
-            "contract_address": contract_addr,
+            "contract_address": resp_contract_addr,
             "total_profit_usdt": total_profit,
             "total_withdrawn_usdt": total_withdrawn,
             "withdrawable_profit_usdt": withdrawable,
+            "withdrawable_profit_source": profit_source,
+            "profit_source": profit_source,
             "treasury_address": treasury_recipient,
             "trading_mode": mode,
             "recent_withdrawals": withdrawals,
@@ -780,6 +848,7 @@ def treasury_withdraw_api():
         recipient = (data.get("recipient_address") or data.get("wallet_address") or getattr(config, "WALLET_ADDRESS", "")).strip()
         client_tx_hash = (data.get("tx_hash") or "").strip()
         chain_id_val = int(data.get("chain_id") or getattr(config, "CHAIN_ID", 11155111))
+        chain_info = config.CHAIN_REGISTRY.get(chain_id_val, {})
         
         # Check trading mode / simulation flag
         req_mode = str(data.get("mode", "")).upper().strip()
@@ -812,13 +881,41 @@ def treasury_withdraw_api():
             }), 400
 
         # 4. Check available withdrawable profit
-        withdrawable = get_withdrawable_profit(mode=mode)
-        if amount > withdrawable:
-            return jsonify({
-                "success": False,
-                "status": "INSUFFICIENT_PROFIT",
-                "message": f"Requested amount (${amount:.4f}) exceeds available withdrawable profit (${withdrawable:.4f})."
-            }), 400
+        if mode == "MOCK" or is_simulation:
+            withdrawable = get_withdrawable_profit(mode="MOCK")
+            if amount > withdrawable:
+                return jsonify({
+                    "success": False,
+                    "status": "INSUFFICIENT_PROFIT",
+                    "message": f"Requested amount (${amount:.4f}) exceeds available withdrawable profit (${withdrawable:.4f})."
+                }), 400
+        else:
+            withdrawable = get_withdrawable_profit(mode="LIVE")
+            contract_check_addr = (
+                getattr(config, "TREASURY_CONTRACT_ADDRESS", "")
+                or getattr(config, "ARBITRAGE_CONTRACT_ADDRESS", "")
+            ).strip()
+            rpc_url = chain_info.get("rpc_url") or getattr(config, "RPC_URL", "")
+            if contract_check_addr and rpc_url:
+                try:
+                    from treasury_execution import check_contract_balance
+                    from web3 import Web3
+                    w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 5}))
+                    tokens_map = chain_info.get("tokens", {})
+                    token_info = tokens_map.get(token, {})
+                    token_addr = token_info.get("address", "")
+                    decimals = int(token_info.get("decimals", 6 if token in ("USDC", "USDT") else 18))
+                    if w3.is_connected() and token_addr:
+                        on_chain_bal = check_contract_balance(w3, contract_check_addr, token_addr, decimals)
+                        withdrawable = max(withdrawable, round(float(on_chain_bal), 4))
+                except Exception:
+                    pass
+            if amount > withdrawable:
+                return jsonify({
+                    "success": False,
+                    "status": "INSUFFICIENT_PROFIT",
+                    "message": f"Requested amount (${amount:.4f}) exceeds available withdrawable profit (${withdrawable:.4f})."
+                }), 400
 
         # 5. Handle MOCK / Simulation Mode
         if mode == "MOCK" or is_simulation:
@@ -980,27 +1077,28 @@ def treasury_withdraw_api():
             }), 400
 
         # Transaction succeeded and receipt status is confirmed
+        actual_dest = exec_result.get("recipient") or recipient
         record_id = record_treasury_withdrawal({
             "tx_hash": real_tx,
             "chain_id": chain_id_val,
             "token": token,
             "amount": amount,
-            "recipient_address": recipient,
+            "recipient_address": actual_dest,
             "status": "CONFIRMED",
             "mode": "LIVE",
-            "notes": f"Confirmed on-chain withdrawal of ${amount:.4f} {token} to {recipient[:6]}...{recipient[-4:]}"
+            "notes": f"Confirmed on-chain withdrawal of ${amount:.4f} {token} to {actual_dest[:6]}...{actual_dest[-4:]}"
         })
 
         return jsonify({
             "success": True,
             "status": "CONFIRMED",
-            "message": f"Successfully executed on-chain withdrawal of ${amount:.4f} {token} to {recipient[:6]}...{recipient[-4:]}.",
+            "message": exec_result.get("message") or f"Successfully executed on-chain withdrawal of ${amount:.4f} {token} to {actual_dest[:6]}...{actual_dest[-4:]}.",
             "withdrawal": {
                 "id": record_id,
                 "tx_hash": real_tx,
                 "token": token,
                 "amount": amount,
-                "recipient_address": recipient,
+                "recipient_address": actual_dest,
                 "chain_id": chain_id_val,
                 "status": "CONFIRMED",
                 "mode": "LIVE"
@@ -1392,6 +1490,8 @@ def wallet_api():
         quotes = get_all_dex_quotes(100.0, base_sym, quote_sym)
         eth_price = list(quotes.values())[0]["spot_price"] if quotes else 3000.0
         wallet = get_wallet_balances(eth_price)
+        if not is_request_authenticated() and isinstance(wallet, dict) and wallet.get("wallet_address"):
+            wallet["wallet_address"] = mask_sensitive_address(wallet["wallet_address"])
         return jsonify({"success": True, "wallet": wallet})
     except Exception as exc:
         return jsonify({"success": False, "message": str(exc)}), 500
@@ -1465,9 +1565,12 @@ def wallet_disconnect_api():
 @app.route("/api/contract", methods=["GET"])
 def contract_api():
     """Return DexArbitrage smart contract metadata and ABI."""
+    contract_addr = getattr(config, "ARBITRAGE_CONTRACT_ADDRESS", "")
+    if not is_request_authenticated() and contract_addr:
+        contract_addr = mask_sensitive_address(contract_addr)
     return jsonify({
         "success": True,
-        "contract_address": getattr(config, "ARBITRAGE_CONTRACT_ADDRESS", ""),
+        "contract_address": contract_addr,
         "chain_id": config.CHAIN_ID,
         "chain": config.DEFAULT_CHAIN,
         "abi": DEX_ARBITRAGE_ABI,
@@ -1670,7 +1773,16 @@ def settings_api():
             "settings": current_settings(),
         })
 
-    return jsonify({"success": True, "settings": current_settings()})
+    settings = current_settings()
+    if not is_request_authenticated():
+        if settings.get("wallet_address"):
+            settings["wallet_address"] = mask_sensitive_address(settings["wallet_address"])
+        if settings.get("contract_address"):
+            settings["contract_address"] = mask_sensitive_address(settings["contract_address"])
+        if settings.get("rpc_url"):
+            settings["rpc_url"] = "[REDACTED]"
+
+    return jsonify({"success": True, "settings": settings})
 
 
 @app.route("/api/chain/switch", methods=["POST"])

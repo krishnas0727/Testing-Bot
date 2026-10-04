@@ -256,6 +256,47 @@ class TestLossBreakerAndEmergencyStop(unittest.TestCase):
         self.assertEqual(fresh_daily_loss, -20.0)
         self.assertTrue(arbitrage.daily_loss_limit_reached())
 
+    def test_failed_live_trade_counts_towards_daily_loss(self):
+        """TASK 1: Verify FAILED LIVE trades count toward daily loss and trigger circuit breaker."""
+        config.MAX_DAILY_LOSS_USDT = 5.0
+
+        # 1. Save a LIVE trade with net_profit -0.50 and status FAILED
+        save_trade({
+            "tx_hash": "0xfailed_live_tx_1",
+            "chain_id": 8453,
+            "buy_dex": "Uniswap_V2",
+            "sell_dex": "SushiSwap_V2",
+            "token_pair": "WETH/USDT",
+            "amount_in": 10.0,
+            "amount_out": 0.0,
+            "gross_profit": -0.50,
+            "net_profit": -0.50,
+            "status": "FAILED",
+            "mode": "LIVE"
+        })
+
+        # Assert get_today_live_profit("LIVE") == -0.5
+        self.assertEqual(get_today_live_profit("LIVE"), -0.5)
+        self.assertFalse(arbitrage.daily_loss_limit_reached())
+
+        # Save additional trade so sum reaches -MAX_DAILY_LOSS_USDT (-5.0)
+        save_trade({
+            "tx_hash": "0xfailed_live_tx_2",
+            "chain_id": 8453,
+            "buy_dex": "Uniswap_V2",
+            "sell_dex": "SushiSwap_V2",
+            "token_pair": "WETH/USDT",
+            "amount_in": 50.0,
+            "amount_out": 0.0,
+            "gross_profit": -4.50,
+            "net_profit": -4.50,
+            "status": "FAILED",
+            "mode": "LIVE"
+        })
+
+        self.assertEqual(get_today_live_profit("LIVE"), -5.0)
+        self.assertTrue(arbitrage.daily_loss_limit_reached())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -411,13 +411,13 @@ def get_today_live_profit(mode: Optional[str] = "LIVE") -> float:
         cursor.execute("""
             SELECT COALESCE(SUM(net_profit), 0.0)
             FROM trades
-            WHERE DATE(created_at) = DATE('now') AND mode = 'MOCK' AND status IN ('CONFIRMED','REVERTED','UNPROFITABLE')
+            WHERE DATE(created_at) = DATE('now') AND mode = 'MOCK' AND status IN ('CONFIRMED','REVERTED','UNPROFITABLE','FAILED')
         """)
     else:
         cursor.execute("""
             SELECT COALESCE(SUM(net_profit), 0.0)
             FROM risk_ledger
-            WHERE DATE(created_at) = DATE('now') AND mode = 'LIVE' AND status IN ('CONFIRMED','REVERTED','UNPROFITABLE')
+            WHERE DATE(created_at) = DATE('now') AND mode = 'LIVE' AND status IN ('CONFIRMED','REVERTED','UNPROFITABLE','FAILED')
         """)
     today_profit = cursor.fetchone()[0]
     conn.close()
