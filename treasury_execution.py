@@ -119,11 +119,11 @@ def submit_blockchain_withdrawal(
         from eth_account import Account
         acct = Account.from_key(private_key)
         signer_address = acct.address
-    except Exception as e:
+    except Exception:
         return {
             "success": False,
             "status": "INVALID_SIGNER_KEY",
-            "message": f"Invalid signing private key: {e}"
+            "message": "Invalid signing private key format."
         }
 
     tokens_map = chain_info.get("tokens", {})

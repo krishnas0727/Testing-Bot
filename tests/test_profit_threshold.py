@@ -19,11 +19,15 @@ class ProfitThresholdAndSkipReasonTests(unittest.TestCase):
         self._orig_emergency = config.EMERGENCY_STOP
         self._orig_auto = config.AUTO_TRADE_ENABLED
         self._orig_armed = config.LIVE_TRADING_ARMED
+        self._orig_chain = getattr(config, "CHAIN_ID", 8453)
+        self._orig_min_profit = getattr(config, "MIN_PROFIT_USDT", 0.005)
 
+        config.set_active_chain(8453)
         config.TRADING_MODE = "MOCK"
         config.EMERGENCY_STOP = False
         config.AUTO_TRADE_ENABLED = False
         config.LIVE_TRADING_ARMED = False
+        config.MIN_PROFIT_USDT = 0.005
         arbitrage.last_trade_time = 0
         arbitrage.last_trade_key = None
 
@@ -32,6 +36,8 @@ class ProfitThresholdAndSkipReasonTests(unittest.TestCase):
         config.EMERGENCY_STOP = self._orig_emergency
         config.AUTO_TRADE_ENABLED = self._orig_auto
         config.LIVE_TRADING_ARMED = self._orig_armed
+        config.MIN_PROFIT_USDT = self._orig_min_profit
+        config.set_active_chain(self._orig_chain)
         arbitrage.last_trade_time = 0
         arbitrage.last_trade_key = None
 
@@ -91,7 +97,7 @@ class ProfitThresholdAndSkipReasonTests(unittest.TestCase):
 
     def test_zero_balance_shows_actual_required_amount(self):
         """Test diagnostic shows actual minimum required amount and never says 'Need at least $1.00' or 'Need $5'."""
-        with patch.object(config, "TRADING_MODE", "LIVE"), patch("wallet_manager.get_wallet_balances") as mock_wb:
+        with patch.object(config, "TRADING_MODE", "LIVE"), patch.object(config, "LIVE_TRADING_ARMED", True), patch("wallet_manager.get_wallet_balances") as mock_wb:
             mock_wb.return_value = {
                 "is_connected": True,
                 "wallet_address": "0x1bcea3bc88cd89f3a5de9c07a5c7b6f2b4f501b4",
@@ -126,7 +132,27 @@ class ProfitThresholdAndSkipReasonTests(unittest.TestCase):
 
     def test_micro_balance_0_05_executes_dynamically(self):
         """Test wallet with $0.05 USDT executes dynamically using safe percentage without requiring $1 or $5."""
-        with patch.object(config, "TRADING_MODE", "LIVE"), patch("wallet_manager.get_wallet_balances") as mock_wb:
+        mock_quotes = {
+            "Uniswap_V2": {"dex": "Uniswap_V2", "spot_price": 2700.0},
+            "SushiSwap_V2": {"dex": "SushiSwap_V2", "spot_price": 2800.0}
+        }
+        with patch.object(config, "TRADING_MODE", "LIVE"), patch.object(config, "LIVE_TRADING_ARMED", True), patch("wallet_manager.get_wallet_balances") as mock_wb, \
+             patch("arbitrage.get_all_dex_quotes", return_value=mock_quotes), \
+             patch("arbitrage._calculate_net_profit", return_value={
+                 "is_profitable": True,
+                 "is_gas_acceptable": True,
+                 "weth_out": 0.000017,
+                 "usdt_out": 0.0650,
+                 "gross_profit_usdt": 0.0160,
+                 "gas_cost_usdt": 0.0005,
+                 "slippage_cost_usdt": 0.0005,
+                 "net_profit_usdt": 0.0150,
+                 "net_profit_pct": 30.0,
+                 "buy_impact_pct": 0.01,
+                 "sell_impact_pct": 0.01,
+                 "max_price_impact_pct": 0.01,
+                 "min_usdt_out": 0.0640,
+             }):
             mock_wb.return_value = {
                 "is_connected": True,
                 "wallet_address": "0x1bcea3bc88cd89f3a5de9c07a5c7b6f2b4f501b4",
@@ -141,7 +167,7 @@ class ProfitThresholdAndSkipReasonTests(unittest.TestCase):
                 "buy_dex": "Uniswap_V2",
                 "sell_dex": "SushiSwap_V2",
                 "amount_in": safe_amt,
-                "net_profit_usdt": 0.0015,
+                "net_profit_usdt": 0.0150,
                 "is_profitable": True,
                 "is_gas_acceptable": True,
             }
@@ -155,7 +181,27 @@ class ProfitThresholdAndSkipReasonTests(unittest.TestCase):
 
     def test_micro_balance_0_20_executes_dynamically(self):
         """Test wallet with $0.20 USDT executes dynamically using safe percentage (0.19 USDT)."""
-        with patch.object(config, "TRADING_MODE", "LIVE"), patch("wallet_manager.get_wallet_balances") as mock_wb:
+        mock_quotes = {
+            "Uniswap_V2": {"dex": "Uniswap_V2", "spot_price": 2700.0},
+            "SushiSwap_V2": {"dex": "SushiSwap_V2", "spot_price": 2800.0}
+        }
+        with patch.object(config, "TRADING_MODE", "LIVE"), patch.object(config, "LIVE_TRADING_ARMED", True), patch("wallet_manager.get_wallet_balances") as mock_wb, \
+             patch("arbitrage.get_all_dex_quotes", return_value=mock_quotes), \
+             patch("arbitrage._calculate_net_profit", return_value={
+                 "is_profitable": True,
+                 "is_gas_acceptable": True,
+                 "weth_out": 0.00007,
+                 "usdt_out": 0.205,
+                 "gross_profit_usdt": 0.015,
+                 "gas_cost_usdt": 0.001,
+                 "slippage_cost_usdt": 0.001,
+                 "net_profit_usdt": 0.013,
+                 "net_profit_pct": 6.5,
+                 "buy_impact_pct": 0.01,
+                 "sell_impact_pct": 0.01,
+                 "max_price_impact_pct": 0.01,
+                 "min_usdt_out": 0.204,
+             }):
             mock_wb.return_value = {
                 "is_connected": True,
                 "wallet_address": "0x1bcea3bc88cd89f3a5de9c07a5c7b6f2b4f501b4",
@@ -170,7 +216,7 @@ class ProfitThresholdAndSkipReasonTests(unittest.TestCase):
                 "buy_dex": "Uniswap_V2",
                 "sell_dex": "SushiSwap_V2",
                 "amount_in": safe_amt,
-                "net_profit_usdt": 0.0035,
+                "net_profit_usdt": 0.0130,
                 "is_profitable": True,
                 "is_gas_acceptable": True,
             }
@@ -184,7 +230,27 @@ class ProfitThresholdAndSkipReasonTests(unittest.TestCase):
 
     def test_micro_balance_0_01_executes_dynamically(self):
         """Test wallet with $0.01 USDT executes dynamically (0.0095 USDT) without requiring $1 or $5."""
-        with patch.object(config, "TRADING_MODE", "LIVE"), patch("wallet_manager.get_wallet_balances") as mock_wb:
+        mock_quotes = {
+            "Uniswap_V2": {"dex": "Uniswap_V2", "spot_price": 2700.0},
+            "SushiSwap_V2": {"dex": "SushiSwap_V2", "spot_price": 2800.0}
+        }
+        with patch.object(config, "TRADING_MODE", "LIVE"), patch.object(config, "LIVE_TRADING_ARMED", True), patch.object(config, "MIN_PROFIT_USDT", 0.0001), patch.object(config, "LIVE_MIN_NET_PROFIT_USDT", 0.0001), patch("wallet_manager.get_wallet_balances") as mock_wb, \
+             patch("arbitrage.get_all_dex_quotes", return_value=mock_quotes), \
+             patch("arbitrage._calculate_net_profit", return_value={
+                 "is_profitable": True,
+                 "is_gas_acceptable": True,
+                 "weth_out": 0.000003,
+                 "usdt_out": 0.0102,
+                 "gross_profit_usdt": 0.0007,
+                 "gas_cost_usdt": 0.00005,
+                 "slippage_cost_usdt": 0.00005,
+                 "net_profit_usdt": 0.0006,
+                 "net_profit_pct": 6.0,
+                 "buy_impact_pct": 0.01,
+                 "sell_impact_pct": 0.01,
+                 "max_price_impact_pct": 0.01,
+                 "min_usdt_out": 0.0101,
+             }):
             mock_wb.return_value = {
                 "is_connected": True,
                 "wallet_address": "0x1bcea3bc88cd89f3a5de9c07a5c7b6f2b4f501b4",
@@ -204,22 +270,7 @@ class ProfitThresholdAndSkipReasonTests(unittest.TestCase):
                 "is_gas_acceptable": True,
             }
 
-            with patch("arbitrage.execute_atomic_trade") as mock_exec, \
-                 patch("arbitrage._calculate_net_profit", return_value={
-                     "is_profitable": True,
-                     "is_gas_acceptable": True,
-                     "weth_out": 0.000003,
-                     "usdt_out": 0.0102,
-                     "gross_profit_usdt": 0.0007,
-                     "gas_cost_usdt": 0.00005,
-                     "slippage_cost_usdt": 0.00005,
-                     "net_profit_usdt": 0.0006,
-                     "net_profit_pct": 6.0,
-                     "buy_impact_pct": 0.01,
-                     "sell_impact_pct": 0.01,
-                     "max_price_impact_pct": 0.01,
-                     "min_usdt_out": 0.0101,
-                 }):
+            with patch("arbitrage.execute_atomic_trade") as mock_exec:
                 mock_exec.return_value = {"success": True, "trade": profitable_route, "tx_hash": "0x111222"}
                 result = arbitrage.execute_real_trade(profitable_route, custom_amount=5.00, is_manual=True)
                 mock_exec.assert_called_once()
@@ -228,7 +279,27 @@ class ProfitThresholdAndSkipReasonTests(unittest.TestCase):
 
     def test_wallet_with_0_05_and_5_requested_dynamically_scales(self):
         """Test wallet with $0.05 and $5 requested dynamically scales to $0.0475 and never aborts with Need $5."""
-        with patch.object(config, "TRADING_MODE", "LIVE"), patch("wallet_manager.get_wallet_balances") as mock_wb:
+        mock_quotes = {
+            "Uniswap_V2": {"dex": "Uniswap_V2", "spot_price": 2700.0},
+            "SushiSwap_V2": {"dex": "SushiSwap_V2", "spot_price": 2800.0}
+        }
+        with patch.object(config, "TRADING_MODE", "LIVE"), patch.object(config, "LIVE_TRADING_ARMED", True), patch("wallet_manager.get_wallet_balances") as mock_wb, \
+             patch("arbitrage.get_all_dex_quotes", return_value=mock_quotes), \
+             patch("arbitrage._calculate_net_profit", return_value={
+                 "is_profitable": True,
+                 "is_gas_acceptable": True,
+                 "weth_out": 0.000017,
+                 "usdt_out": 0.0650,
+                 "gross_profit_usdt": 0.0160,
+                 "gas_cost_usdt": 0.0005,
+                 "slippage_cost_usdt": 0.0005,
+                 "net_profit_usdt": 0.0150,
+                 "net_profit_pct": 30.0,
+                 "buy_impact_pct": 0.01,
+                 "sell_impact_pct": 0.01,
+                 "max_price_impact_pct": 0.01,
+                 "min_usdt_out": 0.0640,
+             }):
             mock_wb.return_value = {
                 "is_connected": True,
                 "wallet_address": "0x1bcea3bc88cd89f3a5de9c07a5c7b6f2b4f501b4",
@@ -254,7 +325,7 @@ class ProfitThresholdAndSkipReasonTests(unittest.TestCase):
 
     def test_insufficient_gas_blocks_transaction(self):
         """Test that if wallet has tokens but insufficient ETH for gas, it blocks with INSUFFICIENT BALANCE."""
-        with patch.object(config, "TRADING_MODE", "LIVE"), patch("wallet_manager.get_wallet_balances") as mock_wb:
+        with patch.object(config, "TRADING_MODE", "LIVE"), patch.object(config, "LIVE_TRADING_ARMED", True), patch("wallet_manager.get_wallet_balances") as mock_wb:
             mock_wb.return_value = {
                 "is_connected": True,
                 "wallet_address": "0x1bcea3bc88cd89f3a5de9c07a5c7b6f2b4f501b4",
@@ -310,7 +381,7 @@ class ProfitThresholdAndSkipReasonTests(unittest.TestCase):
         initial_trades = get_total_trades(mode="LIVE")
         initial_profit = get_total_profit(mode="LIVE")
 
-        with patch.object(config, "TRADING_MODE", "LIVE"), patch("wallet_manager.get_wallet_balances") as mock_wb:
+        with patch.object(config, "TRADING_MODE", "LIVE"), patch.object(config, "LIVE_TRADING_ARMED", True), patch("wallet_manager.get_wallet_balances") as mock_wb:
             mock_wb.return_value = {
                 "is_connected": True,
                 "wallet_address": "0x1bcea3bc88cd89f3a5de9c07a5c7b6f2b4f501b4",

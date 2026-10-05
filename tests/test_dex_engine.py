@@ -14,6 +14,13 @@ from dex_engine import (
 
 
 class DEXEngineTests(unittest.TestCase):
+    def setUp(self):
+        self._orig_mode = getattr(config, "TRADING_MODE", "MOCK")
+        config.TRADING_MODE = "MOCK"
+
+    def tearDown(self):
+        config.TRADING_MODE = self._orig_mode
+
     def test_constant_product_swap_formula(self):
         # 100 USDT input into pool with 100,000 USDT and 33.33 WETH (0.3% fee)
         # expected out: (100 * 0.997 * 33.333333) / (100000 + 100 * 0.997) ≈ 0.0332

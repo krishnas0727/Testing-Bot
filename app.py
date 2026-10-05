@@ -15,7 +15,8 @@ from typing import Dict, Any, Optional, List
 
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    load_dotenv(dotenv_path=_env_path)
 except ImportError:
     pass
 
@@ -197,10 +198,12 @@ def get_engine_status(chain_id: Optional[int] = None) -> str:
     """Return truthful engine state reflecting current environment, mode, and selected chain."""
     if emergency_stop_active():
         return "BLOCKED - EMERGENCY STOP ACTIVE"
+    mode = getattr(config, "TRADING_MODE", "MOCK").upper()
+    if mode == "LIVE" and daily_loss_limit_reached():
+        return "BLOCKED - DAILY LOSS LIMIT REACHED"
     if not getattr(config, "AUTO_TRADE_ENABLED", False):
         return "STANDBY - AUTO TRADE DISABLED"
 
-    mode = getattr(config, "TRADING_MODE", "MOCK").upper()
     cid = chain_id if chain_id is not None else getattr(config, "CHAIN_ID", 8453)
     chain_info = config.CHAIN_REGISTRY.get(cid, {})
     is_testnet = bool(chain_info.get("is_testnet", False))
@@ -231,17 +234,27 @@ def get_engine_status(chain_id: Optional[int] = None) -> str:
 
 
 _acquire_auto_trader_lock = acquire_auto_trader_lock
+_auto_trader_thread: Optional[threading.Thread] = None
+_auto_trader_start_lock = threading.Lock()
+_stop_auto_trader_event = threading.Event()
 
 
-def start_background_auto_trader():
-    if not acquire_auto_trader_lock():
-        return
+def start_background_auto_trader() -> bool:
+    global _auto_trader_thread
+    with _auto_trader_start_lock:
+        if _auto_trader_thread is not None and _auto_trader_thread.is_alive():
+            return False
+
+        if not acquire_auto_trader_lock():
+            return False
+
+        _stop_auto_trader_event.clear()
 
     def auto_trader_loop():
         global last_background_trade_result, last_execution_status
         print("[DEX Auto-Trader] Background loop started.", flush=True)
 
-        while True:
+        while not _stop_auto_trader_event.is_set():
             try:
                 auto_enabled = getattr(config, "AUTO_TRADE_ENABLED", False)
                 mode = getattr(config, "TRADING_MODE", "MOCK").upper()
@@ -253,7 +266,9 @@ def start_background_auto_trader():
                 is_chain_testnet = bool(chain_info.get("is_testnet", False))
                 chain_compatible = (mode == "MOCK") or (mode == "TESTNET" and is_chain_testnet) or (mode == "LIVE" and not is_chain_testnet)
 
-                if auto_enabled and is_armed and chain_compatible and not emergency_stop_active():
+                loss_limit_blocked = (mode == "LIVE" and daily_loss_limit_reached())
+
+                if auto_enabled and is_armed and chain_compatible and not emergency_stop_active() and not loss_limit_blocked:
                     market = analyze_market()
 
                     if market and market.get("is_profitable"):
@@ -336,16 +351,36 @@ def start_background_auto_trader():
                 print(f"[DEX Auto-Trader Error]: {err}", flush=True)
                 last_execution_status = "ERROR - CHECK ENGINE LOGS"
 
-            time.sleep(getattr(config, "REFRESH_INTERVAL", 2))
+            _stop_auto_trader_event.wait(getattr(config, "REFRESH_INTERVAL", 2))
 
     def auto_trader_runner():
+        global _auto_trader_thread
         try:
             auto_trader_loop()
         finally:
             release_auto_trader_lock()
+            with _auto_trader_start_lock:
+                if _auto_trader_thread is threading.current_thread():
+                    _auto_trader_thread = None
             print("[DEX Auto-Trader] Background loop stopped and lock released.", flush=True)
 
-    threading.Thread(target=auto_trader_runner, daemon=True).start()
+    with _auto_trader_start_lock:
+        t = threading.Thread(target=auto_trader_runner, daemon=True, name="DexAutoTraderThread")
+        _auto_trader_thread = t
+        t.start()
+    return True
+
+
+def stop_background_auto_trader(timeout: float = 3.0) -> bool:
+    """Gracefully signal the background auto-trader loop to stop and release lock."""
+    global _auto_trader_thread
+    _stop_auto_trader_event.set()
+    if _auto_trader_thread and _auto_trader_thread.is_alive():
+        _auto_trader_thread.join(timeout=timeout)
+    with _auto_trader_start_lock:
+        _auto_trader_thread = None
+    release_auto_trader_lock()
+    return True
 
 
 start_background_auto_trader()
@@ -372,7 +407,7 @@ def require_api_auth(f=None, *, methods=None):
             return f(*args, **kwargs)
 
         expected_token = (
-            os.environ.get("API_AUTH_TOKEN", "") or getattr(config, "API_AUTH_TOKEN", "")
+            getattr(config, "API_AUTH_TOKEN", "") or os.environ.get("API_AUTH_TOKEN", "")
         ).strip()
 
         if not expected_token:
@@ -412,7 +447,7 @@ def require_api_auth(f=None, *, methods=None):
 def is_request_authenticated() -> bool:
     """Return True if the current request presents a valid API token."""
     expected_token = (
-        os.environ.get("API_AUTH_TOKEN", "") or getattr(config, "API_AUTH_TOKEN", "")
+        getattr(config, "API_AUTH_TOKEN", "") or os.environ.get("API_AUTH_TOKEN", "")
     ).strip()
     if not expected_token:
         return False
@@ -1197,7 +1232,19 @@ def manual_trade_api():
                 pass
 
         # Router validation guard (Phase 8)
-        active_cid = getattr(config, "CHAIN_ID", 8453)
+        raw_chain_id = req_data.get("chain_id")
+        if raw_chain_id is not None:
+            try:
+                active_cid = int(raw_chain_id)
+            except (TypeError, ValueError):
+                return jsonify({
+                    "success": False,
+                    "status": "INVALID_CHAIN_ID",
+                    "message": "Invalid chain_id provided."
+                }), 400
+        else:
+            active_cid = int(getattr(config, "CHAIN_ID", 8453))
+
         is_routers_valid, router_reason, _ = config.validate_chain_dex_routers(active_cid)
         if not is_routers_valid:
             return jsonify({
@@ -1206,7 +1253,7 @@ def manual_trade_api():
                 "message": router_reason
             }), 400
 
-        market = analyze_market(custom_amount=custom_amount)
+        market = analyze_market(custom_amount=custom_amount, chain_id=active_cid)
         if not market:
             return jsonify({"success": False, "message": "Unable to fetch on-chain DEX reserves."}), 503
 
@@ -1732,15 +1779,23 @@ def settings_api():
                 if not pk.startswith("0x") and len(pk) == 64:
                     pk = "0x" + pk
                 if len(pk) == 66:
-                    # In-memory session key only — NEVER persisted to SQLite database
-                    config.PRIVATE_KEY = pk
                     try:
                         from eth_account import Account
                         acct = Account.from_key(pk)
+                        # In-memory session key only — NEVER persisted to SQLite database
+                        config.PRIVATE_KEY = pk
                         config.WALLET_ADDRESS = acct.address
                         save_bot_setting("wallet_address", acct.address)
                     except Exception:
-                        pass
+                        return jsonify({
+                            "success": False,
+                            "message": "Invalid private key format. Key must be a valid 64-character hex string."
+                        }), 400
+                else:
+                    return jsonify({
+                        "success": False,
+                        "message": "Invalid private key format. Key must be a valid 64-character hex string."
+                    }), 400
             elif pk == "":
                 config.PRIVATE_KEY = ""
                 try:
@@ -1801,6 +1856,9 @@ def switch_chain_api():
         chain_info = config.set_active_chain(chain_id)
         save_bot_setting("chain_id", chain_id)
         save_bot_setting("rpc_url", chain_info["rpc_url"])
+        if getattr(config, "LIVE_TRADING_ARMED", False):
+            config.LIVE_TRADING_ARMED = False
+            save_bot_setting("live_trading_armed", False)
         last_execution_status = get_engine_status(chain_id)
 
         return jsonify({

@@ -11,15 +11,16 @@ from dex_contract import TREASURY_ABI, ARBITRAGE_EXECUTOR_ABI, DEX_ARBITRAGE_ABI
 class TreasuryAndArbitrageSystemTests(unittest.TestCase):
     def setUp(self):
         self._temp_dir = tempfile.TemporaryDirectory()
-        self._orig_data_dir = os.environ.get("DATA_DIR")
-        os.environ["DATA_DIR"] = self._temp_dir.name
+        self._db_path = os.path.join(self._temp_dir.name, "test_treasury.db")
+        self._orig_db = database.DATABASE_NAME
+        self._orig_config_db = config.DATABASE_NAME
+        database.DATABASE_NAME = self._db_path
+        config.DATABASE_NAME = self._db_path
         database.create_database()
 
     def tearDown(self):
-        if self._orig_data_dir is not None:
-            os.environ["DATA_DIR"] = self._orig_data_dir
-        else:
-            os.environ.pop("DATA_DIR", None)
+        database.DATABASE_NAME = self._orig_db
+        config.DATABASE_NAME = self._orig_config_db
         self._temp_dir.cleanup()
 
     def test_treasury_contract_abi_contains_required_functions(self):
@@ -29,16 +30,16 @@ class TreasuryAndArbitrageSystemTests(unittest.TestCase):
             "depositProfit",
             "withdraw",
             "emergencyWithdraw",
-            "setDistributionBps",
-            "getDistributionBps",
+            "emergencyWithdrawETH",
+            "setAllocationBps",
+            "setArbitrageExecutor",
             "getBucketBalances",
+            "admin",
+            "arbitrageExecutor",
             "tradingCapitalBps",
-            "emergencyReserveBps",
-            "profitReserveBps",
-            "tradingCapitalBalance",
-            "emergencyReserveBalance",
-            "profitReserveBalance",
-            "owner",
+            "reserveBps",
+            "revenueBps",
+            "paused",
         ]
         for fn in required_functions:
             self.assertIn(fn, function_names, f"Treasury ABI missing function: {fn}")
@@ -49,14 +50,16 @@ class TreasuryAndArbitrageSystemTests(unittest.TestCase):
         required_functions = [
             "executeArbitrage",
             "simulateArbitrage",
+            "admin",
+            "treasury",
+            "paused",
+            "togglePause",
             "setRouterWhitelist",
             "setTokenWhitelist",
-            "emergencyPause",
+            "setExecutor",
             "setTreasury",
-            "owner",
-            "whitelistedRouters",
-            "whitelistedTokens",
-            "treasury",
+            "routerWhitelist",
+            "tokenWhitelist",
         ]
         for fn in required_functions:
             self.assertIn(fn, function_names, f"ArbitrageExecutor ABI missing function: {fn}")
@@ -157,7 +160,7 @@ class TreasuryAndArbitrageSystemTests(unittest.TestCase):
 
         # 2. Record a withdrawal of $1.50
         withdrawn_id = database.record_treasury_withdrawal({
-            "tx_hash": "0xwithdrawn_1",
+            "tx_hash": "0x" + "a" * 64,
             "chain_id": 8453,
             "token": "USDC",
             "amount": 1.50,

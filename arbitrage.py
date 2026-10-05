@@ -362,7 +362,7 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
                 "gross_profit_usdt": round(gross_profit_usdt, 4),
                 "gas_cost_usdt": round(gas_cost_usdt, 4),
                 "gas_price_gwei": gas_price_gwei,
-                "dex_fees_usdt": round(calculate_two_leg_dex_fees_usd(trade_amount, usdt_returned, config.DEX_PROTOCOL_FEE_PCT)["total_dex_fees_usd"], 4),
+                "dex_fees_usdt": round(calculate_two_leg_dex_fees_usd(trade_amount, trade_amount, config.DEX_PROTOCOL_FEE_PCT)["total_dex_fees_usd"], 4),
                 "safety_margin_usdt": round(float(getattr(config, "SAFETY_MARGIN_USDT", 0.005)), 4),
                 "net_profit_usdt": round(net_profit_usdt, 4),
                 "net_profit_percent": round(net_profit_percent, 2),
@@ -499,10 +499,11 @@ def _calculate_net_profit(trade_amt: float, buy_q: dict, sell_q: dict, gas_price
     sell_impact = calculate_price_impact(weth_out, usdt_out, sell_q["spot_price"])
     max_impact = max(buy_impact, sell_impact)
 
-    # Slippage reserve cost = difference between expected and minimum acceptable output
+    # Slippage protection boundary (amountOutMin):
+    # min_usdt_out is an execution-protection boundary enforced on-chain, not a realized cash expense.
     slippage_pct = float(getattr(config, "SLIPPAGE_PCT", 0.5))
     min_usdt_out = calculate_slippage_min_out(usdt_out, slippage_pct)
-    slippage_cost_usdt = usdt_out - min_usdt_out
+    slippage_cost_usdt = 0.0
 
     # Real on-chain gas cost in USD (estimated gas units × gas price × ETH price)
     # Atomic arbitrage ≈ 200,000 – 300,000 gas units
@@ -511,12 +512,14 @@ def _calculate_net_profit(trade_amt: float, buy_q: dict, sell_q: dict, gas_price
     gas_cost_usdt = gas_cost_eth * eth_price_usdt
     gas_cost_usdt = _effective_gas_cost_usd(gas_cost_usdt, trade_amt)
 
-    # Gross profit = raw output − input (before all costs)
+    # Gross profit = expected raw output − input
+    # (DEX swap fees and pool price impact are already embedded in usdt_out via constant-product formula)
     gross_profit_usdt = usdt_out - trade_amt
 
-    # Net profit = gross − gas − slippage reserve
-    # (DEX fees are already embedded in constant-product formula; showing them for transparency)
-    net_profit_usdt = gross_profit_usdt - gas_cost_usdt - slippage_cost_usdt
+    # Net profit = Gross profit - realistic gas cost
+    # (DEX fees and price impact are already embedded in usdt_out;
+    # slippage tolerance defines amountOutMin for on-chain execution protection, NOT an upfront realized cash expense)
+    net_profit_usdt = gross_profit_usdt - gas_cost_usdt
     net_profit_pct = (net_profit_usdt / trade_amt) * 100.0 if trade_amt > 0 else 0.0
 
     is_gas_ok = gas_price_gwei <= float(getattr(config, "MAX_GAS_PRICE_GWEI", 50.0))
@@ -556,7 +559,7 @@ def _calculate_net_profit(trade_amt: float, buy_q: dict, sell_q: dict, gas_price
         "is_impact_acceptable": is_impact_ok,
         "skip_reason": "" if is_profitable else (
             f"INSUFFICIENT_PROFIT: Net ${net_profit_usdt:.6f} USDT is below threshold (${min_profit_threshold:.6f} USDT) "
-            f"(Gross ${gross_profit_usdt:.6f} - Gas ${gas_cost_usdt:.6f} - Slip ${slippage_cost_usdt:.6f})"
+            f"(Gross ${gross_profit_usdt:.6f} - Gas ${gas_cost_usdt:.6f})"
             if is_gas_ok and is_impact_ok
             else (f"Gas too high ({gas_price_gwei:.2f} Gwei)" if not is_gas_ok
                   else f"Price impact too high ({max_impact:.2f}%)")
@@ -740,13 +743,12 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
     print(
         f"[PROFIT CHECK] Gross=${profit_check['gross_profit_usdt']:.6f} "
         f"Gas=${profit_check['gas_cost_usdt']:.6f} "
-        f"Slip=${profit_check['slippage_cost_usdt']:.6f} "
         f"Net=${profit_check['net_profit_usdt']:.6f} "
         f"Profitable={profit_check['is_profitable']}",
         flush=True
     )
 
-    # Gate 8: Net profit must be > 0 after ALL costs (gas + slippage + fees)
+    # Gate 8: Net profit must be > 0 after real costs (realistic gas cost)
     min_profit_threshold = float(getattr(config, "MIN_PROFIT_USDT", 0.005))
     if mode == "LIVE":
         min_profit_threshold = max(min_profit_threshold, float(getattr(config, "LIVE_MIN_NET_PROFIT_USDT", 0.01)))

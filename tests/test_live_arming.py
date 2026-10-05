@@ -12,6 +12,8 @@ import config
 from app import app
 from database import create_database, save_bot_setting, load_all_bot_settings
 import arbitrage
+import dex_engine
+import live_executor
 
 
 class TestLiveTradingArming(unittest.TestCase):
@@ -226,6 +228,94 @@ class TestLiveTradingArming(unittest.TestCase):
         self.assertTrue(data["success"])
         self.assertEqual(data["status"], "DISARMED")
         self.assertFalse(config.LIVE_TRADING_ARMED)
+
+    def test_mock_mode_with_armed_state_never_executes_live(self):
+        """Requirement 10.C: MOCK mode + armed must NOT execute LIVE transactions."""
+        config.TRADING_MODE = "MOCK"
+        config.LIVE_TRADING_ARMED = True
+        config.EMERGENCY_STOP = False
+
+        with patch("live_executor.execute_live") as mock_live:
+            plan = {
+                "chain_id": 8453,
+                "buy_dex": "Uniswap_V2",
+                "sell_dex": "SushiSwap_V2",
+                "amount_in": 10.0,
+                "gross_return_usdt": 10.50,
+                "net_profit_usdt": 0.495,
+            }
+            res = dex_engine.execute_atomic_trade(plan)
+            # Must NOT call live_executor.execute_live
+            mock_live.assert_not_called()
+            self.assertTrue(res["success"])
+            self.assertEqual(res["trade"]["mode"], "MOCK")
+
+        # Direct call to live_executor.execute_live rejects under MOCK mode
+        res_direct = live_executor.execute_live(plan)
+        self.assertFalse(res_direct["success"])
+        self.assertEqual(res_direct["status"], "INVALID_MODE")
+
+    def test_authorized_arm_with_confirmation_still_requires_safety_checks(self):
+        """Requirement 10.I: Arming succeeds with confirmation, but live execution still requires all safety conditions."""
+        config.TRADING_MODE = "LIVE"
+        config.LIVE_TRADING_ARMED = False
+        config.EMERGENCY_STOP = False
+
+        # 1. Arm with explicit confirmation
+        res = self.client.post(
+            "/api/trade/arm",
+            headers=self.headers,
+            json={"arm": True, "confirm_live": True}
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.get_json()["success"])
+        self.assertTrue(config.LIVE_TRADING_ARMED)
+
+        # 2. If Emergency Stop is toggled ON, live trade is blocked despite armed state
+        config.EMERGENCY_STOP = True
+        res_blocked = self.client.post("/api/trade", headers=self.headers, json={"trade_amount": 5.0})
+        self.assertEqual(res_blocked.status_code, 400)
+        self.assertEqual(res_blocked.get_json()["status"], "BLOCKED_EMERGENCY_STOP")
+
+        # 3. If mode is switched away from LIVE, arming must not allow live trade
+        config.EMERGENCY_STOP = False
+        config.TRADING_MODE = "MOCK"
+        res_mock = self.client.post("/api/trade", headers=self.headers, json={"trade_amount": 5.0})
+        # Trade runs in MOCK/simulation, never LIVE
+        data_mock = res_mock.get_json()
+        if data_mock.get("success") and "trade" in data_mock:
+            self.assertEqual(data_mock["trade"]["mode"], "MOCK")
+
+    def test_chain_switch_disarms_live_trading(self):
+        """Requirement 6: Switching chain must not silently arm, and safely disarms."""
+        config.LIVE_TRADING_ARMED = True
+        save_bot_setting("live_trading_armed", True)
+
+        res = self.client.post("/api/chain/switch", headers=self.headers, json={"chain_id": 42161})
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(config.LIVE_TRADING_ARMED)
+
+    def test_live_executor_final_gate_rejects_unarmed_or_mock(self):
+        """Requirement 9: live_executor.execute_live enforces armed + live mode at the final submission gate."""
+        plan = {
+            "buy_dex": "Uniswap_V2",
+            "sell_dex": "SushiSwap_V2",
+            "amount_in": 5.0,
+        }
+        # Unarmed
+        config.TRADING_MODE = "LIVE"
+        config.LIVE_TRADING_ARMED = False
+        config.EMERGENCY_STOP = False
+        res = live_executor.execute_live(plan)
+        self.assertFalse(res["success"])
+        self.assertEqual(res["status"], "NOT_ARMED")
+
+        # Emergency Stop active
+        config.LIVE_TRADING_ARMED = True
+        config.EMERGENCY_STOP = True
+        res2 = live_executor.execute_live(plan)
+        self.assertFalse(res2["success"])
+        self.assertEqual(res2["status"], "BLOCKED_EMERGENCY_STOP")
 
 
 if __name__ == "__main__":

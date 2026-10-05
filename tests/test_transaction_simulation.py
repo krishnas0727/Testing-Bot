@@ -168,7 +168,7 @@ class TransactionSimulationTests(unittest.TestCase):
         self.assertIn("ExcessiveGasCost", res["revert_reason"])
 
     def test_low_profit(self):
-        req = dict(self.base_request, simulated_output=50.008) # net profit $0.003 < 0.01
+        req = dict(self.base_request, simulated_output=50.008, min_output=50.00) # net profit $0.003 < 0.01
         res = self.simulator.simulate(req)
         self.assertEqual(res["status"], "SIMULATION_FAILED")
         self.assertIn("UnprofitableArbitrage", res["revert_reason"])

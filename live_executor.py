@@ -242,6 +242,19 @@ def execute_live(plan: Dict[str, Any]) -> Dict[str, Any]:
     if getattr(config, "EMERGENCY_STOP", True):
         return _fail("BLOCKED_EMERGENCY_STOP", "Emergency stop is active; live transaction submission blocked.")
 
+    mode = getattr(config, "TRADING_MODE", "MOCK")
+    if mode not in ("LIVE", "TESTNET"):
+        return _fail("INVALID_MODE", f"Cannot execute live transaction in {mode} mode.")
+
+    if not getattr(config, "LIVE_TRADING_ARMED", False):
+        return _fail("NOT_ARMED", f"{mode} trading is not armed. Enable LIVE_TRADING_ARMED to submit transactions.")
+
+    # Phase 4 Mandate: Daily loss limit check in final executor
+    if mode == "LIVE":
+        from arbitrage import daily_loss_limit_reached
+        if daily_loss_limit_reached():
+            return _fail("DAILY_LOSS_LIMIT_REACHED", "Daily net loss limit reached; live execution blocked.")
+
     t: Dict[str, float] = {}
     t0 = _now_ms()
     detect_ts = float(plan.get("detected_at_ms") or 0.0)   # wall-clock ms when the opportunity was found
@@ -252,12 +265,16 @@ def execute_live(plan: Dict[str, Any]) -> Dict[str, Any]:
     contract_addr = _cfg("ARBITRAGE_CONTRACT_ADDRESS", "").strip()
     if not pk:
         return _fail("LIVE_SIGNER_REQUIRED", "PRIVATE_KEY not configured for server-side signing.")
+    try:
+        acct = Account.from_key(pk)
+    except Exception:
+        return _fail("INVALID_SIGNER_KEY", "Configured PRIVATE_KEY is invalid (failed to derive wallet account).")
+
     if not contract_addr:
         return _fail("REQUIRES_DEPLOYED_CONTRACT", "Set ARBITRAGE_CONTRACT_ADDRESS to your deployed DexArbitrage.sol.")
 
     try:
         w3 = get_w3()
-        acct = Account.from_key(pk)
         contract_addr = Web3.to_checksum_address(contract_addr)
         base_sym, quote_sym, base_tok, quote_tok = _resolve_tokens(plan)
         dec = int(quote_tok["decimals"])
@@ -268,11 +285,15 @@ def execute_live(plan: Dict[str, Any]) -> Dict[str, Any]:
         if not is_valid_routers:
             return _fail("TRADE SKIPPED", router_reason)
 
-        if buy_dex == sell_dex or config.DEX_ROUTERS.get(buy_dex, "").lower() == config.DEX_ROUTERS.get(sell_dex, "").lower():
+        routers_map = config.CHAIN_REGISTRY.get(cid, {}).get("routers", getattr(config, "DEX_ROUTERS", {}))
+        if buy_dex not in routers_map or sell_dex not in routers_map:
+            return _fail("TRADE SKIPPED", f"One or both DEX routers ({buy_dex}, {sell_dex}) not supported on chain {cid}.")
+
+        if buy_dex == sell_dex or routers_map.get(buy_dex, "").lower() == routers_map.get(sell_dex, "").lower():
             return _fail("TRADE SKIPPED", "Arbitrage unavailable: fewer than two valid DEX routers configured.")
 
-        router_buy = Web3.to_checksum_address(config.DEX_ROUTERS[buy_dex])
-        router_sell = Web3.to_checksum_address(config.DEX_ROUTERS[sell_dex])
+        router_buy = Web3.to_checksum_address(routers_map[buy_dex])
+        router_sell = Web3.to_checksum_address(routers_map[sell_dex])
         token_in = Web3.to_checksum_address(quote_tok["address"])
         token_out = Web3.to_checksum_address(base_tok["address"])
 
@@ -348,12 +369,34 @@ def execute_live(plan: Dict[str, Any]) -> Dict[str, Any]:
 
             gas_limit = int(gas_est * float(_cfg("LIVE_GAS_LIMIT_BUFFER", 1.3)))
 
-            # Gas balance check (Requirement 5)
+            # 1. Gas balance check: verify signer wallet has sufficient native ETH for max gas
             required_gas_wei = int(gas_limit * max_fee)
             signer_eth_bal = f_eth_bal.result()
             if signer_eth_bal < required_gas_wei:
                 return _fail("INSUFFICIENT_GAS_BALANCE",
                              f"Signer has {signer_eth_bal / 1e18:.6f} ETH for gas; need at least {required_gas_wei / 1e18:.6f} ETH.", t)
+
+            # 2. Phase 7 Section 30 Gate: If gas estimation changes expected gas cost materially,
+            # recalculate net profit and reject if net_profit <= 0 before transaction signing.
+            eth_price = float(plan.get("eth_price_usdt") or plan.get("buy_price") or 0.0)
+            if eth_price <= 0:
+                return _fail("MISSING_PRICE_DATA", "Native token (ETH) USD price unavailable; cannot calculate real gas cost.", t)
+
+            initial_gas_est_usd = float(plan.get("gas_cost_usdt", 0.0))
+            if initial_gas_est_usd > 0:
+                eff_gas_price_wei = base_fee + tip
+                updated_gas_usd = (gas_est * eff_gas_price_wei / 1e18) * eth_price
+                l1_fee_usd = float(_cfg("LIVE_L1_FEE_USD", 0.005)) if cid in (8453, 84532) else 0.0
+                total_live_gas_cost_usd = updated_gas_usd + l1_fee_usd
+
+                expected_gross_usd = exp_profit if exp_profit > 0 else (float(quoted_profit) if quoted_profit > 0 else float(plan.get("gross_profit_usdt", 0.0)))
+                if expected_gross_usd > 0 and (expected_gross_usd - total_live_gas_cost_usd) <= 0:
+                    return _fail(
+                        "UNPROFITABLE_AFTER_GAS_ESTIMATE",
+                        f"Net profit after realistic gas estimate (${total_live_gas_cost_usd:.4f} USD) is "
+                        f"${(expected_gross_usd - total_live_gas_cost_usd):+.4f} <= 0. Trade cancelled before signing.",
+                        t
+                    )
 
             tx = arb.functions.executeArbitrage(params).build_transaction({
                 "from": acct.address, "nonce": f_nonce.result(), "chainId": config.CHAIN_ID,

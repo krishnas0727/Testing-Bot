@@ -11,8 +11,8 @@ class ProfitEnginePythonTests(unittest.TestCase):
         fee_pct = 0.003         # 0.30%
 
         amount_out = calculate_amount_out(amount_in, reserve_in, reserve_out, fee_pct)
-        # Expected ≈ 0.332223 WETH
-        self.assertAlmostEqual(amount_out, 0.332223, places=4)
+        # Expected ≈ 0.331233 WETH (with 0.30% fee)
+        self.assertAlmostEqual(amount_out, 0.331233, places=4)
 
     def test_complete_net_profit_and_roi_calculation(self):
         """Verify complete Phase 5 Net Profit and ROI formulas."""

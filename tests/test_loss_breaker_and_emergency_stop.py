@@ -297,6 +297,171 @@ class TestLossBreakerAndEmergencyStop(unittest.TestCase):
         self.assertEqual(get_today_live_profit("LIVE"), -5.0)
         self.assertTrue(arbitrage.daily_loss_limit_reached())
 
+    def test_live_loss_below_limit_allows_execution(self):
+        """Requirement 16.A: LIVE loss below limit allows execution through to normal validation."""
+        config.MAX_DAILY_LOSS_USDT = 10.0
+        save_trade({
+            "tx_hash": "0xloss_below_limit",
+            "chain_id": 8453,
+            "buy_dex": "Uniswap_V2",
+            "sell_dex": "SushiSwap_V2",
+            "amount_in": 10.0,
+            "net_profit": -2.0,
+            "status": "CONFIRMED",
+            "mode": "LIVE"
+        })
+        self.assertEqual(get_today_live_profit("LIVE"), -2.0)
+        self.assertFalse(arbitrage.daily_loss_limit_reached())
+
+    def test_live_loss_reaches_exact_limit_blocks_execution(self):
+        """Requirement 16.B: LIVE loss reaching exact limit triggers breaker and blocks trade."""
+        config.MAX_DAILY_LOSS_USDT = 10.0
+        save_trade({
+            "tx_hash": "0xloss_exact_limit",
+            "chain_id": 8453,
+            "buy_dex": "Uniswap_V2",
+            "sell_dex": "SushiSwap_V2",
+            "amount_in": 50.0,
+            "net_profit": -10.0,
+            "status": "CONFIRMED",
+            "mode": "LIVE"
+        })
+        self.assertEqual(get_today_live_profit("LIVE"), -10.0)
+        self.assertTrue(arbitrage.daily_loss_limit_reached())
+
+        mock_market = {
+            "best_route": {
+                "buy_dex": "Uniswap_V2",
+                "sell_dex": "SushiSwap_V2",
+                "amount_in": 5.0,
+                "is_profitable": True,
+                "net_profit_usdt": 1.0,
+            }
+        }
+        res = arbitrage.execute_real_trade(mock_market, is_manual=True)
+        self.assertFalse(res["success"])
+        self.assertIn("Daily net loss limit reached", res["skip_reason"])
+
+    def test_live_loss_exceeds_daily_limit_blocks_execution(self):
+        """Requirement 16.C: LIVE loss exceeding daily limit blocks dex_engine and live_executor."""
+        config.MAX_DAILY_LOSS_USDT = 10.0
+        save_trade({
+            "tx_hash": "0xloss_exceeds_limit",
+            "chain_id": 8453,
+            "buy_dex": "Uniswap_V2",
+            "sell_dex": "SushiSwap_V2",
+            "amount_in": 50.0,
+            "net_profit": -15.0,
+            "status": "CONFIRMED",
+            "mode": "LIVE"
+        })
+        self.assertTrue(arbitrage.daily_loss_limit_reached())
+
+        plan = {
+            "buy_dex": "Uniswap_V2",
+            "sell_dex": "SushiSwap_V2",
+            "amount_in": 5.0,
+            "chain_id": 8453,
+        }
+        # dex_engine block
+        res_engine = dex_engine.execute_atomic_trade(plan)
+        self.assertFalse(res_engine["success"])
+        self.assertEqual(res_engine["status"], "DAILY_LOSS_LIMIT_REACHED")
+
+        # live_executor block
+        res_exec = live_executor.execute_live(plan)
+        self.assertFalse(res_exec["success"])
+        self.assertEqual(res_exec["status"], "DAILY_LOSS_LIMIT_REACHED")
+
+    def test_multiple_negative_live_trades_accumulate_correctly(self):
+        """Requirement 16.D: Multiple negative LIVE trades accumulate realized losses correctly."""
+        save_trade({"tx_hash": "0xtx1", "chain_id": 8453, "amount_in": 10.0, "net_profit": -0.50, "status": "CONFIRMED", "mode": "LIVE"})
+        save_trade({"tx_hash": "0xtx2", "chain_id": 8453, "amount_in": 10.0, "net_profit": -0.75, "status": "CONFIRMED", "mode": "LIVE"})
+        save_trade({"tx_hash": "0xtx3", "chain_id": 8453, "amount_in": 10.0, "net_profit": -1.25, "status": "CONFIRMED", "mode": "LIVE"})
+        self.assertEqual(get_today_live_profit("LIVE"), -2.50)
+
+    def test_simulation_losses_do_not_trigger_live_breaker(self):
+        """Requirement 16.F: Simulated/MOCK losses do not affect LIVE risk calculations."""
+        config.MAX_DAILY_LOSS_USDT = 5.0
+        # Massive simulation loss in MOCK mode
+        save_trade({"tx_hash": "0xmock_loss", "chain_id": 8453, "amount_in": 100.0, "net_profit": -50.0, "status": "CONFIRMED", "mode": "MOCK"})
+        self.assertEqual(get_today_live_profit("LIVE"), 0.0)
+        self.assertFalse(arbitrage.daily_loss_limit_reached())
+
+    def test_emergency_stop_api_auth_and_state_change(self):
+        """Requirements 16.M, 16.N, 16.O: Emergency stop requires authentication and changes state."""
+        # 1. Unauthenticated -> 401
+        res_unauth = self.client.post("/api/emergency-stop", json={"active": True})
+        self.assertEqual(res_unauth.status_code, 401)
+
+        # 2. Invalid token -> 403
+        res_bad = self.client.post(
+            "/api/emergency-stop",
+            headers={"Authorization": "Bearer wrong-token-xyz"},
+            json={"active": True}
+        )
+        self.assertEqual(res_bad.status_code, 403)
+
+        # 3. Authorized -> 200 and toggles state
+        res_ok = self.client.post(
+            "/api/emergency-stop",
+            headers=self.headers,
+            json={"active": True}
+        )
+        self.assertEqual(res_ok.status_code, 200)
+        self.assertTrue(config.EMERGENCY_STOP)
+        self.assertTrue(res_ok.get_json()["emergency_stop"])
+
+    def test_emergency_stop_activation_disarms_and_cannot_auto_resume(self):
+        """Requirement 16.P: Emergency Stop activation disarms live trading; clearing stop does NOT auto-resume."""
+        config.LIVE_TRADING_ARMED = True
+        save_bot_setting("live_trading_armed", True)
+
+        # Activate Emergency Stop
+        self.client.post("/api/emergency-stop", headers=self.headers, json={"active": True})
+        self.assertTrue(config.EMERGENCY_STOP)
+        self.assertFalse(config.LIVE_TRADING_ARMED)
+
+        # Deactivate Emergency Stop
+        self.client.post("/api/emergency-stop", headers=self.headers, json={"active": False})
+        self.assertFalse(config.EMERGENCY_STOP)
+        # CRITICAL: live trading must NOT automatically re-arm!
+        self.assertFalse(config.LIVE_TRADING_ARMED)
+
+    def test_daily_boundary_timezone_behavior(self):
+        """Requirement 16.R: Historical trades from yesterday do not count toward today's loss."""
+        config.MAX_DAILY_LOSS_USDT = 5.0
+        # Insert trade with yesterday's timestamp
+        save_trade({
+            "tx_hash": "0xyesterday_loss",
+            "chain_id": 8453,
+            "amount_in": 50.0,
+            "net_profit": -25.0,
+            "status": "CONFIRMED",
+            "mode": "LIVE",
+            "created_at": "2020-01-01 12:00:00"
+        })
+        # Today's profit ignores yesterday's trades
+        self.assertEqual(get_today_live_profit("LIVE"), 0.0)
+        self.assertFalse(arbitrage.daily_loss_limit_reached())
+
+    def test_daily_loss_fix_preserves_live_trading_armed_requirement(self):
+        """Requirement 16.S: Having zero daily loss does not bypass LIVE_TRADING_ARMED requirement."""
+        config.TRADING_MODE = "LIVE"
+        config.LIVE_TRADING_ARMED = False
+        config.EMERGENCY_STOP = False
+
+        res = self.client.post("/api/trade", headers=self.headers, json={"trade_amount": 5.0})
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.get_json()["status"], "NOT_ARMED")
+
+    def test_private_key_security_intact_under_risk_controls(self):
+        """Requirement 16.T: Phase 3 private key protections remain strictly intact."""
+        config.PRIVATE_KEY = "0x" + "a" * 64
+        res = self.client.get("/api/settings")
+        self.assertNotIn("0x" + "a" * 64, res.get_data(as_text=True))
+        config.PRIVATE_KEY = ""
+
 
 if __name__ == "__main__":
     unittest.main()

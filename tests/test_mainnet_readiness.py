@@ -31,8 +31,8 @@ def test_base_mainnet_configuration_isolation():
     # Canonical WETH
     assert "0x4200000000000000000000000000000000000006" in content
     # Strict bounds
-    assert "minTradeSizeUsd: 5.0" in content
-    assert "maxFirstTradeSizeUsd: 100.0" in content
+    assert "minTradeAmountUsd: 5.0" in content
+    assert "maxTradeAmountUsd: 100.0" in content
     assert "minNetProfitUsd: 0.10" in content
 
 

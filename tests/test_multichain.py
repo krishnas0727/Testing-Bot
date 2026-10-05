@@ -23,13 +23,16 @@ class MultiChainVerificationTests(unittest.TestCase):
         self.client = app.test_client()
         self.test_token = "multichain-test-token"
         self.orig_token = getattr(config, "API_AUTH_TOKEN", "")
+        self.orig_mode = getattr(config, "TRADING_MODE", "MOCK")
         config.API_AUTH_TOKEN = self.test_token
+        config.TRADING_MODE = "MOCK"
         self.client.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {self.test_token}"
         # Always start from Base L2
         config.set_active_chain(8453)
 
     def tearDown(self):
         config.API_AUTH_TOKEN = self.orig_token
+        config.TRADING_MODE = self.orig_mode
         # Reset back to Base L2
         config.set_active_chain(8453)
 

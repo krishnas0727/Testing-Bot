@@ -13,6 +13,9 @@ class DEXApiTests(unittest.TestCase):
         self.client.testing = True
         self.test_token = "dex-api-test-token"
         self.orig_token = getattr(config, "API_AUTH_TOKEN", "")
+        self.orig_trade_amount = getattr(config, "DEFAULT_TRADE_AMOUNT", 5.0)
+        self.orig_min_profit = getattr(config, "MIN_PROFIT_USDT", 0.005)
+        self.orig_slippage = getattr(config, "SLIPPAGE_PCT", 0.5)
         config.API_AUTH_TOKEN = self.test_token
         self.client.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {self.test_token}"
         config.WALLET_ADDRESS = ""
@@ -20,6 +23,9 @@ class DEXApiTests(unittest.TestCase):
 
     def tearDown(self):
         config.API_AUTH_TOKEN = self.orig_token
+        config.DEFAULT_TRADE_AMOUNT = self.orig_trade_amount
+        config.MIN_PROFIT_USDT = self.orig_min_profit
+        config.SLIPPAGE_PCT = self.orig_slippage
 
     def test_health_check(self):
         res = self.client.get("/api/health")

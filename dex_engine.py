@@ -604,6 +604,18 @@ def execute_atomic_trade(plan: Dict[str, Any], is_manual: bool = False) -> Dict[
             "message": router_reason
         }
 
+    buy_dex = plan.get("buy_dex")
+    sell_dex = plan.get("sell_dex")
+    chain_routers = config.CHAIN_REGISTRY.get(cid, {}).get("routers", getattr(config, "DEX_ROUTERS", {}))
+    buy_r = chain_routers.get(buy_dex, "") if buy_dex else ""
+    sell_r = chain_routers.get(sell_dex, "") if sell_dex else ""
+    if not buy_dex or not sell_dex or buy_dex == sell_dex or not buy_r or not sell_r or buy_r.strip().lower() == sell_r.strip().lower():
+        return {
+            "success": False,
+            "status": "ARBITRAGE_UNAVAILABLE",
+            "message": "Arbitrage unavailable: fewer than two valid DEX routers configured."
+        }
+
     # Guard 2: Mode validation & safe simulation in MOCK mode
     if mode == "MOCK":
         sim = simulate_atomic_arbitrage(plan)
@@ -652,6 +664,16 @@ def execute_atomic_trade(plan: Dict[str, Any], is_manual: bool = False) -> Dict[
             "status": "NOT_ARMED",
             "message": f"{mode} trading is not armed. Enable LIVE_TRADING_ARMED to submit transactions."
         }
+
+    # Guard 3b: Daily loss limit for LIVE execution
+    if mode == "LIVE":
+        from arbitrage import daily_loss_limit_reached
+        if daily_loss_limit_reached():
+            return {
+                "success": False,
+                "status": "DAILY_LOSS_LIMIT_REACHED",
+                "message": "Daily net loss limit reached; live execution blocked."
+            }
 
     # LIVE / TESTNET: sign + broadcast with the server key (live_executor.py)
     if not getattr(config, "PRIVATE_KEY", "").strip():
