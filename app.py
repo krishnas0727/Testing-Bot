@@ -20,6 +20,27 @@ try:
 except ImportError:
     pass
 
+# Direct pure-Python fallback to ensure .env is parsed even if python-dotenv fails
+_env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.isfile(_env_file):
+    try:
+        with open(_env_file, "r", encoding="utf-8") as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if not _line or _line.startswith("#") or "=" not in _line:
+                    continue
+                _k, _v = _line.split("=", 1)
+                _k = _k.strip()
+                _v = _v.strip()
+                if _v.startswith('"') and _v.endswith('"') and len(_v) >= 2:
+                    _v = _v[1:-1]
+                elif _v.startswith("'") and _v.endswith("'") and len(_v) >= 2:
+                    _v = _v[1:-1]
+                if _k and _k not in os.environ:
+                    os.environ[_k] = _v
+    except Exception:
+        pass
+
 from flask import Flask, jsonify, render_template, request
 
 
