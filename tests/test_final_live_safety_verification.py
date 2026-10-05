@@ -37,7 +37,12 @@ class TestFinalLiveTradeSafety(unittest.TestCase):
         delete_all_trades()
         self.app = app
         self.client = app.test_client()
-        self.headers = {"Authorization": "Bearer local_dev_token_12345"}
+        self.orig_token = getattr(config, "API_AUTH_TOKEN", "")
+        self.orig_env_token = os.environ.get("API_AUTH_TOKEN", "")
+        self.auth_token = "local_dev_token_12345"
+        config.API_AUTH_TOKEN = self.auth_token
+        os.environ["API_AUTH_TOKEN"] = self.auth_token
+        self.headers = {"Authorization": f"Bearer {self.auth_token}"}
 
         self.orig_chain_id = config.CHAIN_ID
         self.orig_trading_mode = config.TRADING_MODE
@@ -58,6 +63,11 @@ class TestFinalLiveTradeSafety(unittest.TestCase):
         config.ARBITRAGE_CONTRACT_ADDRESS = "0x0000000000000000000000000000000000000001"
 
     def tearDown(self):
+        config.API_AUTH_TOKEN = self.orig_token
+        if self.orig_env_token:
+            os.environ["API_AUTH_TOKEN"] = self.orig_env_token
+        else:
+            os.environ.pop("API_AUTH_TOKEN", None)
         config.set_active_chain(self.orig_chain_id)
         config.TRADING_MODE = self.orig_trading_mode
         config.LIVE_TRADING_ARMED = self.orig_armed

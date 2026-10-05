@@ -13,33 +13,58 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, Optional, List
 
-try:
-    from dotenv import load_dotenv
-    _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-    load_dotenv(dotenv_path=_env_path)
-except ImportError:
-    pass
+def load_and_sanitize_dotenv(dotenv_path: Optional[str] = None):
+    """Load .env file and sanitize empty variables with inline comments.
 
-# Direct pure-Python fallback to ensure .env is parsed even if python-dotenv fails
-_env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-if os.path.isfile(_env_file):
+    Ensures that empty variables with inline comments (e.g. 'PRIVATE_KEY= # comment')
+    load as truly empty strings (''), while real values with inline comments
+    (e.g. 'RPC_URL=https://... # comment') work properly.
+    """
+    if dotenv_path is None:
+        dotenv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+
+    # 1. Standard python-dotenv load
     try:
-        with open(_env_file, "r", encoding="utf-8") as _f:
-            for _line in _f:
-                _line = _line.strip()
-                if not _line or _line.startswith("#") or "=" not in _line:
-                    continue
-                _k, _v = _line.split("=", 1)
-                _k = _k.strip()
-                _v = _v.strip()
-                if _v.startswith('"') and _v.endswith('"') and len(_v) >= 2:
-                    _v = _v[1:-1]
-                elif _v.startswith("'") and _v.endswith("'") and len(_v) >= 2:
-                    _v = _v[1:-1]
-                if _k and _k not in os.environ:
-                    os.environ[_k] = _v
-    except Exception:
+        from dotenv import load_dotenv
+        load_dotenv(dotenv_path=dotenv_path)
+    except ImportError:
         pass
+
+    # 2. Direct pure-Python parsing & sanitization directly from .env file
+    if os.path.isfile(dotenv_path):
+        try:
+            with open(dotenv_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    k = k.strip()
+                    v = v.strip()
+
+                    # Check if empty variable with inline comment: e.g. VAR= # comment
+                    if v.startswith("#"):
+                        v = ""
+                    else:
+                        if not ((v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'"))):
+                            if " #" in v:
+                                v = v.split(" #", 1)[0].strip()
+                            elif "\t#" in v:
+                                v = v.split("\t#", 1)[0].strip()
+                        if (v.startswith('"') and v.endswith('"') and len(v) >= 2) or (v.startswith("'") and v.endswith("'") and len(v) >= 2):
+                            v = v[1:-1]
+                    v = v.strip()
+                    os.environ[k] = v
+        except Exception:
+            pass
+
+    # 3. Final sweep to catch any variable whose value begins with '#'
+    for k, v in list(os.environ.items()):
+        if isinstance(v, str) and v.strip().startswith("#"):
+            os.environ[k] = ""
+
+
+load_and_sanitize_dotenv()
 
 from flask import Flask, jsonify, render_template, request
 
