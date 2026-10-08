@@ -528,7 +528,9 @@ def is_valid_ethereum_address(address: Any) -> bool:
     if len(clean) != 42 or not clean.startswith("0x"):
         return False
     try:
-        int(clean[2:], 16)
+        val = int(clean[2:], 16)
+        if val == 0:
+            return False
         return True
     except ValueError:
         return False

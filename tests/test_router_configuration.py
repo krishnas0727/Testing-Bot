@@ -71,6 +71,7 @@ class TestRouterConfiguration(unittest.TestCase):
         self.assertFalse(is_valid_ethereum_address(""))
         self.assertFalse(is_valid_ethereum_address(None))
         self.assertFalse(is_valid_ethereum_address(12345))
+        self.assertFalse(is_valid_ethereum_address("0x0000000000000000000000000000000000000000"))
 
     # ------------------------------------------------------------------
     # 2. Identical Router Addresses Test
@@ -358,6 +359,136 @@ class TestRouterConfiguration(unittest.TestCase):
         # Should NOT fail with ARBITRAGE_UNAVAILABLE
         self.assertNotEqual(res.get("status"), "ARBITRAGE_UNAVAILABLE")
         self.assertNotEqual(res.get("message"), "Arbitrage unavailable: fewer than two valid DEX routers configured.")
+
+    # ------------------------------------------------------------------
+    # 12. Explicit Verification Tests for Router & Liquidity Gates
+    # ------------------------------------------------------------------
+    def test_zero_valid_routers_blocks_trade(self):
+        """Verify: 0 valid routers -> trade blocked with ARBITRAGE_UNAVAILABLE."""
+        from unittest.mock import patch
+        mock_registry = dict(config.CHAIN_REGISTRY)
+        mock_registry[8453] = dict(mock_registry[8453])
+        mock_registry[8453]["routers"] = {}
+        mock_registry[8453]["dexes"] = []
+
+        with patch.dict(config.CHAIN_REGISTRY, mock_registry):
+            is_valid, reason, valid_dexes = validate_chain_dex_routers(8453)
+            self.assertFalse(is_valid)
+            self.assertEqual(reason, "Arbitrage unavailable: fewer than two valid DEX routers configured.")
+            self.assertEqual(valid_dexes, [])
+
+            plan = {
+                "chain_id": 8453,
+                "buy_dex": "Uniswap_V2",
+                "sell_dex": "SushiSwap_V2",
+                "amount_in": 5.0,
+                "net_profit_usdt": 1.0,
+            }
+            res = execute_atomic_trade(plan)
+            self.assertFalse(res.get("success", False))
+            self.assertEqual(res.get("status"), "ARBITRAGE_UNAVAILABLE")
+
+    def test_one_valid_router_blocks_trade(self):
+        """Verify: 1 valid router -> trade blocked with ARBITRAGE_UNAVAILABLE."""
+        from unittest.mock import patch
+        mock_registry = dict(config.CHAIN_REGISTRY)
+        mock_registry[8453] = dict(mock_registry[8453])
+        mock_registry[8453]["routers"] = {
+            "Uniswap_V2": "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24"
+        }
+        mock_registry[8453]["dexes"] = ["Uniswap_V2"]
+
+        with patch.dict(config.CHAIN_REGISTRY, mock_registry):
+            is_valid, reason, valid_dexes = validate_chain_dex_routers(8453)
+            self.assertFalse(is_valid)
+            self.assertEqual(reason, "Arbitrage unavailable: fewer than two valid DEX routers configured.")
+            self.assertEqual(valid_dexes, ["Uniswap_V2"])
+
+            plan = {
+                "chain_id": 8453,
+                "buy_dex": "Uniswap_V2",
+                "sell_dex": "SushiSwap_V2",
+                "amount_in": 5.0,
+                "net_profit_usdt": 1.0,
+            }
+            res = execute_atomic_trade(plan)
+            self.assertFalse(res.get("success", False))
+            self.assertEqual(res.get("status"), "ARBITRAGE_UNAVAILABLE")
+
+    def test_two_valid_routers_allows_evaluation(self):
+        """Verify: 2 valid routers -> arbitrage evaluation allowed."""
+        is_valid, reason, valid_dexes = validate_chain_dex_routers(8453)
+        self.assertTrue(is_valid)
+        self.assertEqual(reason, "Valid DEX routers configured.")
+        self.assertEqual(len(valid_dexes), 2)
+        self.assertIn("Uniswap_V2", valid_dexes)
+        self.assertIn("SushiSwap_V2", valid_dexes)
+
+        # In MOCK mode, market analysis proceeds with full arbitrage evaluation
+        config.set_active_chain(8453)
+        market = analyze_market(custom_amount=5.0, chain_id=8453)
+        self.assertIsNotNone(market)
+        self.assertNotEqual(market.get("status"), "ARBITRAGE_UNAVAILABLE")
+        self.assertIsNotNone(market.get("best_route"))
+
+    def test_invalid_router_address_rejected_explicit(self):
+        """Verify: invalid router address -> rejected from valid list."""
+        for bad_addr in ["0xnothex", "0x123", "random_string", "0x" + "g" * 40, ""]:
+            self.assertFalse(is_valid_ethereum_address(bad_addr))
+            routers = {
+                "Uniswap_V2": "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24",
+                "SushiSwap_V2": bad_addr,
+            }
+            is_valid, reason, valid_dexes = validate_chain_dex_routers(routers=routers)
+            self.assertFalse(is_valid)
+            self.assertNotIn("SushiSwap_V2", valid_dexes)
+
+    def test_wrong_chain_router_rejected(self):
+        """Verify: wrong-chain router -> rejected / isolation maintained."""
+        base_mainnet_routers = config.CHAIN_REGISTRY[8453]["routers"]
+        base_sepolia_routers = config.CHAIN_REGISTRY[84532]["routers"]
+        eth_mainnet_routers = config.CHAIN_REGISTRY[1]["routers"]
+
+        # Base mainnet routers must not be identical to Ethereum mainnet routers
+        self.assertNotEqual(
+            base_mainnet_routers["Uniswap_V2"].lower(),
+            eth_mainnet_routers["Uniswap_V2"].lower()
+        )
+        # Base Sepolia has its own isolated router, not borrowing Base mainnet
+        self.assertNotEqual(
+            base_sepolia_routers["Uniswap_V2"].lower(),
+            base_mainnet_routers["Uniswap_V2"].lower()
+        )
+
+    def test_no_liquidity_rejected(self):
+        """Verify: no liquidity in live mode -> rejected / trade execution prevented."""
+        from dex_engine import get_dex_reserves
+        import dex_engine
+
+        # Test LIVE mode reserve check with zero/negligible liquidity
+        orig_mode = config.TRADING_MODE
+        try:
+            config.TRADING_MODE = "LIVE"
+            # In LIVE mode, mock reserves are refused and negligible pools (< 1000) are skipped
+            with self.assertRaises(RuntimeError):
+                get_dex_reserves("NonExistent_DEX", "FAKE_TOKEN_A", "FAKE_TOKEN_B")
+        finally:
+            config.TRADING_MODE = orig_mode
+
+    def test_no_fake_router_passes_validation(self):
+        """Verify: no fake router (zero address, duplicate, malformed) passes validation."""
+        fake_test_cases = [
+            # Case 1: Zero address burn router
+            {"Uniswap_V2": "0x0000000000000000000000000000000000000000", "SushiSwap_V2": "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24"},
+            # Case 2: Identical addresses under different names (fake duplicate)
+            {"Uniswap_V2": "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24", "SushiSwap_V2": "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24"},
+            # Case 3: Fake non-hex string
+            {"Uniswap_V2": "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24", "SushiSwap_V2": "0xFAKE_ROUTER_ADDRESS_NOT_HEX_CHARS00000"},
+        ]
+        for routers in fake_test_cases:
+            is_valid, reason, valid_dexes = validate_chain_dex_routers(routers=routers)
+            self.assertFalse(is_valid, f"Fake router dictionary {routers} must not pass validation")
+            self.assertEqual(reason, "Arbitrage unavailable: fewer than two valid DEX routers configured.")
 
 
 if __name__ == "__main__":
