@@ -234,12 +234,13 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
         return None
 
     if len(quotes) < 2:
+        reason_msg = router_reason if not is_routers_valid else "No executable DEX route found. Please check network connection or liquidity pools."
         return {
             "success": False,
             "arbitrage_available": False,
             "status": "ARBITRAGE_UNAVAILABLE",
-            "message": "Arbitrage unavailable: fewer than two valid DEX routers configured.",
-            "skip_reason": "Arbitrage unavailable: fewer than two valid DEX routers configured.",
+            "message": reason_msg,
+            "skip_reason": reason_msg,
             "chain_id": chain_id_val,
             "chain_name": chain_name_val,
             "chain_label": chain_label_val,

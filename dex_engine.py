@@ -310,7 +310,8 @@ def get_dex_reserves(dex_name: str, base_sym: str = "WETH", quote_sym: str = "US
 
     if onchain_success and not _is_mock_mode():
         # dust / empty pool guard (real data only)
-        if base_reserve <= 0 or quote_reserve <= 0 or quote_reserve < 1000.0:
+        min_quote_reserve = float(os.getenv("MIN_POOL_LIQUIDITY_USD", "500.0"))
+        if base_reserve <= 0 or quote_reserve <= 0 or quote_reserve < min_quote_reserve:
             raise RuntimeError(f"{dex_name} {base_sym}/{quote_sym} pool has negligible liquidity "
                                f"({base_reserve} / {quote_reserve}); skipping.")
 

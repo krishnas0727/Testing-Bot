@@ -741,12 +741,13 @@ def verify_profit_api():
             })
 
         if len(quotes) < 2:
+            fail_reason = router_reason if not is_routers_valid else "No executable DEX route found. Please check network connection or liquidity pools."
             return jsonify({
                 "is_profitable": False,
                 "arbitrage_available": False,
                 "net_profit_usdt": 0.0,
-                "skip_reason": "Arbitrage unavailable: fewer than two valid DEX routers configured.",
-                "message": "Arbitrage unavailable: fewer than two valid DEX routers configured.",
+                "skip_reason": fail_reason,
+                "message": fail_reason,
             })
 
         # Find the best buy/sell pair

@@ -228,10 +228,12 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
         "is_testnet": False,
         "currency": "ETH",
         "explorer": "https://arbiscan.io",
-        "rpc_url": "https://arbitrum-one-rpc.publicnode.com",
+        "rpc_url": "https://arb1.arbitrum.io/rpc",
         "fallbacks": [
-            "https://arbitrum-one-rpc.publicnode.com",
             "https://arb1.arbitrum.io/rpc",
+            "https://arbitrum-one-rpc.publicnode.com",
+            "https://1rpc.io/arb",
+            "https://arbitrum.drpc.org",
         ],
         "dexes": ["Uniswap_V2", "SushiSwap_V2"],
         "routers": {
@@ -247,8 +249,8 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
             "USDT": {"address": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", "decimals": 6, "symbol": "USDT"},
             "USDC": {"address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", "decimals": 6, "symbol": "USDC"},
         },
-        "pairs": ["WETH/USDC", "WETH/USDT"],
-        "default_symbol": "WETH/USDC",
+        "pairs": ["WETH/USDT", "WETH/USDC"],
+        "default_symbol": "WETH/USDT",
         "arbitrage_contract": os.getenv("ARB_ARBITRAGE_CONTRACT", os.getenv("ARBITRAGE_CONTRACT_ADDRESS", ""))
     },
     137: {

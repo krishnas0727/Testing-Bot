@@ -191,10 +191,10 @@ const SUPPORTED_CHAINS = {
         decimals: 18,
         explorer: "https://arbiscan.io",
         hex: "0xa4b1",
-        rpcUrls: ["https://arbitrum-one-rpc.publicnode.com"],
+        rpcUrls: ["https://arb1.arbitrum.io/rpc", "https://arbitrum-one-rpc.publicnode.com"],
         nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-        defaultPair: "WETH/USDC",
-        pairs: ["WETH/USDC", "WETH/USDT"]
+        defaultPair: "WETH/USDT",
+        pairs: ["WETH/USDT", "WETH/USDC"]
     },
     1: {
         id: 1,
