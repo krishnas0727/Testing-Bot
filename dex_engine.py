@@ -222,6 +222,11 @@ def get_pair_address(dex_name: str, token_a_sym: str, token_b_sym: str) -> Optio
             return pair
 
     factory = config.DEX_FACTORIES.get(dex_name)
+    if not factory:
+        for k, v in config.DEX_FACTORIES.items():
+            if k.lower() == dex_name.lower() or k.lower().replace("_", "") == dex_name.lower().replace("_", ""):
+                factory = v
+                break
     token_a = config.TOKEN_REGISTRY.get(token_a_sym, {}).get("address")
     token_b = config.TOKEN_REGISTRY.get(token_b_sym, {}).get("address")
 
@@ -476,15 +481,28 @@ def get_dex_quote(dex_name: str, amount_usdt: float, base_sym: str = "WETH", quo
     buy_effective_price = amount_usdt / weth_received if weth_received > 0 else spot_price
     buy_price_impact = calculate_price_impact(amount_usdt, weth_received, 1.0 / spot_price if spot_price > 0 else 0)
 
-    # Sell quote: Swap 1 WETH -> USDT to determine marginal sell price
-    usdt_for_one_eth = calculate_amount_out(
-        amount_in=1.0,
-        reserve_in=base_res,
-        reserve_out=quote_res,
-        fee_pct=config.DEX_PROTOCOL_FEE_PCT
-    )
-    sell_effective_price = usdt_for_one_eth
-    sell_price_impact = calculate_price_impact(1.0, usdt_for_one_eth, spot_price)
+    # Sell quote: Swap proportional WETH (matched to amount_usdt) -> USDT to determine sell price & true price impact
+    weth_to_sell = weth_received if weth_received > 0 else ((amount_usdt / spot_price) if spot_price > 0 else 0.0)
+    if weth_to_sell > 0:
+        usdt_returned = calculate_amount_out(
+            amount_in=weth_to_sell,
+            reserve_in=base_res,
+            reserve_out=quote_res,
+            fee_pct=config.DEX_PROTOCOL_FEE_PCT
+        )
+        sell_effective_price = (usdt_returned / weth_to_sell) if weth_to_sell > 0 else spot_price
+        sell_price_impact = calculate_price_impact(weth_to_sell, usdt_returned, spot_price)
+    else:
+        # Fallback for zero trade amount: marginal quote with small trade size (0.001 WETH)
+        marginal_weth = 0.001
+        usdt_marginal = calculate_amount_out(
+            amount_in=marginal_weth,
+            reserve_in=base_res,
+            reserve_out=quote_res,
+            fee_pct=config.DEX_PROTOCOL_FEE_PCT
+        )
+        sell_effective_price = (usdt_marginal / marginal_weth) if marginal_weth > 0 else spot_price
+        sell_price_impact = calculate_price_impact(marginal_weth, usdt_marginal, spot_price)
 
     return {
         "dex": dex_name,
