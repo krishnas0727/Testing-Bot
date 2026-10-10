@@ -1042,6 +1042,7 @@ function updateDashboardUI(payload) {
         const gweiStr = gwei < 0.1 ? gwei.toFixed(3) : gwei.toFixed(1);
         setText("tickerGasPrice", `${gweiStr} Gwei`);
     }
+    setText("rpcStatusText", `Live RPC Synced (${new Date().toLocaleTimeString()})`);
 
     // Synchronize Header Chain Select, Settings Select, and Network Cards strictly with currentSelectedChainId
     const chainSelect = document.getElementById("headerChainSelect");
@@ -1302,9 +1303,13 @@ function updateDashboardUI(payload) {
         setText("bestRouteChainName", targetChainInfo.name);
         const bestRouteTimestamp = document.getElementById("bestRouteTimestamp");
         if (bestRouteTimestamp) {
-            if (data.timestamp || payload.timestamp) {
-                const d = new Date((data.timestamp || payload.timestamp) * 1000);
+            const rawTs = data.timestamp || payload.timestamp;
+            if (rawTs) {
+                const tsMs = Number(rawTs) > 1e11 ? Number(rawTs) : Number(rawTs) * 1000;
+                const d = new Date(tsMs);
                 bestRouteTimestamp.innerText = `Updated ${d.toLocaleTimeString()}`;
+            } else {
+                bestRouteTimestamp.innerText = `Updated ${new Date().toLocaleTimeString()}`;
             }
         }
 
