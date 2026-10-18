@@ -4284,18 +4284,22 @@ function closeTreasuryModal() {
 window.showTreasuryModal = showTreasuryModal;
 window.closeTreasuryModal = closeTreasuryModal;
 
-function useConnectedWalletForTreasury() {
+function useOwnerWalletForTreasury() {
     const recipientInput = document.getElementById("treasuryRecipientInput");
-    if (!metamaskAccount) {
-        showToast("Please connect your MetaMask wallet first.", "warning");
-        showMetaMaskModal();
-        return;
-    }
-    if (recipientInput) {
-        recipientInput.value = metamaskAccount;
-        showToast("Recipient address set to connected MetaMask wallet.", "info");
+    if (recipientInput && window._treasuryOwnerAddress) {
+        recipientInput.value = window._treasuryOwnerAddress;
+        showToast("Recipient set to bot owner wallet address.", "info");
+    } else {
+        refreshTreasuryStatus().then(() => {
+            if (recipientInput && window._treasuryOwnerAddress) {
+                recipientInput.value = window._treasuryOwnerAddress;
+                showToast("Recipient set to bot owner wallet address.", "info");
+            }
+        });
     }
 }
+window.useOwnerWalletForTreasury = useOwnerWalletForTreasury;
+window.useConnectedWalletForTreasury = useOwnerWalletForTreasury;
 
 function setTreasuryPercent(pct) {
     const amtInput = document.getElementById("treasuryAmountInput");
@@ -4313,6 +4317,20 @@ async function refreshTreasuryStatus() {
             setText("treasuryTotalProfit", `$${Number(json.total_profit_usdt || 0).toFixed(4)}`);
             setText("treasuryTotalWithdrawn", `$${Number(json.total_withdrawn_usdt || 0).toFixed(4)}`);
             setText("treasuryWithdrawable", `$${treasuryWithdrawableAmount.toFixed(4)}`);
+
+            const onChainBal = Number(json.on_chain_balance || 0);
+            setText("treasuryOnChainBal", `$${onChainBal.toFixed(4)}`);
+
+            const destAddr = json.withdrawable_destination || json.treasury_address || "";
+            window._treasuryOwnerAddress = destAddr;
+            const shortDest = destAddr ? `${destAddr.slice(0, 6)}...${destAddr.slice(-4)}` : "--";
+            setText("treasuryOwnerAddressDisplay", destAddr ? shortDest : "--");
+            const destNote = document.getElementById("treasuryDestinationNote");
+            if (destNote) {
+                destNote.innerText = destAddr
+                    ? `Funds are sent to the bot owner wallet (${shortDest})`
+                    : "Funds are sent to the bot owner wallet";
+            }
 
             if (json.buckets) {
                 setText("treasuryTradingCapital", `$${Number(json.buckets.trading_capital || 0).toFixed(4)}`);
@@ -4337,7 +4355,7 @@ async function refreshTreasuryStatus() {
 
             const recipientInput = document.getElementById("treasuryRecipientInput");
             if (recipientInput && !recipientInput.value) {
-                recipientInput.value = metamaskAccount || json.treasury_address || "";
+                recipientInput.value = destAddr || metamaskAccount || "";
             }
 
             const container = document.getElementById("treasuryHistoryContainer");
@@ -4394,7 +4412,10 @@ async function executeTreasuryWithdraw() {
     const token = tokenSelect?.value || "USDT";
     let recipient = (recipientInput?.value || "").trim();
 
-    if (!recipient && metamaskAccount) {
+    if (!recipient && window._treasuryOwnerAddress) {
+        recipient = window._treasuryOwnerAddress;
+        if (recipientInput) recipientInput.value = recipient;
+    } else if (!recipient && metamaskAccount) {
         recipient = metamaskAccount;
         if (recipientInput) recipientInput.value = recipient;
     }

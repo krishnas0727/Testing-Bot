@@ -14,6 +14,7 @@ cp .env.example .env
 ```
 
 ## 2. `.env` (safe first values)
+# Note: The system defaults to MOCK. LIVE mode must be set explicitly by the operator.
 ```ini
 TRADING_MODE=LIVE
 CHAIN_ID=8453

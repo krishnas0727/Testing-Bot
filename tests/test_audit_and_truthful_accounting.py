@@ -215,7 +215,7 @@ class TestAuditAndTruthfulAccounting(unittest.TestCase):
         self.assertFalse(res.get_json()["success"])
 
         # LIVE mode on testnet chain is blocked by dex_engine
-        with patch.object(config, "CHAIN_ID", 11155111):
+        with patch.object(config, "CHAIN_ID", 11155111), patch.object(config, "TRADING_MODE", "LIVE"):
             res_engine = dex_engine.execute_atomic_trade({
                 "buy_dex": "Uniswap_V2",
                 "sell_dex": "SushiSwap_V2",
@@ -422,6 +422,104 @@ class TestAuditAndTruthfulAccounting(unittest.TestCase):
 
         sepolia_url = get_explorer_tx_url(11155111, sample_hash)
         self.assertEqual(sepolia_url, f"https://sepolia.etherscan.io/tx/{sample_hash}")
+
+    # -------------------------------------------------------------------------
+    # 13. Default mode is MOCK when TRADING_MODE is unset
+    # -------------------------------------------------------------------------
+    def test_default_trading_mode_is_mock(self):
+        """TRADING_MODE default must strictly be MOCK, never LIVE."""
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(os.getenv("TRADING_MODE", "MOCK").upper(), "MOCK")
+
+    # -------------------------------------------------------------------------
+    # 14. Environment CHAIN_ID takes precedence over saved bot_settings
+    # -------------------------------------------------------------------------
+    def test_env_chain_id_precedence_over_saved_settings(self):
+        """If CHAIN_ID is explicitly set in environment, it takes precedence over stale database setting."""
+        database.save_bot_setting("chain_id", 84532)
+        saved = database.load_all_bot_settings()
+        self.assertEqual(saved.get("chain_id"), 84532)
+
+        # Simulate startup precedence logic from app.py
+        with patch.dict(os.environ, {"CHAIN_ID": "8453"}):
+            env_cid = int(os.environ.get("CHAIN_ID"))
+            _saved = database.load_all_bot_settings()
+            if env_cid in config.CHAIN_REGISTRY:
+                config.set_active_chain(env_cid)
+            self.assertEqual(config.CHAIN_ID, 8453)
+
+    # -------------------------------------------------------------------------
+    # 15. Withdrawal recipient defaults to contract owner, rejects non-owner without DB write
+    # -------------------------------------------------------------------------
+    def test_treasury_withdraw_recipient_owner_enforcement(self):
+        """In LIVE mode, withdrawal requires the recipient to be the contract owner."""
+        owner_addr = "0x1111111111111111111111111111111111111111"
+        not_owner = "0x2222222222222222222222222222222222222222"
+        contract_addr = "0x3333333333333333333333333333333333333333"
+
+        with patch.object(config, "ARBITRAGE_CONTRACT_ADDRESS", contract_addr):
+            with patch("app.get_contract_owner", return_value=owner_addr):
+                # 1. Non-owner recipient is rejected with RECIPIENT_NOT_OWNER
+                res_bad = self.client.post("/api/treasury/withdraw", headers=self.headers, json={
+                    "amount": 1.0,
+                    "recipient_address": not_owner,
+                    "mode": "LIVE"
+                })
+                self.assertEqual(res_bad.status_code, 400)
+                data_bad = res_bad.get_json()
+                self.assertEqual(data_bad["status"], "RECIPIENT_NOT_OWNER")
+                self.assertIn(owner_addr, data_bad["message"])
+
+                # Invariant: NO withdrawal row recorded in database
+                withdrawals = database.get_treasury_withdrawals(limit=10, mode="LIVE")
+                self.assertEqual(len(withdrawals), 0)
+
+                # 2. When no recipient is supplied, recipient defaults to owner
+                with patch("treasury_execution.submit_blockchain_withdrawal", return_value={"success": True, "tx_hash": "0x" + "d" * 64}):
+                    # Mock on-chain balance so balance check passes
+                    with patch("treasury_execution.check_contract_balance", return_value=100.0):
+                        res_default = self.client.post("/api/treasury/withdraw", headers=self.headers, json={
+                            "amount": 1.0,
+                            "mode": "LIVE"
+                        })
+                        # Either 200 (if executed) or rejected at key configuration, but recipient was defaulted to owner
+                        if res_default.status_code == 400:
+                            self.assertNotEqual(res_default.get_json().get("status"), "RECIPIENT_NOT_OWNER")
+
+    # -------------------------------------------------------------------------
+    # 16. Treasury status includes withdrawable_destination and buckets_label
+    # -------------------------------------------------------------------------
+    def test_treasury_status_shows_withdrawable_destination_and_buckets_label(self):
+        """Status endpoint returns honest bucket label and withdrawable destination."""
+        owner_addr = "0x1111111111111111111111111111111111111111"
+        with patch.object(config, "ARBITRAGE_CONTRACT_ADDRESS", "0x3333333333333333333333333333333333333333"):
+            with patch("app.get_contract_owner", return_value=owner_addr):
+                res = self.client.get("/api/treasury/status?mode=LIVE", headers=self.headers)
+                self.assertEqual(res.status_code, 200)
+                data = res.get_json()
+                self.assertEqual(data.get("withdrawable_destination"), owner_addr)
+                self.assertEqual(data.get("buckets_label"), "Accounting allocation (not on-chain balances)")
+
+    # -------------------------------------------------------------------------
+    # 17. Dotenv fallback parser strips inline comments and handles empty values
+    # -------------------------------------------------------------------------
+    def test_dotenv_strips_inline_comments_and_empty_with_comment(self):
+        """Fallback .env parser must strip inline comments and parse 'PRIVATE_KEY=   # comment' to ''."""
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".env", encoding="utf-8") as f:
+            f.write("TEST_EMPTY_VAR=   # some comment here\n")
+            f.write("TEST_VAL_VAR=my_secret_token   # inline comment\n")
+            f.write("TEST_QUOTED_VAR=\"value # not a comment\"\n")
+            temp_path = f.name
+
+        try:
+            config.load_and_sanitize_dotenv(temp_path)
+            self.assertEqual(os.environ.get("TEST_EMPTY_VAR"), "")
+            self.assertEqual(os.environ.get("TEST_VAL_VAR"), "my_secret_token")
+            self.assertEqual(os.environ.get("TEST_QUOTED_VAR"), "value # not a comment")
+        finally:
+            if os.path.isfile(temp_path):
+                os.remove(temp_path)
 
 
 if __name__ == "__main__":

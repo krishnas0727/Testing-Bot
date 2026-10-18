@@ -4,6 +4,7 @@
 # ============================================================
 
 import os
+import re
 from typing import Dict, Any, Optional, List, Tuple
 
 def load_and_sanitize_dotenv(dotenv_path: Optional[str] = None):
@@ -40,12 +41,12 @@ def load_and_sanitize_dotenv(dotenv_path: Optional[str] = None):
                         v = ""
                     else:
                         if not ((v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'"))):
-                            if " #" in v:
-                                v = v.split(" #", 1)[0].strip()
-                            elif "\t#" in v:
-                                v = v.split("\t#", 1)[0].strip()
-                        if (v.startswith('"') and v.endswith('"') and len(v) >= 2) or (v.startswith("'") and v.endswith("'") and len(v) >= 2):
-                            v = v[1:-1]
+                            v = re.split(r'\s+#', v, maxsplit=1)[0].strip()
+                            if v.startswith("#"):
+                                v = ""
+                        else:
+                            if (v.startswith('"') and v.endswith('"') and len(v) >= 2) or (v.startswith("'") and v.endswith("'") and len(v) >= 2):
+                                v = v[1:-1]
                     v = v.strip()
                     os.environ[k] = v
         except Exception:
@@ -413,7 +414,7 @@ TREASURY_CONTRACT_ADDRESS = os.getenv("TREASURY_CONTRACT_ADDRESS", "")
 # ============================================================
 
 # MOCK | TESTNET | LIVE
-TRADING_MODE = os.getenv("TRADING_MODE", "LIVE").upper()
+TRADING_MODE = os.getenv("TRADING_MODE", "MOCK").upper()
 
 # Auto-trading background engine (safe default: False)
 AUTO_TRADE_ENABLED = os.getenv("AUTO_TRADE_ENABLED", "false").lower() == "true"

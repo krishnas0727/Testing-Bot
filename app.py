@@ -124,6 +124,8 @@ try:
         config.AUTO_TRADE_ENABLED = bool(_saved["auto_trade"])
     if "trading_mode" in _saved:
         config.TRADING_MODE = str(_saved["trading_mode"]).upper()
+        if config.TRADING_MODE == "LIVE":
+            print("[DEX App] WARNING: LIVE mode restored; trading remains DISARMED until /api/trade/arm is called", flush=True)
     if "min_profit" in _saved:
         saved_min_profit = float(_saved["min_profit"])
         if saved_min_profit >= 0.50:
@@ -176,7 +178,21 @@ try:
         print(f"[DEX App] Router configuration check warning: {_r_err}", flush=True)
     if "contract_address" in _saved and _saved["contract_address"]:
         config.ARBITRAGE_CONTRACT_ADDRESS = str(_saved["contract_address"]).strip()
-    if "chain_id" in _saved:
+    env_chain_id = os.environ.get("CHAIN_ID")
+    if env_chain_id:
+        try:
+            env_cid = int(env_chain_id)
+            if env_cid in config.CHAIN_REGISTRY:
+                if "chain_id" in _saved and int(_saved["chain_id"]) != env_cid:
+                    print(
+                        f"[DEX App] WARNING: Saved chain_id {_saved['chain_id']} ignored; "
+                        f"CHAIN_ID in environment ({env_cid}) takes precedence.",
+                        flush=True
+                    )
+                config.set_active_chain(env_cid)
+        except (ValueError, TypeError):
+            pass
+    elif "chain_id" in _saved:
         try:
             cid = int(_saved["chain_id"])
             if cid in config.CHAIN_REGISTRY:
@@ -853,6 +869,29 @@ def get_explorer_tx_url(chain_id: int, tx_hash: str) -> str:
     return f"{base}{tx_hash}" if base else ""
 
 
+def get_contract_owner(chain_id: int, contract_address: str) -> Optional[str]:
+    """Query DexArbitrage contract.owner() view function via RPC."""
+    if not contract_address or not str(contract_address).startswith("0x") or len(str(contract_address)) != 42:
+        return None
+    try:
+        from web3 import Web3
+        from treasury_execution import DEX_ARBITRAGE_ABI
+        chain_info = config.CHAIN_REGISTRY.get(chain_id, {})
+        rpc_url = chain_info.get("rpc_url") or getattr(config, "RPC_URL", "")
+        if not rpc_url:
+            return None
+        w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 5}))
+        if not w3.is_connected():
+            return None
+        contract = w3.eth.contract(
+            address=Web3.to_checksum_address(contract_address),
+            abi=DEX_ARBITRAGE_ABI
+        )
+        return contract.functions.owner().call()
+    except Exception:
+        return None
+
+
 @app.route("/api/treasury/status", methods=["GET"])
 def treasury_status_api():
     """Retrieve treasury metrics: total profit, withdrawn amount, withdrawable balance, and recent history."""
@@ -866,6 +905,7 @@ def treasury_status_api():
         total_withdrawn = get_total_withdrawn(mode=mode)
 
         profit_source = "database"
+        on_chain_bal = 0.0
         if mode == "MOCK":
             withdrawable = get_withdrawable_profit(mode="MOCK")
             profit_source = "database"
@@ -902,6 +942,16 @@ def treasury_status_api():
         buckets = get_treasury_buckets_summary(mode=mode)
         allocations = get_treasury_allocations(limit=15, mode=mode)
 
+        contract_owner = None
+        if contract_addr:
+            contract_owner = get_contract_owner(active_cid, contract_addr)
+
+        withdrawable_destination = ""
+        if mode == "LIVE":
+            withdrawable_destination = contract_owner or getattr(config, "WALLET_ADDRESS", "")
+        else:
+            withdrawable_destination = getattr(config, "WALLET_ADDRESS", "") or "0xSIMULATED_WALLET"
+
         treasury_recipient = getattr(config, "WALLET_ADDRESS", "") or getattr(config, "TREASURY_ADDRESS", "")
         resp_contract_addr = contract_addr
         if not is_request_authenticated():
@@ -920,6 +970,9 @@ def treasury_status_api():
             "withdrawable_profit_usdt": withdrawable,
             "withdrawable_profit_source": profit_source,
             "profit_source": profit_source,
+            "withdrawable_destination": withdrawable_destination,
+            "on_chain_balance": on_chain_bal if profit_source == "contract_on_chain" else 0.0,
+            "buckets_label": "Accounting allocation (not on-chain balances)",
             "treasury_address": treasury_recipient,
             "trading_mode": mode,
             "recent_withdrawals": withdrawals,
@@ -950,7 +1003,7 @@ def treasury_withdraw_api():
             return jsonify({"success": False, "status": "INVALID_AMOUNT", "message": "Withdrawal amount must be a valid number greater than 0."}), 400
 
         token = (data.get("token") or "USDT").upper().strip()
-        recipient = (data.get("recipient_address") or data.get("wallet_address") or getattr(config, "WALLET_ADDRESS", "")).strip()
+        recipient = (data.get("recipient_address") or data.get("wallet_address") or "").strip()
         client_tx_hash = (data.get("tx_hash") or "").strip()
         chain_id_val = int(data.get("chain_id") or getattr(config, "CHAIN_ID", 11155111))
         chain_info = config.CHAIN_REGISTRY.get(chain_id_val, {})
@@ -959,6 +1012,27 @@ def treasury_withdraw_api():
         req_mode = str(data.get("mode", "")).upper().strip()
         is_simulation = bool(data.get("simulation", False)) or (req_mode == "MOCK")
         mode = "MOCK" if is_simulation else (req_mode or getattr(config, "TRADING_MODE", "LIVE"))
+
+        # In LIVE mode, DexArbitrage.withdrawToken pays only the contract owner
+        contract_check_addr = (
+            getattr(config, "TREASURY_CONTRACT_ADDRESS", "")
+            or getattr(config, "ARBITRAGE_CONTRACT_ADDRESS", "")
+        ).strip()
+
+        if mode == "LIVE" and contract_check_addr:
+            owner = get_contract_owner(chain_id_val, contract_check_addr)
+            if owner:
+                if not recipient:
+                    recipient = owner
+                elif recipient.strip().lower() != owner.strip().lower():
+                    return jsonify({
+                        "success": False,
+                        "status": "RECIPIENT_NOT_OWNER",
+                        "message": f"Funds can only go to the owner wallet ({owner})."
+                    }), 400
+
+        if not recipient:
+            recipient = getattr(config, "WALLET_ADDRESS", "").strip()
 
         # 1. Validate Amount
         if amount <= 0.0:

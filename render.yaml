@@ -18,7 +18,7 @@ services:
       - key: PORT
         value: 5000
       - key: TRADING_MODE
-        value: LIVE
+        value: MOCK
       - key: AUTO_TRADE_ENABLED
         value: "false"
       - key: LIVE_TRADING_ARMED

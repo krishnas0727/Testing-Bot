@@ -1413,7 +1413,7 @@
         </div>
 
         <!-- TREASURY STATS TILES -->
-        <div class="treasury-stats-grid" style="display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin-bottom:16px;">
+        <div class="treasury-stats-grid" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; margin-bottom:16px;">
             <div style="background:#0f172a; padding:12px; border-radius:8px; border:1px solid rgba(56,189,248,0.2);">
                 <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">Total Realized Profit</div>
                 <div id="treasuryTotalProfit" style="font-size:16px; font-weight:700; color:var(--profit-color);">$0.0000</div>
@@ -1429,12 +1429,17 @@
                 <div id="treasuryWithdrawable" style="font-size:16px; font-weight:700; color:#34d399;">$0.0000</div>
                 <div style="font-size:10px; color:var(--text-muted);">Net withdrawable</div>
             </div>
+            <div id="treasuryOnChainTile" style="background:#0f172a; padding:12px; border-radius:8px; border:1px solid #38bdf8; box-shadow:0 0 10px rgba(56,189,248,0.2);">
+                <div style="font-size:11px; color:#38bdf8; font-weight:700; margin-bottom:4px;">On-Chain Balance</div>
+                <div id="treasuryOnChainBal" style="font-size:16px; font-weight:700; color:#38bdf8;">$0.0000</div>
+                <div style="font-size:10px; color:var(--text-muted);">Contract tokens</div>
+            </div>
         </div>
 
         <!-- MULTI-BUCKET REVENUE ALLOCATION BREAKDOWN (MODULE 8 & 9) -->
         <div style="background:#090d16; border:1px solid #1e293b; border-radius:10px; padding:14px; margin-bottom:16px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                <span style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Automated Treasury Allocation (60 / 20 / 20)</span>
+                <span style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Accounting allocation (not on-chain balances)</span>
                 <span id="treasuryTotalAllocatedBadge" style="font-size:10px; font-family:var(--font-mono); color:#38bdf8; background:rgba(56,189,248,0.1); padding:2px 6px; border-radius:4px;">Compounding Engine</span>
             </div>
             
@@ -1466,13 +1471,14 @@
 
         <!-- WITHDRAWAL INPUT FORM -->
         <div style="background:#0b1329; border:1px solid rgba(148,163,184,0.2); border-radius:10px; padding:16px; margin-bottom:16px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                 <label style="font-size:12px; font-weight:700; color:var(--text-bright);">Recipient Web3 Address</label>
-                <button type="button" class="btn btn-secondary" style="padding:2px 8px; font-size:10px;" onclick="useConnectedWalletForTreasury()">
-                    🦊 Use Connected MetaMask
+                <button type="button" class="btn btn-secondary" style="padding:2px 8px; font-size:10px;" onclick="useOwnerWalletForTreasury()">
+                    👑 Use Owner Address
                 </button>
             </div>
-            <input type="text" id="treasuryRecipientInput" placeholder="0x... Recipient Wallet Address" style="width:100%; box-sizing:border-box; padding:10px 12px; background:#1e293b; border:1px solid #334155; border-radius:6px; color:#fff; font-family:var(--font-mono); font-size:12px; margin-bottom:12px; outline:none;" />
+            <div id="treasuryDestinationNote" style="font-size:11px; color:#38bdf8; margin-bottom:8px;">Funds are sent to the bot owner wallet (<span id="treasuryOwnerAddressDisplay">--</span>)</div>
+            <input type="text" id="treasuryRecipientInput" placeholder="0x... Bot Owner Wallet Address" style="width:100%; box-sizing:border-box; padding:10px 12px; background:#1e293b; border:1px solid #334155; border-radius:6px; color:#fff; font-family:var(--font-mono); font-size:12px; margin-bottom:12px; outline:none;" />
 
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <label style="font-size:12px; font-weight:700; color:var(--text-bright);">Withdrawal Amount & Token</label>

@@ -28,7 +28,7 @@ This project is a 100% decentralized, on-chain crypto arbitrage trading terminal
 5. **Safe Modes (MOCK / TESTNET / LIVE)**:
    - **MOCK Mode (Default)**: Fetches real live on-chain pool prices via RPC, performs full mathematical validation and simulation, without risking real funds.
    - **TESTNET Mode**: Executes transactions on Sepolia testnet.
-   - **LIVE Mode**: Mainnet execution (requires explicit arming and private key configuration).
+   - **LIVE Mode**: Mainnet execution (must be set explicitly by the operator; requires explicit arming and private key configuration).
 
 ---
 
