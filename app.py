@@ -832,6 +832,27 @@ def verify_profit_api():
 # TREASURY & PROFIT WITHDRAWAL API
 # ============================================================
 
+def get_explorer_tx_url(chain_id: int, tx_hash: str) -> str:
+    """Return truthful block explorer URL for a given EVM transaction hash."""
+    if not tx_hash or not str(tx_hash).startswith("0x") or len(str(tx_hash)) != 66:
+        return ""
+    explorers = {
+        42161: "https://arbiscan.io/tx/",
+        421614: "https://sepolia.arbiscan.io/tx/",
+        8453: "https://basescan.org/tx/",
+        84532: "https://sepolia.basescan.org/tx/",
+        1: "https://etherscan.io/tx/",
+        11155111: "https://sepolia.etherscan.io/tx/",
+    }
+    base = explorers.get(int(chain_id))
+    if not base:
+        chain_data = config.CHAIN_REGISTRY.get(int(chain_id), {})
+        base_exp = chain_data.get("explorer", "").rstrip("/")
+        if base_exp:
+            base = f"{base_exp}/tx/"
+    return f"{base}{tx_hash}" if base else ""
+
+
 @app.route("/api/treasury/status", methods=["GET"])
 def treasury_status_api():
     """Retrieve treasury metrics: total profit, withdrawn amount, withdrawable balance, and recent history."""
@@ -876,8 +897,10 @@ def treasury_status_api():
                 profit_source = "database"
 
         withdrawals = get_treasury_withdrawals(limit=25, mode=mode)
-        buckets = get_treasury_buckets_summary()
-        allocations = get_treasury_allocations(limit=15)
+        for w in withdrawals:
+            w["explorer_tx_url"] = get_explorer_tx_url(w.get("chain_id", active_cid), w.get("tx_hash", ""))
+        buckets = get_treasury_buckets_summary(mode=mode)
+        allocations = get_treasury_allocations(limit=15, mode=mode)
 
         treasury_recipient = getattr(config, "WALLET_ADDRESS", "") or getattr(config, "TREASURY_ADDRESS", "")
         resp_contract_addr = contract_addr
@@ -1096,7 +1119,8 @@ def treasury_withdraw_api():
                     "recipient_address": recipient,
                     "chain_id": chain_id_val,
                     "status": "CONFIRMED",
-                    "mode": "LIVE"
+                    "mode": "LIVE",
+                    "explorer_tx_url": get_explorer_tx_url(chain_id_val, client_tx_hash)
                 },
                 "total_withdrawn_usdt": get_total_withdrawn(mode="LIVE"),
                 "withdrawable_profit_usdt": get_withdrawable_profit(mode="LIVE")
@@ -1183,7 +1207,8 @@ def treasury_withdraw_api():
                 "recipient_address": actual_dest,
                 "chain_id": chain_id_val,
                 "status": "CONFIRMED",
-                "mode": "LIVE"
+                "mode": "LIVE",
+                "explorer_tx_url": get_explorer_tx_url(chain_id_val, real_tx)
             },
             "total_withdrawn_usdt": get_total_withdrawn(mode="LIVE"),
             "withdrawable_profit_usdt": get_withdrawable_profit(mode="LIVE")

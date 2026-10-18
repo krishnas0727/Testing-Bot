@@ -106,12 +106,13 @@ class DEXEngineTests(unittest.TestCase):
 
     def test_micro_trade_price_impact_is_minimized(self):
         """Micro-trade ($5 USDT) must produce negligible price impact on both buy and sell legs (< 0.5%)."""
-        q = get_dex_quote("Uniswap_V2", 5.0, "WETH", "USDT")
-        self.assertLess(q["buy_price_impact_pct"], 0.5)
-        self.assertLess(q["sell_price_impact_pct"], 0.5)
-        self.assertGreater(q["sell_price"], 0.0)
-        # Sell price should not be artificially collapsed to a 1 ETH liquidation value
-        self.assertAlmostEqual(q["sell_price"] / q["spot_price"], 1.0, delta=0.02)
+        with patch.object(config, "CHAIN_ID", 42161):
+            q = get_dex_quote("Uniswap_V2", 5.0, "WETH", "USDT")
+            self.assertLess(q["buy_price_impact_pct"], 0.5)
+            self.assertLess(q["sell_price_impact_pct"], 0.5)
+            self.assertGreater(q["sell_price"], 0.0)
+            # Sell price should not be artificially collapsed to a 1 ETH liquidation value
+            self.assertAlmostEqual(q["sell_price"] / q["spot_price"], 1.0, delta=0.02)
 
     def test_get_pair_address_case_insensitive(self):
         """Pair address resolution must match DEX factory regardless of casing or suffix."""

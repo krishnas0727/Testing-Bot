@@ -4346,13 +4346,16 @@ async function refreshTreasuryStatus() {
                 if (list.length === 0) {
                     container.innerHTML = `<div style="padding:12px; color:var(--text-muted); text-align:center;">No profit withdrawals recorded yet.</div>`;
                 } else {
-                    const chainInfo = SUPPORTED_CHAINS[json.chain_id] || { explorer: "https://sepolia.etherscan.io" };
                     container.innerHTML = list.map(w => {
                         const shortRecip = w.recipient_address ? `${w.recipient_address.slice(0, 6)}...${w.recipient_address.slice(-4)}` : "Wallet";
                         const shortTx = w.tx_hash ? `${w.tx_hash.slice(0, 10)}...` : "--";
+                        const explorerLink = w.explorer_tx_url || (w.tx_hash ? `${chainInfo.explorer}/tx/${w.tx_hash}` : "");
+                        const isSim = (w.mode === "MOCK" || w.status === "SIMULATED");
+                        const badgeClass = isSim ? "badge-blue" : (w.status === "FAILED" ? "badge-red" : "badge-green");
+                        const statusLabel = isSim ? "SIMULATED" : (w.status || "CONFIRMED");
                         const txLink = (w.tx_hash && !w.tx_hash.startsWith("0xtreasury_"))
-                            ? `<a href="${chainInfo.explorer}/tx/${w.tx_hash}" target="_blank" style="color:var(--accent-cyan); text-decoration:none;">${shortTx} 🔗</a>`
-                            : `<span style="color:var(--text-muted);">${shortTx}</span>`;
+                            ? `<a href="${explorerLink}" target="_blank" style="color:var(--accent-cyan); text-decoration:none;">${shortTx} 🔗</a>`
+                            : `<span style="color:var(--text-muted); font-size:10px;">${isSim ? "SIMULATED" : "--"}</span>`;
                         const dateStr = w.created_at ? new Date(w.created_at).toLocaleTimeString() : "";
                         return `
                             <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; border-bottom:1px solid rgba(255,255,255,0.05);">
@@ -4362,7 +4365,7 @@ async function refreshTreasuryStatus() {
                                 </div>
                                 <div style="display:flex; align-items:center; gap:8px;">
                                     ${txLink}
-                                    <span class="badge badge-green" style="font-size:9px;">${w.status || 'CONFIRMED'}</span>
+                                    <span class="badge ${badgeClass}" style="font-size:9px;">${statusLabel}</span>
                                     <span style="color:var(--text-muted); font-size:10px;">${dateStr}</span>
                                 </div>
                             </div>

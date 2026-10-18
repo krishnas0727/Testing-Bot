@@ -133,6 +133,7 @@ def create_database():
             trading_capital REAL DEFAULT 0.0,
             reserve REAL DEFAULT 0.0,
             revenue REAL DEFAULT 0.0,
+            mode TEXT DEFAULT 'LIVE',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -147,6 +148,11 @@ def create_database():
             cursor.execute("ALTER TABLE trades ADD COLUMN initial_capital REAL DEFAULT 0.0")
         if "dex_fees" not in cols:
             cursor.execute("ALTER TABLE trades ADD COLUMN dex_fees REAL DEFAULT 0.0")
+        
+        cursor.execute("PRAGMA table_info(treasury_allocations)")
+        alloc_cols = [r["name"] for r in cursor.fetchall()]
+        if "mode" not in alloc_cols:
+            cursor.execute("ALTER TABLE treasury_allocations ADD COLUMN mode TEXT DEFAULT 'LIVE'")
     except Exception:
         pass
 
@@ -321,8 +327,9 @@ def save_trade(trade_data: Dict[str, Any]) -> int:
     conn.commit()
     conn.close()
 
-    # Module 9: Automatically record revenue allocation if trade confirmed with net profit > 0
-    if trade_data.get("status") == "CONFIRMED" and net_profit > 0:
+    # Module 9: Automatically record revenue allocation ONLY for confirmed LIVE trades with net profit > 0
+    # Phase 1 & 3: Simulation must never create fake treasury funds. Keep simulation accounting completely separate.
+    if mode == "LIVE" and trade_data.get("status") == "CONFIRMED" and net_profit > 0:
         token_sym = "USDT" if "USDT" in str(trade_data.get("token_pair", "")) else "USDC"
         record_treasury_allocation({
             "trade_id": trade_id,
@@ -333,7 +340,8 @@ def save_trade(trade_data: Dict[str, Any]) -> int:
             "net_profit": net_profit,
             "trading_capital": round(net_profit * 0.60, 4),
             "reserve": round(net_profit * 0.20, 4),
-            "revenue": round(net_profit * 0.20, 4)
+            "revenue": round(net_profit * 0.20, 4),
+            "mode": "LIVE"
         })
 
     sync_trades_to_json_backup()
@@ -373,10 +381,14 @@ def get_total_trades(mode: Optional[str] = None) -> int:
     create_database()
     conn = get_connection()
     cursor = conn.cursor()
-    if mode and mode != "ALL":
+    if mode == "MOCK":
+        cursor.execute("SELECT COUNT(*) FROM trades WHERE mode = 'MOCK' AND status IN ('CONFIRMED', 'SIMULATED')")
+    elif mode and mode != "ALL":
         cursor.execute("SELECT COUNT(*) FROM trades WHERE mode = ? AND status = 'CONFIRMED'", (mode,))
+    elif mode == "ALL":
+        cursor.execute("SELECT COUNT(*) FROM trades WHERE status IN ('CONFIRMED', 'SIMULATED')")
     else:
-        cursor.execute("SELECT COUNT(*) FROM trades WHERE status = 'CONFIRMED'")
+        cursor.execute("SELECT COUNT(*) FROM trades WHERE mode = 'LIVE' AND status = 'CONFIRMED'")
     count = cursor.fetchone()[0]
     conn.close()
     return count
@@ -386,10 +398,14 @@ def get_total_profit(mode: Optional[str] = None) -> float:
     create_database()
     conn = get_connection()
     cursor = conn.cursor()
-    if mode and mode != "ALL":
+    if mode == "MOCK":
+        cursor.execute("SELECT COALESCE(SUM(net_profit), 0.0) FROM trades WHERE mode = 'MOCK' AND status IN ('CONFIRMED', 'SIMULATED')")
+    elif mode and mode != "ALL":
         cursor.execute("SELECT COALESCE(SUM(net_profit), 0.0) FROM trades WHERE mode = ? AND status = 'CONFIRMED'", (mode,))
+    elif mode == "ALL":
+        cursor.execute("SELECT COALESCE(SUM(net_profit), 0.0) FROM trades WHERE status IN ('CONFIRMED', 'SIMULATED')")
     else:
-        cursor.execute("SELECT COALESCE(SUM(net_profit), 0.0) FROM trades WHERE status = 'CONFIRMED'")
+        cursor.execute("SELECT COALESCE(SUM(net_profit), 0.0) FROM trades WHERE mode = 'LIVE' AND status = 'CONFIRMED'")
     total = cursor.fetchone()[0]
     conn.close()
     return round(float(total), 4)
@@ -430,6 +446,8 @@ def delete_all_trades():
     cursor = conn.cursor()
     cursor.execute("DELETE FROM trades")
     cursor.execute("DELETE FROM opportunity_log")
+    cursor.execute("DELETE FROM treasury_allocations")
+    cursor.execute("DELETE FROM treasury_withdrawals")
     conn.commit()
     conn.close()
 
@@ -446,8 +464,19 @@ def get_live_pnl_summary(mode: Optional[str] = None) -> Dict[str, Any]:
     conn = get_connection()
     cursor = conn.cursor()
 
-    where_clause = "WHERE mode = ? AND status = 'CONFIRMED'" if (mode and mode != "ALL") else "WHERE status = 'CONFIRMED'"
-    params = (mode,) if (mode and mode != "ALL") else ()
+    if mode == "MOCK":
+        where_clause = "WHERE mode = 'MOCK' AND status IN ('CONFIRMED', 'SIMULATED')"
+        params = ()
+    elif mode and mode != "ALL":
+        where_clause = "WHERE mode = ? AND status = 'CONFIRMED'"
+        params = (mode,)
+    elif mode == "ALL":
+        where_clause = "WHERE status IN ('CONFIRMED', 'SIMULATED')"
+        params = ()
+    else:
+        # Default: LIVE confirmed only (never count simulated trades as real live profit)
+        where_clause = "WHERE mode = 'LIVE' AND status = 'CONFIRMED'"
+        params = ()
 
     cursor.execute(f"""
         SELECT
@@ -485,7 +514,7 @@ def get_live_pnl_summary(mode: Optional[str] = None) -> Dict[str, Any]:
     row["win_rate"] = win_rate
     row["roi"] = roi
     row["winning_trades"] = win_tr
-    row["treasury_buckets"] = get_treasury_buckets_summary()
+    row["treasury_buckets"] = get_treasury_buckets_summary(mode=mode or "LIVE")
     return row
 
 
@@ -631,10 +660,12 @@ def get_treasury_withdrawals(limit: int = 50, mode: Optional[str] = None) -> Lis
     return [dict(row) for row in rows]
 
 
-def get_withdrawable_profit(mode: Optional[str] = None) -> float:
-    """Calculate available realized profit ready for withdrawal."""
-    total_profit = get_total_profit(mode=mode)
-    total_withdrawn = get_total_withdrawn(mode=mode)
+def get_withdrawable_profit(mode: Optional[str] = "LIVE") -> float:
+    """Calculate available realized profit ready for withdrawal.
+    Defaults to LIVE mode: only verified real funds count toward withdrawable treasury balance."""
+    target_mode = mode if mode else "LIVE"
+    total_profit = get_total_profit(mode=target_mode)
+    total_withdrawn = get_total_withdrawn(mode=target_mode)
     return round(max(0.0, total_profit - total_withdrawn), 4)
 
 
@@ -646,8 +677,8 @@ def record_treasury_allocation(data: Dict[str, Any]) -> int:
     cursor.execute("""
         INSERT INTO treasury_allocations (
             trade_id, tx_hash, chain_id, token, gross_profit, net_profit,
-            trading_capital, reserve, revenue, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            trading_capital, reserve, revenue, mode, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         data.get("trade_id", 0),
         data.get("tx_hash", ""),
@@ -658,6 +689,7 @@ def record_treasury_allocation(data: Dict[str, Any]) -> int:
         float(data.get("trading_capital", 0.0)),
         float(data.get("reserve", 0.0)),
         float(data.get("revenue", 0.0)),
+        data.get("mode", "LIVE"),
         data.get("created_at") or datetime.now().astimezone().isoformat()
     ))
     alloc_id = cursor.lastrowid
@@ -666,34 +698,44 @@ def record_treasury_allocation(data: Dict[str, Any]) -> int:
     return alloc_id
 
 
-def get_treasury_allocations(limit: int = 50) -> List[Dict[str, Any]]:
+def get_treasury_allocations(limit: int = 50, mode: Optional[str] = "LIVE") -> List[Dict[str, Any]]:
     """Retrieve history of revenue distributions across capital, reserve, and revenue."""
     create_database()
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM treasury_allocations ORDER BY id DESC LIMIT ?", (limit,))
+    if mode and mode != "ALL":
+        cursor.execute("SELECT * FROM treasury_allocations WHERE mode = ? ORDER BY id DESC LIMIT ?", (mode, limit))
+    else:
+        cursor.execute("SELECT * FROM treasury_allocations ORDER BY id DESC LIMIT ?", (limit,))
     rows = cursor.fetchall()
     conn.close()
     return [dict(row) for row in rows]
 
 
-def get_treasury_buckets_summary(token: Optional[str] = None) -> Dict[str, Any]:
-    """Retrieve cumulative breakdown across Trading Capital (60%), Reserve (20%), and Revenue (20%)."""
+def get_treasury_buckets_summary(token: Optional[str] = None, mode: Optional[str] = "LIVE") -> Dict[str, Any]:
+    """Retrieve cumulative breakdown across Trading Capital (60%), Reserve (20%), and Revenue (20%).
+    Defaults to LIVE mode to ensure simulation profit is never counted as real treasury funds."""
     create_database()
     conn = get_connection()
     cursor = conn.cursor()
-    query = """
+    conditions = []
+    params = []
+    if mode and mode != "ALL":
+        conditions.append("mode = ?")
+        params.append(mode)
+    if token:
+        conditions.append("token = ?")
+        params.append(token)
+    where_sql = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+    query = f"""
         SELECT
             COALESCE(SUM(trading_capital), 0.0) as total_trading_capital,
             COALESCE(SUM(reserve), 0.0) as total_reserve,
             COALESCE(SUM(revenue), 0.0) as total_revenue,
             COALESCE(SUM(net_profit), 0.0) as total_allocated
         FROM treasury_allocations
+        {where_sql}
     """
-    params = []
-    if token:
-        query += " WHERE token = ?"
-        params.append(token)
     cursor.execute(query, tuple(params))
     row = dict(cursor.fetchone())
     conn.close()

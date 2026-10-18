@@ -842,10 +842,16 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
                 result["status"] = "INSUFFICIENT_PROFIT"
                 result["message"] = f"Trade aborted: Net profit was not positive (${actual_net:.6f} USDT)."
             else:
-                trade_data["status"] = "CONFIRMED"
+                if mode == "MOCK":
+                    trade_data["status"] = "SIMULATED"
+                    trade_data["tx_hash"] = ""
+                else:
+                    trade_data["status"] = "CONFIRMED"
                 tx_hash = trade_data.get("tx_hash") or result.get("tx_hash")
                 if tx_hash:
                     print(f"[TRADE CONFIRMED] tx={tx_hash} net_profit=${actual_net:.6f} USDT", flush=True)
+                else:
+                    print(f"[TRADE SIMULATED] net_profit=${actual_net:.6f} USDT (paper mode, no on-chain tx)", flush=True)
                 save_trade(trade_data)
     else:
         print(f"[TRADE FAILED] {result.get('message', 'Unknown error')} — NOT recording profit.", flush=True)

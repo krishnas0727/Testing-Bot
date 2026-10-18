@@ -313,12 +313,13 @@ def get_dex_reserves(dex_name: str, base_sym: str = "WETH", quote_sym: str = "US
             f"(pair={pair_addr}). Refusing to use simulated pools outside MOCK mode."
         )
 
-    if onchain_success and not _is_mock_mode():
-        # dust / empty pool guard (real data only)
-        min_quote_reserve = float(os.getenv("MIN_POOL_LIQUIDITY_USD", "500.0"))
-        if base_reserve <= 0 or quote_reserve <= 0 or quote_reserve < min_quote_reserve:
+    min_quote_reserve = float(os.getenv("MIN_POOL_LIQUIDITY_USD", "500.0"))
+    if onchain_success and (base_reserve <= 0 or quote_reserve <= 0 or quote_reserve < min_quote_reserve):
+        if not _is_mock_mode():
             raise RuntimeError(f"{dex_name} {base_sym}/{quote_sym} pool has negligible liquidity "
                                f"({base_reserve} / {quote_reserve}); skipping.")
+        else:
+            onchain_success = False
 
     if not onchain_success:
         # Resilient fallback mock pool reserves with realistic market oscillation
@@ -646,7 +647,7 @@ def execute_atomic_trade(plan: Dict[str, Any], is_manual: bool = False) -> Dict[
         gross_profit = float(plan.get("gross_profit_usdt", gross_return - amount_in))
         gas_cost = float(plan.get("gas_cost_usdt", 0.005))
         net_profit = float(plan.get("net_profit_usdt", gross_profit - gas_cost))
-        mock_hash = f"0xmock_{int(time.time() * 1000)}"
+        mock_hash = ""
         trade_record = {
             "tx_hash": mock_hash,
             "chain_id": int(plan.get("chain_id", getattr(config, "CHAIN_ID", 8453))),
@@ -662,14 +663,15 @@ def execute_atomic_trade(plan: Dict[str, Any], is_manual: bool = False) -> Dict[
             "gas_cost_usdt": gas_cost,
             "price_impact": float(plan.get("max_price_impact_pct", 0.01)),
             "slippage": float(getattr(config, "SLIPPAGE_PCT", 0.5)),
-            "status": "CONFIRMED",
+            "status": "SIMULATED",
             "mode": "MOCK",
             "created_at": datetime.now().astimezone().isoformat()
         }
         return {
             "success": True,
             "status": "CONFIRMED",
-            "message": f"MOCK atomic arbitrage simulated successfully: Net profit +${net_profit:.4f} USDT confirmed.",
+            "execution_mode": "SIMULATION",
+            "message": f"MOCK atomic arbitrage simulated successfully: Net profit +${net_profit:.4f} USDT confirmed (simulation).",
             "trade": trade_record,
             "tx_hash": mock_hash,
             "gross_return": gross_return,

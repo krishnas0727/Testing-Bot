@@ -1692,7 +1692,17 @@ input:checked + .slider:before {
 .text-yellow { color: var(--accent-gold) !important; }
 
 /* --- RESPONSIVE MEDIA QUERIES --- */
-@media (max-width: 1360px) {
+/* --- COMPREHENSIVE RESPONSIVE MEDIA QUERIES (320px, 375px, 430px, 768px, 1024px, 1366px, 1920px) --- */
+
+/* 1920px+ Ultra-wide Displays */
+@media (min-width: 1920px) {
+    .main { max-width: 1800px; margin-right: auto; }
+    .kpi-grid { grid-template-columns: repeat(4, 1fr); }
+    .kpi-secondary-strip { grid-template-columns: repeat(4, 1fr) !important; }
+}
+
+/* 1366px - 1024px Standard Desktop & Laptop */
+@media (max-width: 1366px) {
     .chart-layout { grid-template-columns: 1fr; }
     .kpi-grid { grid-template-columns: repeat(2, 1fr); }
     .dex-wallet-grid { grid-template-columns: repeat(2, 1fr); }
@@ -1701,6 +1711,14 @@ input:checked + .slider:before {
     .settings-grid { grid-template-columns: 1fr; }
 }
 
+/* 1024px Tablet Landscape */
+@media (max-width: 1024px) {
+    .kpi-secondary-strip { grid-template-columns: repeat(2, 1fr) !important; }
+    .network-cards-grid { grid-template-columns: repeat(2, 1fr) !important; }
+    .header-status-strip, .second-header-right { flex-wrap: wrap; gap: 8px; }
+}
+
+/* 768px Tablet Portrait */
 @media (max-width: 768px) {
     .sidebar { width: 68px; padding: 12px 6px; }
     .logo span:not(.logo-icon), .sidebar nav a span, .bot-status span:not(.dot) { display: none; }
@@ -1713,15 +1731,121 @@ input:checked + .slider:before {
     .opp-details-grid { grid-template-columns: 1fr; }
     .route-leg-container { flex-direction: column; align-items: stretch; }
     .route-connector { display: none; }
+    .kpi-secondary-strip { grid-template-columns: repeat(2, 1fr) !important; }
+    .table-responsive { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; display: block; }
+    .data-table { min-width: 580px; }
 }
 
+/* 480px, 430px, 375px, 320px Mobile Phones */
 @media (max-width: 480px) {
-    .exec-dialog { padding: 16px; width: 95%; }
+    /* Mobile App-Style Bottom Navigation */
+    .sidebar {
+        position: fixed;
+        bottom: 0;
+        top: auto;
+        left: 0;
+        width: 100vw;
+        height: 56px;
+        flex-direction: row;
+        justify-content: space-around;
+        align-items: center;
+        padding: 4px 6px;
+        border-right: none;
+        border-top: 1px solid var(--border-subtle);
+        background: var(--bg-sidebar);
+        z-index: 1000;
+        box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.5);
+    }
+    .sidebar .logo, .sidebar .bot-status { display: none !important; }
+    .sidebar nav {
+        flex-direction: row;
+        width: 100%;
+        justify-content: space-around;
+        align-items: center;
+        gap: 0;
+    }
+    .sidebar nav a {
+        padding: 8px 12px;
+        border-radius: var(--radius-sm);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .sidebar nav a svg { width: 20px; height: 20px; }
+
+    /* Main Content Full Width on Mobile */
+    .main {
+        margin-left: 0 !important;
+        margin-bottom: 64px;
+        width: 100vw !important;
+        max-width: 100vw !important;
+        padding: 8px 8px 72px;
+        overflow-x: hidden;
+    }
+
+    /* Header & Control Bars */
+    header, .second-header {
+        padding: 10px 12px;
+        border-radius: var(--radius-sm);
+        gap: 8px;
+    }
+    .header-titles h1 { font-size: 14px; }
+    .header-chain-badge { font-size: 10px; }
+    .header-status-strip { gap: 6px; }
+
+    /* Single Column Layouts on Mobile */
+    .kpi-grid { grid-template-columns: 1fr !important; }
+    .kpi-secondary-strip { grid-template-columns: 1fr !important; }
+    .treasury-stats-grid { grid-template-columns: 1fr !important; gap: 8px !important; }
+    .treasury-buckets-grid { grid-template-columns: 1fr !important; gap: 6px !important; }
+    .treasury-actions-row { flex-direction: column !important; gap: 8px !important; }
+    .treasury-actions-row .btn { width: 100% !important; min-height: 40px; }
+
+    /* Buttons & Controls on Mobile */
+    .action-btn-group { grid-template-columns: 1fr !important; gap: 8px !important; }
+    .action-btn-group .btn { width: 100% !important; min-height: 38px; }
+    .size-btn-group { grid-template-columns: repeat(3, 1fr) !important; gap: 4px !important; }
+    .size-btn { min-height: 32px; font-size: 11px; }
+
+    /* Modals & Dialogs Fit Screen */
+    .exec-dialog {
+        padding: 14px 12px !important;
+        width: 95vw !important;
+        max-width: 95vw !important;
+        max-height: 88vh !important;
+        overflow-y: auto !important;
+        border-radius: var(--radius-md) !important;
+    }
     .exec-stepper { gap: 3px; }
     .step-pill { font-size: 8px; padding: 4px 2px; }
     .step-pill .step-num { width: 13px; height: 13px; font-size: 8px; }
-    .header-chain-badge { font-size: 10px; }
     .wallet-card-value { font-size: 16px; }
+
+    /* Tables: Smooth Horizontal Scroll Without Page Overflow */
+    .table-responsive {
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        display: block;
+    }
+    .data-table { min-width: 520px; font-size: 11px; }
+    .data-table th, .data-table td { padding: 8px 10px; }
+
+    /* Safe Text Wrapping */
+    .mono, td, span, p, .tx-hash, a {
+        word-break: break-all;
+        overflow-wrap: anywhere;
+    }
+}
+
+/* 320px Extra Small Mobile (iPhone SE 1st gen / small devices) */
+@media (max-width: 340px) {
+    .main { padding: 6px 4px 72px; }
+    header, .second-header { padding: 8px 8px; }
+    .header-titles h1 { font-size: 13px; }
+    .exec-dialog { padding: 10px 8px !important; width: 98vw !important; max-width: 98vw !important; }
+    .size-btn-group { grid-template-columns: repeat(2, 1fr) !important; }
+    .data-table { min-width: 460px; font-size: 10px; }
 }
 
 /* --- EXECUTION STEPPER PIPELINE --- */

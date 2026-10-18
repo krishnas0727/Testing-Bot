@@ -1413,7 +1413,7 @@
         </div>
 
         <!-- TREASURY STATS TILES -->
-        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin-bottom:16px;">
+        <div class="treasury-stats-grid" style="display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin-bottom:16px;">
             <div style="background:#0f172a; padding:12px; border-radius:8px; border:1px solid rgba(56,189,248,0.2);">
                 <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">Total Realized Profit</div>
                 <div id="treasuryTotalProfit" style="font-size:16px; font-weight:700; color:var(--profit-color);">$0.0000</div>
@@ -1438,7 +1438,7 @@
                 <span id="treasuryTotalAllocatedBadge" style="font-size:10px; font-family:var(--font-mono); color:#38bdf8; background:rgba(56,189,248,0.1); padding:2px 6px; border-radius:4px;">Compounding Engine</span>
             </div>
             
-            <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-bottom:10px;">
+            <div class="treasury-buckets-grid" style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-bottom:10px;">
                 <div style="background:#0f172a; padding:10px; border-radius:6px; border-left:3px solid #3b82f6;">
                     <div style="font-size:10px; color:var(--text-muted);">Trading Capital (60%)</div>
                     <div id="treasuryTradingCapital" style="font-size:14px; font-weight:700; color:#60a5fa; font-family:var(--font-mono);">$0.0000</div>
@@ -1495,7 +1495,7 @@
         </div>
 
         <!-- ACTION BUTTONS -->
-        <div style="display:flex; gap:10px; margin-bottom:16px;">
+        <div class="treasury-actions-row" style="display:flex; gap:10px; margin-bottom:16px;">
             <button type="button" id="btnExecuteTreasuryWithdraw" class="btn btn-primary" style="flex:1; padding:12px; font-size:13px; font-weight:700; justify-content:center; background:linear-gradient(135deg, #10b981 0%, #059669 100%); color:#fff; border:none; box-shadow:0 0 12px rgba(16,185,129,0.35); cursor:pointer;" onclick="executeTreasuryWithdraw()">
                 💸 Withdraw Profit to Wallet
             </button>
@@ -1503,6 +1503,7 @@
                 🦊 Contract Direct Withdraw
             </button>
         </div>
+
 
         <!-- RECENT WITHDRAWALS TABLE -->
         <div>

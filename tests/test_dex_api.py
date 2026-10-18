@@ -16,6 +16,8 @@ class DEXApiTests(unittest.TestCase):
         self.orig_trade_amount = getattr(config, "DEFAULT_TRADE_AMOUNT", 5.0)
         self.orig_min_profit = getattr(config, "MIN_PROFIT_USDT", 0.005)
         self.orig_slippage = getattr(config, "SLIPPAGE_PCT", 0.5)
+        self.orig_mode = getattr(config, "TRADING_MODE", "MOCK")
+        config.TRADING_MODE = "MOCK"
         config.API_AUTH_TOKEN = self.test_token
         self.client.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {self.test_token}"
         config.WALLET_ADDRESS = ""
@@ -26,6 +28,7 @@ class DEXApiTests(unittest.TestCase):
         config.DEFAULT_TRADE_AMOUNT = self.orig_trade_amount
         config.MIN_PROFIT_USDT = self.orig_min_profit
         config.SLIPPAGE_PCT = self.orig_slippage
+        config.TRADING_MODE = self.orig_mode
 
     def test_health_check(self):
         res = self.client.get("/api/health")
