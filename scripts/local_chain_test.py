@@ -52,6 +52,7 @@ config.SYMBOL = 'WETH/USDC'
 config.PRIVATE_KEY = bot.key.hex(); config.WALLET_ADDRESS = bot.address
 config.ARBITRAGE_CONTRACT_ADDRESS = arb.address
 config.TRADING_MODE = 'TESTNET'
+config.LIVE_TRADING_ARMED = True
 live_executor.get_w3 = lambda: w3
 
 def plan(amount=10.0, **kw):
