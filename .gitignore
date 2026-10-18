@@ -37,6 +37,7 @@ ENV/
 # Database & SQLite
 data/
 data_localtest/
+clean_test_clone/
 .pytest_cache/
 *.db
 *.sqlite
