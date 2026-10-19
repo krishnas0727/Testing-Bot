@@ -266,7 +266,7 @@ def get_engine_status(chain_id: Optional[int] = None) -> str:
     if not getattr(config, "AUTO_TRADE_ENABLED", False):
         return "STANDBY - AUTO TRADE DISABLED"
 
-    cid = chain_id if chain_id is not None else getattr(config, "CHAIN_ID", 8453)
+    cid = chain_id if chain_id is not None else getattr(config, "CHAIN_ID", 42161)
     chain_info = config.CHAIN_REGISTRY.get(cid, {})
     is_testnet = bool(chain_info.get("is_testnet", False))
     chain_label = chain_info.get("label", f"Chain {cid}")
@@ -323,7 +323,7 @@ def start_background_auto_trader() -> bool:
                 live_armed = getattr(config, "LIVE_TRADING_ARMED", False)
                 is_armed = (mode == "MOCK") or (mode in ("TESTNET", "LIVE") and live_armed)
 
-                active_cid = getattr(config, "CHAIN_ID", 8453)
+                active_cid = getattr(config, "CHAIN_ID", 42161)
                 chain_info = config.CHAIN_REGISTRY.get(active_cid, {})
                 is_chain_testnet = bool(chain_info.get("is_testnet", False))
                 chain_compatible = (mode == "MOCK") or (mode == "TESTNET" and is_chain_testnet) or (mode == "LIVE" and not is_chain_testnet)
@@ -621,7 +621,7 @@ def market_api():
         latest_trade = get_latest_trade(mode=mode if mode == "LIVE" else None)
 
         # Truthfully evaluate engine status for selected chain & live market conditions
-        active_cid = getattr(config, "CHAIN_ID", 8453)
+        active_cid = getattr(config, "CHAIN_ID", 42161)
         base_engine_status = get_engine_status(active_cid)
 
         if (
@@ -694,7 +694,7 @@ def execution_logs_api():
             target_cid = int(cid_param)
         except (ValueError, TypeError):
             pass
-    active_cid = target_cid or getattr(config, "CHAIN_ID", 8453)
+    active_cid = target_cid or getattr(config, "CHAIN_ID", 42161)
     return jsonify({
         "success": True,
         "logs": execution_audit_logs,
@@ -725,7 +725,7 @@ def verify_profit_api():
             except (ValueError, TypeError):
                 pass
 
-        active_chain_id = getattr(config, "CHAIN_ID", 8453)
+        active_chain_id = getattr(config, "CHAIN_ID", 42161)
         chain_info = config.CHAIN_REGISTRY.get(active_chain_id, {})
 
         # Phase 8 Router Uniqueness Guard
@@ -1312,13 +1312,13 @@ def prices_api():
         base_sym = parts[0] if len(parts) > 0 else "WETH"
         quote_sym = parts[1] if len(parts) > 1 else "USDT"
         quotes = get_all_dex_quotes(config.DEFAULT_TRADE_AMOUNT, base_sym, quote_sym)
-        active_chain_id = getattr(config, "CHAIN_ID", 8453)
+        active_chain_id = getattr(config, "CHAIN_ID", 42161)
         chain_info = config.CHAIN_REGISTRY.get(active_chain_id, {})
         return jsonify({
             "success": True,
             "chain_id": active_chain_id,
-            "chain_name": chain_info.get("name", "base"),
-            "chain_label": chain_info.get("label", "Base L2 Mainnet"),
+            "chain_name": chain_info.get("name", "arbitrum"),
+            "chain_label": chain_info.get("label", "Arbitrum One"),
             "symbol": config.SYMBOL,
             "quotes": quotes,
             "prices": {dex: q["spot_price"] for dex, q in quotes.items()},
@@ -1389,7 +1389,7 @@ def manual_trade_api():
                     "message": "Invalid chain_id provided."
                 }), 400
         else:
-            active_cid = int(getattr(config, "CHAIN_ID", 8453))
+            active_cid = int(getattr(config, "CHAIN_ID", 42161))
 
         is_routers_valid, router_reason, _ = config.validate_chain_dex_routers(active_cid)
         if not is_routers_valid:
@@ -1562,10 +1562,28 @@ def confirm_live_trade_api():
         amount_in = float(req.get("amount_in", 1.0))
 
         # Accurately compute gross profit and verified net profit without double-deducting gas
+        decoded_profit = None
+        try:
+            import live_executor
+            if live_executor._HAS_WEB3 and getattr(config, "ARBITRAGE_CONTRACT_ADDRESS", ""):
+                w3 = live_executor.get_w3()
+                arb_c = w3.eth.contract(address=w3.to_checksum_address(config.ARBITRAGE_CONTRACT_ADDRESS), abi=live_executor.ARB_ABI)
+                evs = arb_c.events.ArbitrageExecuted().process_receipt(receipt, errors=live_executor.DISCARD)
+                if evs:
+                    pair_sym = req.get("token_pair") or config.SYMBOL
+                    quote_sym = pair_sym.split("/")[1] if "/" in pair_sym else "USDT"
+                    dec = int(config.TOKEN_REGISTRY.get(quote_sym, {}).get("decimals", 6))
+                    from dex_engine import from_raw_units
+                    decoded_profit = float(from_raw_units(evs[0]["args"]["netProfit"], dec))
+        except Exception:
+            pass
+
         req_gross = req.get("gross_profit")
         req_expected_net = req.get("expected_profit", req.get("net_profit"))
         
-        if req_gross is not None and float(req_gross) > 0:
+        if decoded_profit is not None:
+            gross_profit = decoded_profit
+        elif req_gross is not None and float(req_gross) > 0:
             gross_profit = float(req_gross)
         elif req_expected_net is not None and float(req_expected_net) > 0:
             gross_profit = float(req_expected_net) + gas_cost_usdt

@@ -103,11 +103,11 @@ SUPPORTED_DEXES = [
 # BLOCKCHAIN & WEB3 RPC CONFIGURATION
 # ============================================================
 
-DEFAULT_CHAIN = os.getenv("DEFAULT_CHAIN", "base")
-CHAIN_ID = int(os.getenv("CHAIN_ID", "11155111"))
+DEFAULT_CHAIN = os.getenv("DEFAULT_CHAIN", "arbitrum")
+CHAIN_ID = int(os.getenv("CHAIN_ID", "42161"))
 
 # Primary and fallback public JSON-RPC endpoints
-RPC_URL = os.getenv("RPC_URL", "https://ethereum-sepolia-rpc.publicnode.com")
+RPC_URL = os.getenv("RPC_URL", "https://arb1.arbitrum.io/rpc")
 
 PUBLIC_RPC_FALLBACKS = {
     8453: [
@@ -249,8 +249,12 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
             "WETH": {"address": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", "decimals": 18, "symbol": "WETH"},
             "USDT": {"address": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", "decimals": 6, "symbol": "USDT"},
             "USDC": {"address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", "decimals": 6, "symbol": "USDC"},
+            "USDC.e": {"address": "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8", "decimals": 6, "symbol": "USDC.e"},
+            "DAI": {"address": "0xDA10009cBd5D07dd0CeCc6616156627515b03571", "decimals": 18, "symbol": "DAI"},
+            "WBTC": {"address": "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f", "decimals": 8, "symbol": "WBTC"},
+            "ARB": {"address": "0x912CE59144191C1204E64559FE8253a0e49E6548", "decimals": 18, "symbol": "ARB"},
         },
-        "pairs": ["WETH/USDT", "WETH/USDC"],
+        "pairs": ["WETH/USDT", "WETH/USDC", "WETH/DAI", "ARB/USDC"],
         "default_symbol": "WETH/USDT",
         "arbitrage_contract": os.getenv("ARB_ARBITRAGE_CONTRACT", os.getenv("ARBITRAGE_CONTRACT_ADDRESS", ""))
     },
@@ -352,7 +356,7 @@ CHAIN_REGISTRY: Dict[int, Dict[str, Any]] = {
 # PROTOCOL SMART CONTRACT ADDRESSES (ACTIVE CHAIN)
 # ============================================================
 
-_active_chain_info = CHAIN_REGISTRY.get(CHAIN_ID, CHAIN_REGISTRY[11155111])
+_active_chain_info = CHAIN_REGISTRY.get(CHAIN_ID, CHAIN_REGISTRY[42161])
 
 DEX_ROUTERS: Dict[str, str] = _active_chain_info["routers"]
 DEX_FACTORIES: Dict[str, str] = _active_chain_info["factories"]
@@ -396,7 +400,7 @@ def is_chain_testnet(chain_id: Optional[int] = None) -> bool:
 
 
 # Default trading pair
-SYMBOL = os.getenv("TRADING_SYMBOL", _active_chain_info.get("default_symbol", "WETH/USDC"))
+SYMBOL = os.getenv("TRADING_SYMBOL", _active_chain_info.get("default_symbol", "WETH/USDT"))
 
 
 # ============================================================
@@ -494,7 +498,7 @@ LIVE_MIN_NET_PROFIT_USDT = float(os.getenv("LIVE_MIN_NET_PROFIT_USDT", "0.01"))
 LIVE_GAS_SAFETY_MULT = float(os.getenv("LIVE_GAS_SAFETY_MULT", "1.5"))
 LIVE_GAS_LIMIT_BUFFER = float(os.getenv("LIVE_GAS_LIMIT_BUFFER", "1.3"))
 LIVE_MAX_PRIORITY_GWEI = float(os.getenv("LIVE_MAX_PRIORITY_GWEI", "0.05"))
-LIVE_L1_FEE_USD = float(os.getenv("LIVE_L1_FEE_USD", "0.005"))   # OP-stack L1 data fee estimate (Base)
+LIVE_L1_FEE_USD = float(os.getenv("LIVE_L1_FEE_USD", "0.015"))  # L1 calldata fee estimate for rollups (Arbitrum/Base)
 LIVE_DEADLINE_SEC = int(os.getenv("LIVE_DEADLINE_SEC", "20"))
 LIVE_RECEIPT_TIMEOUT_SEC = float(os.getenv("LIVE_RECEIPT_TIMEOUT_SEC", "30"))
 LIVE_RECEIPT_POLL_SEC = float(os.getenv("LIVE_RECEIPT_POLL_SEC", "0.05"))

@@ -32,15 +32,12 @@ last_trade_time = 0
 last_trade_key = None
 
 
-def _effective_gas_cost_usd(raw_gas_usd: float, trade_amount: float) -> float:
-    """MOCK keeps the old tiny-cost model. LIVE/TESTNET uses the REAL gas cost (+ L1 data fee on OP-stack chains).
-
-    The original code capped gas at 0.05% of the trade size in every mode, which hides the real cost and
-    makes unprofitable trades look profitable.
-    """
+def _effective_gas_cost_usd(raw_gas_usd: float, trade_amount: float, chain_id: Optional[int] = None, includes_l1: bool = False) -> float:
+    """MOCK keeps a low-cost model for simulation. LIVE/TESTNET uses REAL gas cost (+ L1 data fee on rollups)."""
+    cid = int(chain_id if chain_id is not None else getattr(config, "CHAIN_ID", 42161))
     if getattr(config, "TRADING_MODE", "MOCK").upper() == "MOCK":
         return min(raw_gas_usd, max(0.0001, trade_amount * 0.0005))
-    l1 = float(getattr(config, "LIVE_L1_FEE_USD", 0.005)) if getattr(config, "CHAIN_ID", 0) in (8453, 84532) else 0.0
+    l1 = (float(getattr(config, "LIVE_L1_FEE_USD", 0.015)) if cid in (42161, 8453, 84532) else 0.0) if not includes_l1 else 0.0
     return raw_gas_usd + l1
 
 
@@ -189,10 +186,10 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
     trade_amount = min(trade_amount, float(getattr(config, "MAX_TRADE_AMOUNT", 5000.0)))
 
     # Resolve chain-specific symbol
-    chain_id_val = int(chain_id) if chain_id is not None else getattr(config, "CHAIN_ID", 8453)
+    chain_id_val = int(chain_id) if chain_id is not None else getattr(config, "CHAIN_ID", 42161)
     chain_entry = config.CHAIN_REGISTRY.get(chain_id_val, {})
-    chain_name_val = chain_entry.get("name", getattr(config, "DEFAULT_CHAIN", "base"))
-    chain_label_val = chain_entry.get("label", "Base L2 Mainnet")
+    chain_name_val = chain_entry.get("name", getattr(config, "DEFAULT_CHAIN", "arbitrum"))
+    chain_label_val = chain_entry.get("label", "Arbitrum One")
     active_symbol = chain_entry.get("default_symbol", config.SYMBOL) if chain_id is not None else config.SYMBOL
 
     # Parse symbol (e.g. WETH/USDT)
@@ -263,13 +260,13 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
         }
 
     # Estimate gas in USD using average spot price
-    avg_eth_price = sum(prices.values()) / len(prices) if prices else 3000.0
-    gas_info = estimate_arbitrage_gas_cost_usd(avg_eth_price)
+    avg_eth_price = sum(prices.values()) / len(prices) if prices else 0.0
+    gas_info = estimate_arbitrage_gas_cost_usd(avg_eth_price, chain_id=chain_id_val)
     gas_price_gwei = gas_info["gas_price_gwei"]
 
     # Calculate realistic on-chain execution fee (Layer-2 rollup / dynamic micro-fee for atomic arbitrage)
     # Scales proportionally with trade size ($0.0005 on $1, $0.0025 on $5, capped realistically)
-    gas_cost_usdt = round(_effective_gas_cost_usd(gas_info["gas_cost_usd"], trade_amount), 4)
+    gas_cost_usdt = round(_effective_gas_cost_usd(gas_info.get("l2_gas_cost_usd", gas_info["gas_cost_usd"]), trade_amount, chain_id=chain_id_val), 4)
 
     opportunities = []
 
@@ -508,10 +505,15 @@ def _calculate_net_profit(trade_amt: float, buy_q: dict, sell_q: dict, gas_price
 
     # Real on-chain gas cost in USD (estimated gas units × gas price × ETH price)
     # Atomic arbitrage ≈ 200,000 – 300,000 gas units
+    eth_price_f = float(eth_price_usdt) if eth_price_usdt is not None else 0.0
+    if eth_price_f <= 0:
+        return {"is_profitable": False, "net_profit_usdt": -999.0, "skip_reason": "MISSING_PRICE_DATA: ETH spot price unavailable for gas conversion"}
+
     GAS_UNITS_ESTIMATE = 250_000
     gas_cost_eth = (GAS_UNITS_ESTIMATE * gas_price_gwei * 1e-9)
-    gas_cost_usdt = gas_cost_eth * eth_price_usdt
-    gas_cost_usdt = _effective_gas_cost_usd(gas_cost_usdt, trade_amt)
+    raw_l2_gas_usd = gas_cost_eth * eth_price_f
+    buy_cid = buy_q.get("chain_id") or getattr(config, "CHAIN_ID", 42161)
+    gas_cost_usdt = _effective_gas_cost_usd(raw_l2_gas_usd, trade_amt, chain_id=buy_cid)
 
     # Gross profit = expected raw output − input
     # (DEX swap fees and pool price impact are already embedded in usdt_out via constant-product formula)
@@ -523,7 +525,7 @@ def _calculate_net_profit(trade_amt: float, buy_q: dict, sell_q: dict, gas_price
     net_profit_usdt = gross_profit_usdt - gas_cost_usdt
     net_profit_pct = (net_profit_usdt / trade_amt) * 100.0 if trade_amt > 0 else 0.0
 
-    is_gas_ok = gas_price_gwei <= float(getattr(config, "MAX_GAS_PRICE_GWEI", 50.0))
+    is_gas_ok = (gas_price_gwei <= float(getattr(config, "MAX_GAS_PRICE_GWEI", 50.0))) and (gas_cost_usdt > 0)
     is_impact_ok = max_impact <= float(getattr(config, "MAX_PRICE_IMPACT_PCT", 1.0))
     min_profit_threshold = float(getattr(config, "MIN_PROFIT_USDT", 0.005))
     if getattr(config, "TRADING_MODE", "MOCK").upper() != "MOCK":
@@ -614,7 +616,7 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
         return _skip("No valid DEX route available")
 
     # Gate 4a: Router validation & uniqueness guard (Phase 8)
-    active_cid = int(route.get("chain_id") or getattr(config, "CHAIN_ID", 8453))
+    active_cid = int(route.get("chain_id") or getattr(config, "CHAIN_ID", 42161))
     is_routers_valid, router_reason, _ = config.validate_chain_dex_routers(active_cid)
     if not is_routers_valid:
         return _skip(router_reason)
@@ -633,7 +635,7 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
     # Reject immediately if candidate route price impact exceeds maximum tolerance
     passed_impact = float(route.get("max_price_impact_pct", 0.0))
     limit_impact = float(getattr(config, "MAX_PRICE_IMPACT_PCT", 1.0))
-    active_cid = int(route.get("chain_id") or getattr(config, "CHAIN_ID", 8453))
+    active_cid = int(route.get("chain_id") or getattr(config, "CHAIN_ID", 42161))
     if config.is_chain_testnet(active_cid) or getattr(config, "TRADING_MODE", "MOCK") == "MOCK":
         limit_impact = max(limit_impact, 3.0)
 
@@ -771,7 +773,7 @@ def execute_real_trade(market: Dict[str, Any], custom_amount: Optional[float] = 
     # Gate 10: Price impact limit
     max_impact = max(profit_check["max_price_impact_pct"], float(route.get("max_price_impact_pct", 0.0)))
     limit_impact = float(getattr(config, "MAX_PRICE_IMPACT_PCT", 1.0))
-    active_cid = int(route.get("chain_id") or getattr(config, "CHAIN_ID", 8453))
+    active_cid = int(route.get("chain_id") or getattr(config, "CHAIN_ID", 42161))
     if config.is_chain_testnet(active_cid) or mode == "MOCK":
         limit_impact = max(limit_impact, 3.0)
 

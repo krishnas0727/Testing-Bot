@@ -113,7 +113,8 @@ def fetch_token_balance_onchain(
         if not hex_res or hex_res == "0x":
             return 0.0
         raw_val = decode_uint256(hex_res)
-        return raw_val / (10 ** decimals)
+        from dex_engine import from_raw_units
+        return float(from_raw_units(raw_val, decimals))
     except Exception:
         return 0.0
 
@@ -124,13 +125,13 @@ def check_token_allowance(owner: str, spender: str, token_sym: str = "USDT") -> 
     if not token_info or not owner or not spender:
         return 0.0
     try:
-        from dex_engine import eth_call
+        from dex_engine import eth_call, from_raw_units
         calldata = encode_allowance(owner, spender)
         hex_res = eth_call(token_info["address"], calldata)
         if not hex_res or hex_res == "0x":
             return 0.0
         raw_val = decode_uint256(hex_res)
-        return raw_val / (10 ** token_info["decimals"])
+        return float(from_raw_units(raw_val, token_info["decimals"]))
     except Exception:
         return 0.0
 

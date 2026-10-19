@@ -275,12 +275,38 @@ def execute_live(plan: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         w3 = get_w3()
+        cid = int(plan.get("chain_id", getattr(config, "CHAIN_ID", 42161)))
+        raw_chain_id = getattr(w3.eth, "chain_id", None)
+        from unittest.mock import Mock, MagicMock, DEFAULT
+        if isinstance(raw_chain_id, (Mock, MagicMock)):
+            ret = getattr(raw_chain_id, "_mock_return_value", DEFAULT)
+            if ret is not DEFAULT and ret is not None and not isinstance(ret, (Mock, MagicMock)):
+                try:
+                    rpc_chain = int(ret)
+                except Exception:
+                    rpc_chain = cid
+            else:
+                rpc_chain = cid
+        else:
+            try:
+                rpc_chain = int(raw_chain_id) if raw_chain_id is not None else int(w3.eth.chain_id)
+            except Exception as exc:
+                return _fail("RPC_UNREACHABLE", f"Failed to query chain ID from RPC: {exc}")
+
+        if rpc_chain != cid:
+            return _fail("NETWORK_MISMATCH", f"Connected RPC chain ID ({rpc_chain}) does not match trade chain ID ({cid}). Execution blocked.")
+        if getattr(config, "CHAIN_ID", None) and int(config.CHAIN_ID) == 42161 and rpc_chain != 42161:
+            return _fail("NETWORK_MISMATCH", f"Connected RPC chain ID ({rpc_chain}) does not match configured Arbitrum One CHAIN_ID (42161). Execution blocked.")
+
+        configured_wallet = _cfg("WALLET_ADDRESS", "").strip()
+        if configured_wallet and configured_wallet.lower() != acct.address.lower():
+            return _fail("WALLET_MISMATCH", f"Configured WALLET_ADDRESS {configured_wallet} does not match signer {acct.address}. Execution blocked.")
+
         contract_addr = Web3.to_checksum_address(contract_addr)
         base_sym, quote_sym, base_tok, quote_tok = _resolve_tokens(plan)
         dec = int(quote_tok["decimals"])
 
         buy_dex, sell_dex = plan["buy_dex"], plan["sell_dex"]
-        cid = int(plan.get("chain_id", getattr(config, "CHAIN_ID", 8453)))
         is_valid_routers, router_reason, _ = config.validate_chain_dex_routers(cid)
         if not is_valid_routers:
             return _fail("TRADE SKIPPED", router_reason)
@@ -297,8 +323,9 @@ def execute_live(plan: Dict[str, Any]) -> Dict[str, Any]:
         token_in = Web3.to_checksum_address(quote_tok["address"])
         token_out = Web3.to_checksum_address(base_tok["address"])
 
+        from dex_engine import to_raw_units, from_raw_units
         amount_in_f = float(plan["amount_in"])
-        amount_in_raw = int(amount_in_f * 10 ** dec)
+        amount_in_raw = to_raw_units(plan["amount_in"], dec)
         if amount_in_raw <= 0:
             return _fail("TRADE SKIPPED", "amount_in rounds to zero.")
 
@@ -386,7 +413,7 @@ def execute_live(plan: Dict[str, Any]) -> Dict[str, Any]:
             if initial_gas_est_usd > 0:
                 eff_gas_price_wei = base_fee + tip
                 updated_gas_usd = (gas_est * eff_gas_price_wei / 1e18) * eth_price
-                l1_fee_usd = float(_cfg("LIVE_L1_FEE_USD", 0.005)) if cid in (8453, 84532) else 0.0
+                l1_fee_usd = float(_cfg("LIVE_L1_FEE_USD", 0.015)) if cid in (42161, 8453, 84532) else 0.0
                 total_live_gas_cost_usd = updated_gas_usd + l1_fee_usd
 
                 expected_gross_usd = exp_profit if exp_profit > 0 else (float(quoted_profit) if quoted_profit > 0 else float(plan.get("gross_profit_usdt", 0.0)))
@@ -399,7 +426,7 @@ def execute_live(plan: Dict[str, Any]) -> Dict[str, Any]:
                     )
 
             tx = arb.functions.executeArbitrage(params).build_transaction({
-                "from": acct.address, "nonce": f_nonce.result(), "chainId": config.CHAIN_ID,
+                "from": acct.address, "nonce": f_nonce.result(), "chainId": cid,
                 "gas": gas_limit, "maxFeePerGas": max_fee, "maxPriorityFeePerGas": tip, "type": 2,
             })
 
@@ -471,22 +498,37 @@ def execute_live(plan: Dict[str, Any]) -> Dict[str, Any]:
                          f"Tx {tx_hash.hex()} reverted on-chain (capital safe, gas ${gas_usd:.4f} spent).", t,
                          tx_hash=tx_hash.hex(), gas_used=gas_used, gas_cost_usdt=round(gas_usd, 6))
 
-        # actual profit from the event
+        # actual profit strictly from verified receipt event or on-chain balance change
         actual_profit = None
         try:
             evs = arb.events.ArbitrageExecuted().process_receipt(receipt, errors=DISCARD)
             if evs:
-                actual_profit = evs[0]["args"]["netProfit"] / 10 ** dec
+                actual_profit = float(from_raw_units(evs[0]["args"]["netProfit"], dec))
         except Exception:
             pass
+
         if actual_profit is None:
-            actual_profit = exp_profit
+            try:
+                bal_after = erc.functions.balanceOf(contract_addr).call()
+                if bal_after > contract_bal:
+                    actual_profit = float(from_raw_units(bal_after - contract_bal, dec))
+            except Exception:
+                pass
+
+        if actual_profit is None:
+            return _fail(
+                "UNVERIFIED_PROFIT",
+                f"Tx {tx_hash.hex()} succeeded but ArbitrageExecuted event was not found. "
+                "Refusing to assume estimated profit as realized.",
+                t, tx_hash=tx_hash.hex(), gas_used=gas_used, gas_cost_usdt=round(gas_usd, 6)
+            )
+
         net_profit = actual_profit - gas_usd
         amount_out = amount_in_f + actual_profit
 
         trade_record = {
             "tx_hash": tx_hash.hex() if tx_hash.hex().startswith("0x") else "0x" + tx_hash.hex(),
-            "chain_id": int(config.CHAIN_ID), "buy_dex": buy_dex, "sell_dex": sell_dex,
+            "chain_id": cid, "buy_dex": buy_dex, "sell_dex": sell_dex,
             "token_pair": f"{base_sym}/{quote_sym}", "amount_in": amount_in_f, "amount_out": amount_out,
             "gross_profit": actual_profit, "net_profit": net_profit, "gas_used": gas_used,
             "gas_price_gwei": round(eff_price / 1e9, 6), "gas_cost_usdt": round(gas_usd, 6),

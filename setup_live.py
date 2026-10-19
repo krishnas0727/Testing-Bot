@@ -86,10 +86,10 @@ def cmd_dry_run(amount: float):
     w3 = live_executor.get_w3()
     tok_in = config.TOKEN_REGISTRY[quote]
     tok_out = config.TOKEN_REGISTRY[base]
-    dec = tok_in["decimals"]
+    from dex_engine import to_raw_units
     params = (Web3.to_checksum_address(config.DEX_ROUTERS[best["buy_dex"]]), Web3.to_checksum_address(config.DEX_ROUTERS[best["sell_dex"]]),
               Web3.to_checksum_address(tok_in["address"]), Web3.to_checksum_address(tok_out["address"]),
-              int(amount * 10 ** dec), 0, int(time.time()) + 60)
+              to_raw_units(amount, dec), 0, int(time.time()) + 60)
     if config.ARBITRAGE_CONTRACT_ADDRESS:
         arb = w3.eth.contract(address=Web3.to_checksum_address(config.ARBITRAGE_CONTRACT_ADDRESS), abi=live_executor.ARB_ABI)
         prof, exp, l1, l2 = arb.functions.simulateArbitrage(params).call()

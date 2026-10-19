@@ -51,6 +51,7 @@ class TestFinalLiveTradeSafety(unittest.TestCase):
         self.orig_min_profit = config.MIN_PROFIT_USDT
         self.orig_pk = config.PRIVATE_KEY
         self.orig_contract = config.ARBITRAGE_CONTRACT_ADDRESS
+        self.orig_wallet = getattr(config, "WALLET_ADDRESS", "")
 
         # Safe default test environment: Sepolia testnet with 2 valid routers
         config.set_active_chain(11155111)
@@ -60,6 +61,7 @@ class TestFinalLiveTradeSafety(unittest.TestCase):
         config.MIN_PROFIT_USDT = 0.01
         # Set dummy 64-char private key for testing key validation
         config.PRIVATE_KEY = "0x" + "1" * 64
+        config.WALLET_ADDRESS = "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
         config.ARBITRAGE_CONTRACT_ADDRESS = "0x0000000000000000000000000000000000000001"
 
     def tearDown(self):
@@ -74,6 +76,7 @@ class TestFinalLiveTradeSafety(unittest.TestCase):
         config.EMERGENCY_STOP = self.orig_emergency_stop
         config.MIN_PROFIT_USDT = self.orig_min_profit
         config.PRIVATE_KEY = self.orig_pk
+        config.WALLET_ADDRESS = self.orig_wallet
         config.ARBITRAGE_CONTRACT_ADDRESS = self.orig_contract
 
     # ------------------------------------------------------------------

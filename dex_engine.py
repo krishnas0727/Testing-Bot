@@ -12,7 +12,8 @@ import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from typing import Dict, Any, List, Optional, Tuple
+from decimal import Decimal, ROUND_DOWN
+from typing import Dict, Any, List, Optional, Tuple, Union
 
 try:
     import requests
@@ -58,6 +59,30 @@ KNOWN_PAIRS = {
 # Token decimals & addresses
 TOKEN_CACHE: Dict[str, Dict[str, Any]] = dict(config.TOKEN_REGISTRY)
 _token_decimals_cache: Dict[str, int] = {}
+
+
+def to_raw_units(amount: Union[float, int, str, Decimal], decimals: int) -> int:
+    """Safely convert human-readable token amount to raw integer on-chain units.
+    
+    Uses Decimal arithmetic and ROUND_DOWN to prevent float rounding inaccuracies
+    (e.g., 5.123456 * 10^6 yielding 5123455 instead of 5123456).
+    """
+    if amount is None or amount == "":
+        return 0
+    d_amount = Decimal(str(amount))
+    if d_amount <= 0:
+        return 0
+    factor = Decimal(10) ** decimals
+    return int((d_amount * factor).to_integral_value(rounding=ROUND_DOWN))
+
+
+def from_raw_units(raw_amount: Union[int, str, Decimal], decimals: int) -> Decimal:
+    """Safely convert raw integer on-chain units to human-readable Decimal without floating point loss."""
+    if raw_amount is None or raw_amount == "":
+        return Decimal("0")
+    d_raw = Decimal(str(raw_amount))
+    factor = Decimal(10) ** decimals
+    return d_raw / factor
 
 
 def get_token_decimals(token_addr: str, fallback_decimals: int = 18) -> int:
@@ -157,7 +182,7 @@ def get_block_number() -> int:
 
 
 def _default_gas_wei() -> int:
-    cid = getattr(config, "CHAIN_ID", 8453)
+    cid = getattr(config, "CHAIN_ID", 42161)
     if cid in (8453, 84532, 42161):
         return 6_000_000  # 0.006 Gwei on Base L2 / Base Sepolia / Arbitrum
     if cid == 137:
@@ -439,25 +464,59 @@ def estimate_arbitrage_gas_cost_usd(
     eth_price_usd: float,
     gas_units: Optional[int] = None,
     gas_price_wei: Optional[int] = None,
+    chain_id: Optional[int] = None,
+    include_l1: bool = False,
 ) -> Dict[str, Any]:
-    """Calculate estimated on-chain transaction fee denominated in ETH and USD."""
+    """Calculate estimated on-chain transaction fee denominated in ETH and USD.
+    
+    Includes Arbitrum/Base L2 execution gas + optional L1 calldata data posting cost.
+    Safely rejects when ETH price is missing/non-positive or gas estimation fails.
+    """
     units = gas_units or getattr(config, "ESTIMATED_GAS_UNITS", 250000)
+    if eth_price_usd is None or eth_price_usd <= 0:
+        return {
+            "gas_units": units,
+            "gas_price_wei": 0,
+            "gas_price_gwei": 0.0,
+            "gas_cost_eth": 0.0,
+            "gas_cost_usd": 0.0,
+            "is_gas_acceptable": False,
+            "error": "MISSING_PRICE_DATA",
+        }
+
     if gas_price_wei is None:
         wei, gwei = get_gas_price()
     else:
         wei = gas_price_wei
         gwei = round(wei / 1e9, 4)
 
-    gas_cost_eth = (units * wei) / 1e18
-    gas_cost_usd = gas_cost_eth * eth_price_usd
+    l2_gas_cost_eth = (units * wei) / 1e18
+    l2_gas_cost_usd = l2_gas_cost_eth * eth_price_usd
+
+    # Rollup L1 Calldata Posting Cost (Arbitrum One 42161, Base 8453, Base Sepolia 84532)
+    cid = int(chain_id if chain_id is not None else getattr(config, "CHAIN_ID", 42161))
+    l1_fee_usd = 0.0
+    if cid in (42161, 8453, 84532):
+        l1_fee_usd = float(getattr(config, "LIVE_L1_FEE_USD", 0.015))
+
+    total_gas_cost_usd = l2_gas_cost_usd + (l1_fee_usd if include_l1 else 0.0)
+    total_gas_cost_eth = total_gas_cost_usd / eth_price_usd if eth_price_usd > 0 else l2_gas_cost_eth
+
+    is_gas_acceptable = (
+        gwei <= getattr(config, "MAX_GAS_PRICE_GWEI", 50.0)
+        and (l2_gas_cost_usd + l1_fee_usd) > 0
+    )
 
     return {
         "gas_units": units,
         "gas_price_wei": wei,
         "gas_price_gwei": gwei,
-        "gas_cost_eth": gas_cost_eth,
-        "gas_cost_usd": round(gas_cost_usd, 4),
-        "is_gas_acceptable": gwei <= getattr(config, "MAX_GAS_PRICE_GWEI", 50.0),
+        "gas_cost_eth": total_gas_cost_eth,
+        "gas_cost_usd": round(total_gas_cost_usd, 4),
+        "l2_gas_cost_usd": round(l2_gas_cost_usd, 4),
+        "l1_fee_usd": round(l1_fee_usd, 4),
+        "total_gas_cost_usd": round(l2_gas_cost_usd + l1_fee_usd, 4),
+        "is_gas_acceptable": is_gas_acceptable,
     }
 
 
@@ -559,7 +618,7 @@ def simulate_atomic_arbitrage(plan: Dict[str, Any]) -> Dict[str, Any]:
     expected_profit = float(plan.get("net_profit_usdt", 0))
     buy_dex = plan.get("buy_dex")
     sell_dex = plan.get("sell_dex")
-    cid = int(plan.get("chain_id", getattr(config, "CHAIN_ID", 8453)))
+    cid = int(plan.get("chain_id", getattr(config, "CHAIN_ID", 42161)))
     chain_routers = config.CHAIN_REGISTRY.get(cid, {}).get("routers", getattr(config, "DEX_ROUTERS", {}))
     buy_r = chain_routers.get(buy_dex, "")
     sell_r = chain_routers.get(sell_dex, "")
@@ -615,7 +674,7 @@ def execute_atomic_trade(plan: Dict[str, Any], is_manual: bool = False) -> Dict[
         }
 
     # Guard 1b: Router uniqueness & availability guard (Phase 8)
-    cid = int(plan.get("chain_id", getattr(config, "CHAIN_ID", 8453)))
+    cid = int(plan.get("chain_id", getattr(config, "CHAIN_ID", 42161)))
     is_valid_routers, router_reason, _ = config.validate_chain_dex_routers(cid)
     if not is_valid_routers:
         return {
@@ -650,7 +709,7 @@ def execute_atomic_trade(plan: Dict[str, Any], is_manual: bool = False) -> Dict[
         mock_hash = ""
         trade_record = {
             "tx_hash": mock_hash,
-            "chain_id": int(plan.get("chain_id", getattr(config, "CHAIN_ID", 8453))),
+            "chain_id": int(plan.get("chain_id", getattr(config, "CHAIN_ID", 42161))),
             "buy_dex": plan.get("buy_dex", "Uniswap_V2"),
             "sell_dex": plan.get("sell_dex", "SushiSwap_V2"),
             "token_pair": getattr(config, "SYMBOL", "WETH/USDT"),
