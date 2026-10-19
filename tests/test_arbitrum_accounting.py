@@ -41,7 +41,7 @@ class TestArbitrumNetworkConfiguration(unittest.TestCase):
         self.assertEqual(tokens["USDC"]["decimals"], 6)
         self.assertEqual(tokens["USDC.e"]["address"].lower(), "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8".lower())
         self.assertEqual(tokens["USDC.e"]["decimals"], 6)
-        self.assertEqual(tokens["DAI"]["address"].lower(), "0xDA10009cBd5D07dd0CeCc6616156627515b03571".lower())
+        self.assertEqual(tokens["DAI"]["address"].lower(), "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1".lower())
         self.assertEqual(tokens["DAI"]["decimals"], 18)
         self.assertEqual(tokens["WBTC"]["address"].lower(), "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f".lower())
         self.assertEqual(tokens["WBTC"]["decimals"], 8)
