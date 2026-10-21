@@ -1392,24 +1392,24 @@ function updateDashboardUI(payload) {
         let netPct = best.net_profit_percent;
 
         const isStale = Boolean(latestMarketData && latestMarketData._lastSuccessTs && (Date.now() - latestMarketData._lastSuccessTs > 30000));
-        const isExactBackendQuote = Boolean(!isStale && best.amount_in && Math.abs(best.amount_in - tradeAmtDisplay) <= 0.001 && best.gross_return_usdt !== undefined && best.net_profit_usdt !== undefined);
+        const planTag = getExecutionPlanProvenance(best, tradeAmtDisplay, isStale);
+        setText("arbPlanTypeTag", planTag);
 
-        if (isExactBackendQuote) {
-            setText("arbPlanTypeTag", "(Verified Backend Quote)");
-        } else {
-            setText("arbPlanTypeTag", isStale ? "(Quote Stale)" : "(Illustrative Estimate)");
-            if (best.amount_in && best.amount_in > 0) {
-                const scale = tradeAmtDisplay / best.amount_in;
-                grossOut = tradeAmtDisplay + ((best.gross_profit_usdt || (best.gross_return_usdt - best.amount_in)) * scale);
-                gasCost = Math.min(0.25, Math.max(0.0001, tradeAmtDisplay * 0.0005));
-                netProf = (grossOut - tradeAmtDisplay) - gasCost;
-                netPct = (netProf / tradeAmtDisplay) * 100.0;
-            }
+        // If backend returned route for a different amount (e.g. default 5 while user chose 15), scale it:
+        if (best.amount_in && Math.abs(best.amount_in - tradeAmtDisplay) > 0.001 && best.amount_in > 0) {
+            const scale = tradeAmtDisplay / best.amount_in;
+            grossOut = tradeAmtDisplay + ((best.gross_profit_usdt || (best.gross_return_usdt - best.amount_in)) * scale);
+            gasCost = Math.min(0.25, Math.max(0.0001, tradeAmtDisplay * 0.0005));
+            netProf = (grossOut - tradeAmtDisplay) - gasCost;
+            netPct = (netProf / tradeAmtDisplay) * 100.0;
         }
+
+        const isMockGas = (latestMarketData?.trading_mode === "MOCK" || best.trading_mode === "MOCK" || best.gas_mode === "MOCK_SIMULATION");
+        const gasCostSuffix = isMockGas ? "(Simulated MOCK gas)" : "(Incl. L1 calldata)";
 
         setText("arbAmountOut", `$${Number(grossOut || tradeAmtDisplay).toFixed(4)} ${quoteSym}`);
         setText("arbPriceImpact", `${Number(best.max_price_impact_pct || 0.01).toFixed(2)}%`);
-        setText("arbGasCost", `$${Number(gasCost || 0.005).toFixed(4)} ${quoteSym}`);
+        setText("arbGasCost", `$${Number(gasCost || 0.005).toFixed(4)} ${quoteSym} ${gasCostSuffix}`);
         const dexFeesEst = tradeAmtDisplay * 0.006;
         setText("arbDexFees", `$${dexFeesEst.toFixed(4)} ${quoteSym} (Included in output)`);
 
@@ -1454,6 +1454,34 @@ function setText(id, text) {
 // SIMULATION & ATOMIC EXECUTION ACTIONS
 // ============================================================
 
+function getExecutionPlanProvenance(bestRoute, targetAmount, isStale) {
+    if (isStale) {
+        return "(Quote Stale)";
+    }
+    const currentMode = (latestMarketData && latestMarketData.trading_mode) || (bestRoute && bestRoute.trading_mode) || "MOCK";
+    if (!bestRoute || !bestRoute.buy_dex || latestMarketData?.arbitrage_available === false) {
+        return "(Quote Unavailable)";
+    }
+    const isExact = Boolean(
+        bestRoute.amount_in &&
+        Math.abs(bestRoute.amount_in - targetAmount) <= 0.001 &&
+        bestRoute.gross_return_usdt !== undefined &&
+        bestRoute.net_profit_usdt !== undefined
+    );
+    const isRealOnChain = (bestRoute.source === "on-chain-rpc" || bestRoute.source === "rpc");
+
+    // Strictly enforce: ONLY fresh, exact quotes in LIVE mode with confirmed on-chain RPC reserves
+    if (currentMode === "LIVE" && isRealOnChain && isExact) {
+        return "(Verified On-Chain Quote)";
+    }
+    // Any MOCK mode quote or simulated fallback pool is truthfully marked as a MOCK simulation
+    if (currentMode === "MOCK" || bestRoute.source === "simulated-pool" || bestRoute.is_simulated) {
+        return "(Simulation Quote — MOCK)";
+    }
+    // Scaling or non-matching amount in LIVE mode:
+    return "(Illustrative Estimate)";
+}
+
 function updateExecutionPlanForAmount(amount) {
     if (!amount || amount <= 0) return;
     const chainConfig = getSelectedChain();
@@ -1485,34 +1513,34 @@ function updateExecutionPlanForAmount(amount) {
 
     setText("arbRouteText", `${bestRoute.buy_dex.replace("_", " ")} ➔ ${bestRoute.sell_dex.replace("_", " ")}`);
 
-    // Check if current quote is exact for this amount and fresh
-    const isExact = Boolean(!isStale && bestRoute.amount_in && Math.abs(bestRoute.amount_in - amount) <= 0.001 && bestRoute.gross_return_usdt !== undefined && bestRoute.net_profit_usdt !== undefined);
+    const planTag = getExecutionPlanProvenance(bestRoute, amount, isStale);
+    setText("arbPlanTypeTag", planTag);
+
+    const isExact = Boolean(!isStale && bestRoute.amount_in && Math.abs(bestRoute.amount_in - amount) <= 0.001);
 
     let grossReturn, netProfit, gasCost, netProfitPct;
 
     if (isExact && bestRoute.gross_return_usdt !== undefined && bestRoute.net_profit_usdt !== undefined) {
-        setText("arbPlanTypeTag", "(Verified Backend Quote)");
         grossReturn = Number(bestRoute.gross_return_usdt);
         gasCost = Number(bestRoute.gas_cost_usdt || 0.005);
         netProfit = Number(bestRoute.net_profit_usdt);
         netProfitPct = Number(bestRoute.net_profit_percent || 0.0);
     } else {
-        setText("arbPlanTypeTag", "(Illustrative Estimate)");
-        // Realistic constant-product DEX arbitrage calculation based on live backend spread
-        // Never use a hardcoded fallback spread to fake profitability
         const spreadPct = Number(bestRoute.spread_pct || 0.0);
         const netSpreadRatio = (spreadPct - 0.60) / 100.0;
         grossReturn = amount * (1.0 + netSpreadRatio);
         const grossProfit = grossReturn - amount;
-        // Illustrative display gas: actual live execution strictly uses backend eth_estimateGas and L1 calldata checks
         gasCost = Math.min(0.25, Math.max(0.0001, amount * 0.0005));
         netProfit = grossProfit - gasCost;
         netProfitPct = (netProfit / amount) * 100.0;
     }
 
+    const isMockGas = (latestMarketData?.trading_mode === "MOCK" || bestRoute?.trading_mode === "MOCK" || bestRoute?.gas_mode === "MOCK_SIMULATION");
+    const gasCostSuffix = isMockGas ? "(Simulated MOCK gas)" : "(Incl. L1 calldata)";
+
     setText("arbAmountOut", `$${grossReturn.toFixed(4)} ${quoteSym}`);
     setText("arbPriceImpact", `${Number(bestRoute.max_price_impact_pct || 0.01).toFixed(2)}%`);
-    setText("arbGasCost", `$${gasCost.toFixed(4)} ${quoteSym}`);
+    setText("arbGasCost", `$${gasCost.toFixed(4)} ${quoteSym} ${gasCostSuffix}`);
     const dexFees = amount * 0.006;
     setText("arbDexFees", `$${dexFees.toFixed(4)} ${quoteSym} (Included in output)`);
 

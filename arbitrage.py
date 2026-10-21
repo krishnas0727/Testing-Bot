@@ -214,6 +214,11 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
             "is_profitable": False,
             "net_profit_usdt": 0.0,
             "prices": {},
+            "source": "unknown",
+            "trading_mode": mode,
+            "is_simulated": True,
+            "gas_mode": "MOCK_SIMULATION" if mode == "MOCK" else "LIVE_ONCHAIN",
+            "includes_l1_fee": bool(mode != "MOCK"),
             "timestamp": time.time() * 1000
         }
 
@@ -246,6 +251,11 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
             "is_profitable": False,
             "net_profit_usdt": 0.0,
             "prices": {},
+            "source": "unknown",
+            "trading_mode": mode,
+            "is_simulated": True,
+            "gas_mode": "MOCK_SIMULATION" if mode == "MOCK" else "LIVE_ONCHAIN",
+            "includes_l1_fee": bool(mode != "MOCK"),
             "timestamp": time.time() * 1000
         }
 
@@ -343,6 +353,10 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
                 and gas_info.get("is_gas_acceptable", True)
             )
 
+            route_source = "on-chain-rpc" if (buy_q.get("source") == "on-chain-rpc" and sell_q.get("source") == "on-chain-rpc") else "simulated-pool"
+            is_simulated = bool(mode == "MOCK" or route_source != "on-chain-rpc")
+            gas_mode = "MOCK_SIMULATION" if mode == "MOCK" else "LIVE_ONCHAIN"
+
             opp = {
                 "buy_dex": buy_dex,
                 "sell_dex": sell_dex,
@@ -377,6 +391,11 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
                 "is_profitable": is_profitable,
                 "profitability_status": "PROFITABLE" if is_profitable else ("PRICE_IMPACT_EXCEEDED" if (buy_price_impact > limit_impact or sell_price_impact > limit_impact) else ("UNPROFITABLE_NEGATIVE_NET" if net_profit_usdt <= 0 else "BELOW_MIN_PROFIT")),
                 "is_estimate": True,
+                "source": route_source,
+                "trading_mode": mode,
+                "is_simulated": is_simulated,
+                "gas_mode": gas_mode,
+                "includes_l1_fee": bool(mode != "MOCK"),
                 "timestamp": time.time() * 1000,
             }
             opportunities.append(opp)
@@ -385,6 +404,9 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
         dex_keys = list(quotes.keys())
         d1 = dex_keys[0]
         d2 = dex_keys[1] if len(dex_keys) > 1 else d1
+        d1_src = quotes.get(d1, {}).get("source", "simulated-pool")
+        d2_src = quotes.get(d2, {}).get("source", "simulated-pool")
+        fallback_source = "on-chain-rpc" if (d1_src == "on-chain-rpc" and d2_src == "on-chain-rpc") else "simulated-pool"
         opportunities.append({
             "buy_dex": d1,
             "sell_dex": d2,
@@ -414,6 +436,11 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
             "min_profit_threshold": 0.0,
             "is_gas_acceptable": gas_info.get("is_gas_acceptable", True),
             "is_profitable": False,
+            "source": fallback_source,
+            "trading_mode": mode,
+            "is_simulated": bool(mode == "MOCK" or fallback_source != "on-chain-rpc"),
+            "gas_mode": "MOCK_SIMULATION" if mode == "MOCK" else "LIVE_ONCHAIN",
+            "includes_l1_fee": bool(mode != "MOCK"),
             "timestamp": time.time() * 1000,
         })
 
@@ -443,6 +470,11 @@ def analyze_market(custom_amount: Optional[float] = None, chain_id: Optional[int
         "price_impact": best["max_price_impact_pct"],
         "weth_amount": best["weth_amount"],
         "is_profitable": best["is_profitable"],
+        "source": best.get("source", "simulated-pool"),
+        "trading_mode": mode,
+        "is_simulated": best.get("is_simulated", True),
+        "gas_mode": best.get("gas_mode", "MOCK_SIMULATION"),
+        "includes_l1_fee": best.get("includes_l1_fee", False),
         "timestamp": time.time() * 1000,
     }
     _MARKET_CACHE[cache_key] = (now, market_data)

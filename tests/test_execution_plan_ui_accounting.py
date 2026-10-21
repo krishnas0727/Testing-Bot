@@ -29,6 +29,7 @@ class TestExecutionPlanUIAccounting(unittest.TestCase):
         self.orig_mode = getattr(config, "TRADING_MODE", "MOCK")
         self.orig_armed = getattr(config, "LIVE_TRADING_ARMED", False)
         self.orig_auto = getattr(config, "AUTO_TRADE_ENABLED", False)
+        self.orig_emerg = getattr(config, "EMERGENCY_STOP", True)
         config.TRADING_MODE = "MOCK"
         config.LIVE_TRADING_ARMED = False
         config.AUTO_TRADE_ENABLED = False
@@ -37,6 +38,7 @@ class TestExecutionPlanUIAccounting(unittest.TestCase):
         config.TRADING_MODE = self.orig_mode
         config.LIVE_TRADING_ARMED = self.orig_armed
         config.AUTO_TRADE_ENABLED = self.orig_auto
+        config.EMERGENCY_STOP = self.orig_emerg
 
     def test_missing_quote_data_fails_closed(self):
         """When DEX quotes cannot be fetched, analyze_market must not claim positive profit."""
@@ -110,45 +112,94 @@ class TestExecutionPlanUIAccounting(unittest.TestCase):
         with open(index_path, "r", encoding="utf-8") as f:
             content = f.read()
 
-        # Must have the tag element for provenance (Illustrative vs Backend Quote)
+        # Must have the tag element for provenance defaulting to Simulation Quote in MOCK mode
         self.assertIn('id="arbPlanTypeTag"', content)
+        self.assertIn('(Simulation Quote — MOCK)', content)
         # Must have clear DEX fee disclosure
         self.assertIn('Included in Expected Output', content)
         # Default badge must be STANDBY, not hardcoded OPTIMAL ROUTE
         self.assertIn('id="arbPlanBadge" class="badge badge-yellow">STANDBY</span>', content)
         # Default net profit must be clean placeholder '--', not hardcoded '+$0.0007'
         self.assertIn('id="arbNetProfit" style="color:var(--text-muted); font-size:16px;">--</strong>', content)
+        # Must have gas label element
+        self.assertIn('id="arbGasCostLabel"', content)
 
-    def test_verified_backend_quote_strict_provenance(self):
-        """Verified Backend Quote must require exact amount match, freshness, and real backend output."""
-        def evaluate_quote_provenance(best_route, selected_amount, is_stale):
-            if is_stale or not best_route or not best_route.get("buy_dex"):
-                return "UNAVAILABLE"
+    def test_quote_provenance_strictly_distinguishes_mock_from_live(self):
+        """MOCK quotes or simulated pools must NEVER display 'Verified On-Chain Quote'.
+
+        Only fresh, exact quotes in LIVE mode from confirmed on-chain RPC reserves
+        can ever be labeled '(Verified On-Chain Quote)'.
+        """
+        def evaluate_quote_provenance(best_route, selected_amount, is_stale, current_mode="MOCK"):
+            if is_stale:
+                return "(Quote Stale)"
+            if not best_route or not best_route.get("buy_dex") or best_route.get("arbitrage_available") is False:
+                return "(Quote Unavailable)"
+
             is_exact = bool(
-                not is_stale and
                 best_route.get("amount_in") and
                 abs(best_route["amount_in"] - selected_amount) <= 0.001 and
                 best_route.get("gross_return_usdt") is not None and
                 best_route.get("net_profit_usdt") is not None
             )
-            return "VERIFIED" if is_exact else "ILLUSTRATIVE"
+            is_real_onchain = best_route.get("source") in ("on-chain-rpc", "rpc")
 
-        # 1. Exact match and fresh -> VERIFIED
-        valid_route = {"buy_dex": "Uni", "sell_dex": "Sushi", "amount_in": 10.0, "gross_return_usdt": 10.08, "net_profit_usdt": 0.075}
-        self.assertEqual(evaluate_quote_provenance(valid_route, 10.0, False), "VERIFIED")
+            if current_mode == "LIVE" and is_real_onchain and is_exact:
+                return "(Verified On-Chain Quote)"
+            if current_mode == "MOCK" or best_route.get("source") == "simulated-pool" or best_route.get("is_simulated"):
+                return "(Simulation Quote — MOCK)"
+            return "(Illustrative Estimate)"
 
-        # 2. Amount mismatch (e.g. backend was 5.0, user selected 10.0) -> ILLUSTRATIVE
-        self.assertEqual(evaluate_quote_provenance(valid_route, 5.0, False), "ILLUSTRATIVE")
+        # 1. In MOCK mode, exact route from simulated pool -> strictly (Simulation Quote — MOCK)
+        mock_sim_route = {
+            "buy_dex": "Uniswap_V2", "sell_dex": "SushiSwap_V2",
+            "amount_in": 10.0, "gross_return_usdt": 10.0793, "net_profit_usdt": 0.0743,
+            "source": "simulated-pool", "trading_mode": "MOCK", "is_simulated": True
+        }
+        self.assertEqual(evaluate_quote_provenance(mock_sim_route, 10.0, False, "MOCK"), "(Simulation Quote — MOCK)")
 
-        # 3. Missing amount_in or missing return -> never VERIFIED
-        invalid_route = {"buy_dex": "Uni", "sell_dex": "Sushi"}
-        self.assertEqual(evaluate_quote_provenance(invalid_route, 10.0, False), "ILLUSTRATIVE")
+        # 2. In LIVE mode with simulated-pool source -> strictly (Simulation Quote — MOCK), NEVER Verified
+        self.assertEqual(evaluate_quote_provenance(mock_sim_route, 10.0, False, "LIVE"), "(Simulation Quote — MOCK)")
 
-        # 4. Stale quote -> UNAVAILABLE
-        self.assertEqual(evaluate_quote_provenance(valid_route, 10.0, True), "UNAVAILABLE")
+        # 3. In LIVE mode, exact amount, on-chain-rpc source -> (Verified On-Chain Quote)
+        live_onchain_route = {
+            "buy_dex": "Uniswap_V2", "sell_dex": "SushiSwap_V2",
+            "amount_in": 10.0, "gross_return_usdt": 10.0793, "net_profit_usdt": 0.0743,
+            "source": "on-chain-rpc", "trading_mode": "LIVE", "is_simulated": False
+        }
+        self.assertEqual(evaluate_quote_provenance(live_onchain_route, 10.0, False, "LIVE"), "(Verified On-Chain Quote)")
 
-    def test_stale_quote_data_fails_closed_in_javascript(self):
-        """Confirm static/app.js enforces staleness threshold (30s) and fails closed."""
+        # 4. In LIVE mode, amount mismatch (user selected 15, route is for 10) -> (Illustrative Estimate)
+        self.assertEqual(evaluate_quote_provenance(live_onchain_route, 15.0, False, "LIVE"), "(Illustrative Estimate)")
+
+        # 5. Stale quote -> strictly (Quote Stale) regardless of mode
+        self.assertEqual(evaluate_quote_provenance(live_onchain_route, 10.0, True, "LIVE"), "(Quote Stale)")
+        self.assertEqual(evaluate_quote_provenance(mock_sim_route, 10.0, True, "MOCK"), "(Quote Stale)")
+
+    def test_analyze_market_exposes_truthful_metadata(self):
+        """analyze_market must include source, trading_mode, is_simulated, and gas_mode."""
+        market = analyze_market(custom_amount=10.0)
+        self.assertIsNotNone(market)
+        self.assertIn("trading_mode", market)
+        self.assertEqual(market["trading_mode"], "MOCK")
+        self.assertIn("gas_mode", market)
+        self.assertEqual(market["gas_mode"], "MOCK_SIMULATION")
+        self.assertIn("source", market)
+        self.assertIn("is_simulated", market)
+        self.assertTrue(market["is_simulated"])
+        self.assertFalse(market["includes_l1_fee"])
+
+        if market.get("best_route"):
+            best = market["best_route"]
+            self.assertIn("source", best)
+            self.assertIn("trading_mode", best)
+            self.assertEqual(best["trading_mode"], "MOCK")
+            self.assertEqual(best["gas_mode"], "MOCK_SIMULATION")
+            self.assertTrue(best["is_simulated"])
+            self.assertFalse(best["includes_l1_fee"])
+
+    def test_javascript_enforces_provenance_and_gas_mode(self):
+        """Confirm static/app.js enforces getExecutionPlanProvenance and gas mode suffixes."""
         js_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "app.js")
         with open(js_path, "r", encoding="utf-8") as f:
             js_content = f.read()
@@ -157,8 +208,40 @@ class TestExecutionPlanUIAccounting(unittest.TestCase):
         self.assertIn("Date.now() - latestMarketData._lastSuccessTs > 30000", js_content)
         # Check for stale quote status handling
         self.assertIn("Quote stale", js_content)
-        # Check for verified quote gate
-        self.assertIn("isExactBackendQuote", js_content)
+        # Check for provenance function
+        self.assertIn("getExecutionPlanProvenance", js_content)
+        self.assertIn("(Simulation Quote — MOCK)", js_content)
+        self.assertIn("(Verified On-Chain Quote)", js_content)
+        # Check for gas suffix differentiation
+        self.assertIn("(Simulated MOCK gas)", js_content)
+        self.assertIn("(Incl. L1 calldata)", js_content)
+
+    def test_simulated_quote_cannot_authorize_live_execution(self):
+        """Server-side live preflight must strictly block live trades when armed is false or mode is MOCK."""
+        import live_executor
+        dummy_plan = {
+            "buy_dex": "Uniswap_V2",
+            "sell_dex": "SushiSwap_V2",
+            "amount_in": 10.0,
+            "chain_id": 42161,
+            "source": "simulated-pool",
+            "is_simulated": True,
+        }
+
+        # 1. In MOCK mode: execute_live must fail with INVALID_MODE (or BLOCKED_EMERGENCY_STOP)
+        config.TRADING_MODE = "MOCK"
+        config.LIVE_TRADING_ARMED = False
+        res = live_executor.execute_live(dummy_plan)
+        self.assertFalse(res["success"])
+        self.assertIn(res.get("status"), ("INVALID_MODE", "BLOCKED_EMERGENCY_STOP", "NOT_ARMED"))
+
+        # 2. In LIVE mode but LIVE_TRADING_ARMED is False (and emergency stop unset for testing check):
+        config.TRADING_MODE = "LIVE"
+        config.EMERGENCY_STOP = False
+        config.LIVE_TRADING_ARMED = False
+        res2 = live_executor.execute_live(dummy_plan)
+        self.assertFalse(res2["success"])
+        self.assertEqual(res2.get("status"), "NOT_ARMED")
 
     def test_safety_invariants_preserved(self):
         """Trading mode must be MOCK and armed/auto-trade disabled."""
