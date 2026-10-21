@@ -54,6 +54,7 @@ class TestFeeAndProfitabilityAccuracy(unittest.TestCase):
         self.orig_armed = getattr(config, "LIVE_TRADING_ARMED", False)
         self.orig_emergency = getattr(config, "EMERGENCY_STOP", False)
         self.orig_chain_id = getattr(config, "CHAIN_ID", 8453)
+        self.orig_wallet_addr = getattr(config, "WALLET_ADDRESS", None)
         config.set_active_chain(8453)
         config.EMERGENCY_STOP = False
 
@@ -62,6 +63,7 @@ class TestFeeAndProfitabilityAccuracy(unittest.TestCase):
         config.LIVE_TRADING_ARMED = self.orig_armed
         config.EMERGENCY_STOP = self.orig_emergency
         config.set_active_chain(self.orig_chain_id)
+        config.WALLET_ADDRESS = self.orig_wallet_addr
 
     # ============================================================
     # 1. FEE CALCULATION ACCURACY & REGRESSION TEST
@@ -331,6 +333,7 @@ class TestFeeAndProfitabilityAccuracy(unittest.TestCase):
         config.TRADING_MODE = "LIVE"
         config.LIVE_TRADING_ARMED = True
         config.PRIVATE_KEY = "0x" + "1" * 64
+        config.WALLET_ADDRESS = "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
         config.ARBITRAGE_CONTRACT_ADDRESS = "0x" + "2" * 40
 
         mock_w3 = MagicMock()
@@ -387,6 +390,7 @@ class TestFeeAndProfitabilityAccuracy(unittest.TestCase):
         config.TRADING_MODE = "LIVE"
         config.LIVE_TRADING_ARMED = True
         config.PRIVATE_KEY = "0x" + "1" * 64
+        config.WALLET_ADDRESS = "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
         config.ARBITRAGE_CONTRACT_ADDRESS = "0x" + "2" * 40
 
         mock_w3 = MagicMock()

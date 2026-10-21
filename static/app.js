@@ -965,7 +965,15 @@ async function fetchMarketData() {
         if (thisEpoch !== currentChainEpoch || thisChainId !== currentSelectedChainId) {
             return;
         }
-        if (!json.success || !json.data) return;
+        if (!json.success || !json.data) {
+            const rpcBadge = document.getElementById("rpcStatusText");
+            if (rpcBadge) rpcBadge.innerText = "RPC Unavailable / Polling Error";
+            if (latestMarketData && Date.now() - (latestMarketData._lastSuccessTs || 0) > 30000) {
+                latestMarketData.arbitrage_available = false;
+                updateDashboardUI({ success: false, data: { arbitrage_available: false, best_route: null } });
+            }
+            return;
+        }
 
         // Verify response belongs to currentSelectedChainId
         const respChainId = Number(json.data.chain_id || json.settings?.chain_id || json.wallet?.chain_id || thisChainId);
@@ -990,7 +998,8 @@ async function fetchMarketData() {
             trading_mode: json.summary?.trading_mode || json.settings?.trading_mode || "MOCK",
             has_private_key: Boolean(json.settings?.has_private_key),
             chain_id: respChainId,
-            best_route: json.data?.best_route || null
+            best_route: json.data?.best_route || null,
+            _lastSuccessTs: Date.now()
         };
         updateDashboardUI(json);
         updateChart(json.data.prices);
@@ -1007,6 +1016,12 @@ async function fetchMarketData() {
 
     } catch (err) {
         console.warn("[DEX Polling Error]:", err);
+        const rpcBadge = document.getElementById("rpcStatusText");
+        if (rpcBadge) rpcBadge.innerText = "RPC Unavailable / Polling Error";
+        if (latestMarketData && Date.now() - (latestMarketData._lastSuccessTs || 0) > 30000) {
+            latestMarketData.arbitrage_available = false;
+            updateDashboardUI({ success: false, data: { arbitrage_available: false, best_route: null } });
+        }
     } finally {
         isFetchingMarket = false;
     }
@@ -1360,7 +1375,7 @@ function updateDashboardUI(payload) {
     if (depthLabelSushi) depthLabelSushi.innerText = `SushiSwap V2: $${sushiQuote.toLocaleString("en-US", { maximumFractionDigits: 0 })} (${sushiPct}%)`;
 
     // 7. Arbitrage tab breakdown
-    if (best.buy_dex) {
+    if (best && best.buy_dex) {
         setText("arbRouteText", `${best.buy_dex.replace("_", " ")} ➔ ${best.sell_dex.replace("_", " ")}`);
 
         // Strictly respect user's selectedTradeAmount or custom input
@@ -1376,30 +1391,56 @@ function updateDashboardUI(payload) {
         let gasCost = best.gas_cost_usdt;
         let netPct = best.net_profit_percent;
 
-        // If backend returned route for a different amount (e.g. default 5 while user chose 15), scale it:
-        if (best.amount_in && Math.abs(best.amount_in - tradeAmtDisplay) > 0.001) {
-            const scale = tradeAmtDisplay / best.amount_in;
-            grossOut = tradeAmtDisplay + ((best.gross_profit_usdt || (best.gross_return_usdt - best.amount_in)) * scale);
-            gasCost = Math.min(0.25, Math.max(0.0001, tradeAmtDisplay * 0.0005));
-            netProf = (grossOut - tradeAmtDisplay) - gasCost;
-            netPct = (netProf / tradeAmtDisplay) * 100.0;
+        const isStale = Boolean(latestMarketData && latestMarketData._lastSuccessTs && (Date.now() - latestMarketData._lastSuccessTs > 30000));
+        const isExactBackendQuote = Boolean(!isStale && best.amount_in && Math.abs(best.amount_in - tradeAmtDisplay) <= 0.001 && best.gross_return_usdt !== undefined && best.net_profit_usdt !== undefined);
+
+        if (isExactBackendQuote) {
+            setText("arbPlanTypeTag", "(Verified Backend Quote)");
+        } else {
+            setText("arbPlanTypeTag", isStale ? "(Quote Stale)" : "(Illustrative Estimate)");
+            if (best.amount_in && best.amount_in > 0) {
+                const scale = tradeAmtDisplay / best.amount_in;
+                grossOut = tradeAmtDisplay + ((best.gross_profit_usdt || (best.gross_return_usdt - best.amount_in)) * scale);
+                gasCost = Math.min(0.25, Math.max(0.0001, tradeAmtDisplay * 0.0005));
+                netProf = (grossOut - tradeAmtDisplay) - gasCost;
+                netPct = (netProf / tradeAmtDisplay) * 100.0;
+            }
         }
 
         setText("arbAmountOut", `$${Number(grossOut || tradeAmtDisplay).toFixed(4)} ${quoteSym}`);
         setText("arbPriceImpact", `${Number(best.max_price_impact_pct || 0.01).toFixed(2)}%`);
         setText("arbGasCost", `$${Number(gasCost || 0.005).toFixed(4)} ${quoteSym}`);
+        const dexFeesEst = tradeAmtDisplay * 0.006;
+        setText("arbDexFees", `$${dexFeesEst.toFixed(4)} ${quoteSym} (Included in output)`);
 
         const netProfEl = document.getElementById("arbNetProfit");
         if (netProfEl) {
             const sign = (netProf || 0) >= 0 ? "+" : "";
             netProfEl.innerText = `${sign}$${Number(netProf || 0).toFixed(4)} ${quoteSym} (${sign}${Number(netPct || 0).toFixed(2)}%)`;
-            netProfEl.style.color = (netProf || 0) >= 0 ? "var(--profit-color)" : "var(--loss-color)";
+            netProfEl.style.color = (netProf || 0) > 0 ? "var(--profit-color)" : ((netProf || 0) < 0 ? "var(--loss-color)" : "var(--text-muted)");
         }
 
         const planBadge = document.getElementById("arbPlanBadge");
         if (planBadge) {
             planBadge.innerText = (netProf || 0) > 0 ? "OPTIMAL ROUTE" : "LOW SPREAD";
             planBadge.className = "badge " + ((netProf || 0) > 0 ? "badge-green" : "badge-yellow");
+        }
+    } else {
+        setText("arbPlanTypeTag", "(Quote Unavailable)");
+        setText("arbRouteText", "Quote unavailable");
+        setText("arbAmountOut", "--");
+        setText("arbPriceImpact", "--");
+        setText("arbGasCost", "--");
+        setText("arbDexFees", "--");
+        const netProfEl = document.getElementById("arbNetProfit");
+        if (netProfEl) {
+            netProfEl.innerText = "Quote unavailable";
+            netProfEl.style.color = "var(--text-muted)";
+        }
+        const planBadge = document.getElementById("arbPlanBadge");
+        if (planBadge) {
+            planBadge.innerText = "QUOTE UNAVAILABLE";
+            planBadge.className = "badge badge-yellow";
         }
     }
 }
@@ -1419,31 +1460,67 @@ function updateExecutionPlanForAmount(amount) {
     const quoteSym = (chainConfig.defaultPair && chainConfig.defaultPair.split("/")[1]) || (currentSelectedChainId === 8453 || currentSelectedChainId === 84532 ? "USDC" : "USDT");
     setText("arbAmountIn", `$${Number(amount).toFixed(2)} ${quoteSym}`);
 
-    // Realistic dynamic gas for L2 / micro-trade ($0.0005 on $1, $0.0025 on $5)
-    const gasCost = Math.min(0.25, Math.max(0.0001, amount * 0.0005));
-
-    // Realistic constant-product DEX arbitrage calculation (~0.8% net spread after 0.3% x 2 DEX fees)
-    let spreadPct = 1.41;
-    if (latestMarketData && latestMarketData.best_route && latestMarketData.best_route.spread_pct) {
-        spreadPct = latestMarketData.best_route.spread_pct;
+    // If no quote data exists, quote is stale (>30s), or backend reported no route available, fail closed with "Quote unavailable"
+    const isStale = Boolean(latestMarketData && latestMarketData._lastSuccessTs && (Date.now() - latestMarketData._lastSuccessTs > 30000));
+    const bestRoute = !isStale && latestMarketData && latestMarketData.best_route;
+    if (!bestRoute || !bestRoute.buy_dex || bestRoute.spread_pct === undefined || latestMarketData.arbitrage_available === false) {
+        setText("arbPlanTypeTag", isStale ? "(Quote Stale)" : "(Quote Unavailable)");
+        setText("arbRouteText", isStale ? "Quote stale (re-fetching...)" : "Quote unavailable");
+        setText("arbAmountOut", "--");
+        setText("arbPriceImpact", "--");
+        setText("arbGasCost", "--");
+        setText("arbDexFees", "--");
+        const netProfEl = document.getElementById("arbNetProfit");
+        if (netProfEl) {
+            netProfEl.innerText = isStale ? "Quote stale" : "Quote unavailable";
+            netProfEl.style.color = "var(--text-muted)";
+        }
+        const planBadge = document.getElementById("arbPlanBadge");
+        if (planBadge) {
+            planBadge.innerText = isStale ? "QUOTE STALE" : "QUOTE UNAVAILABLE";
+            planBadge.className = "badge badge-yellow";
+        }
+        return;
     }
-    const netSpreadRatio = Math.max(0.004, (spreadPct - 0.60) / 100.0);
-    const grossReturn = amount * (1.0 + netSpreadRatio);
-    const grossProfit = grossReturn - amount;
-    const netProfit = grossProfit - gasCost;
-    const netProfitPct = (netProfit / amount) * 100.0;
+
+    setText("arbRouteText", `${bestRoute.buy_dex.replace("_", " ")} ➔ ${bestRoute.sell_dex.replace("_", " ")}`);
+
+    // Check if current quote is exact for this amount and fresh
+    const isExact = Boolean(!isStale && bestRoute.amount_in && Math.abs(bestRoute.amount_in - amount) <= 0.001 && bestRoute.gross_return_usdt !== undefined && bestRoute.net_profit_usdt !== undefined);
+
+    let grossReturn, netProfit, gasCost, netProfitPct;
+
+    if (isExact && bestRoute.gross_return_usdt !== undefined && bestRoute.net_profit_usdt !== undefined) {
+        setText("arbPlanTypeTag", "(Verified Backend Quote)");
+        grossReturn = Number(bestRoute.gross_return_usdt);
+        gasCost = Number(bestRoute.gas_cost_usdt || 0.005);
+        netProfit = Number(bestRoute.net_profit_usdt);
+        netProfitPct = Number(bestRoute.net_profit_percent || 0.0);
+    } else {
+        setText("arbPlanTypeTag", "(Illustrative Estimate)");
+        // Realistic constant-product DEX arbitrage calculation based on live backend spread
+        // Never use a hardcoded fallback spread to fake profitability
+        const spreadPct = Number(bestRoute.spread_pct || 0.0);
+        const netSpreadRatio = (spreadPct - 0.60) / 100.0;
+        grossReturn = amount * (1.0 + netSpreadRatio);
+        const grossProfit = grossReturn - amount;
+        // Illustrative display gas: actual live execution strictly uses backend eth_estimateGas and L1 calldata checks
+        gasCost = Math.min(0.25, Math.max(0.0001, amount * 0.0005));
+        netProfit = grossProfit - gasCost;
+        netProfitPct = (netProfit / amount) * 100.0;
+    }
 
     setText("arbAmountOut", `$${grossReturn.toFixed(4)} ${quoteSym}`);
-    setText("arbPriceImpact", `0.01%`);
+    setText("arbPriceImpact", `${Number(bestRoute.max_price_impact_pct || 0.01).toFixed(2)}%`);
     setText("arbGasCost", `$${gasCost.toFixed(4)} ${quoteSym}`);
     const dexFees = amount * 0.006;
-    setText("arbDexFees", `$${dexFees.toFixed(4)} ${quoteSym}`);
+    setText("arbDexFees", `$${dexFees.toFixed(4)} ${quoteSym} (Included in output)`);
 
     const netProfEl = document.getElementById("arbNetProfit");
     if (netProfEl) {
         const sign = netProfit >= 0 ? "+" : "";
         netProfEl.innerText = `${sign}$${netProfit.toFixed(4)} ${quoteSym} (${sign}${netProfitPct.toFixed(2)}%)`;
-        netProfEl.style.color = netProfit >= 0 ? "var(--profit-color)" : "var(--loss-color)";
+        netProfEl.style.color = netProfit > 0 ? "var(--profit-color)" : (netProfit < 0 ? "var(--loss-color)" : "var(--text-muted)");
     }
 
     const planBadge = document.getElementById("arbPlanBadge");
