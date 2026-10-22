@@ -46,6 +46,7 @@ _PARAMS_TUPLE = {
         {"name": "tokenIn", "type": "address"},
         {"name": "tokenOut", "type": "address"},
         {"name": "amountIn", "type": "uint256"},
+        {"name": "minAmountOutLeg1", "type": "uint256"},
         {"name": "minProfit", "type": "uint256"},
         {"name": "deadline", "type": "uint256"},
     ],
@@ -334,8 +335,19 @@ def execute_live(plan: Dict[str, Any]) -> Dict[str, Any]:
         margin_usd = float(_cfg("LIVE_MIN_NET_PROFIT_USDT", 0.01))
         min_profit_raw = int((gas_cost_est_usd * float(_cfg("LIVE_GAS_SAFETY_MULT", 1.5)) + margin_usd) * 10 ** dec)
 
+        # minAmountOutLeg1: enforce strict fresh-quote-based slippage boundary on Leg 1
+        slippage_pct = float(_cfg("SLIPPAGE_PCT", 0.50))
+        slippage_bps = int(max(1, min(5000, round(slippage_pct * 100))))
+        base_dec = int(base_tok.get("decimals", 18))
+        leg1_expected_raw = int(plan.get("leg1_output_raw") or 0)
+        if leg1_expected_raw <= 0:
+            buy_price = float(plan.get("buy_price") or 0.0)
+            if buy_price > 0:
+                leg1_expected_raw = int((amount_in_f / buy_price) * (10 ** base_dec))
+        min_amount_out_leg1 = max(1, int((leg1_expected_raw * (10000 - slippage_bps)) // 10000))
+
         deadline = int(time.time()) + int(_cfg("LIVE_DEADLINE_SEC", 20))
-        params = (router_buy, router_sell, token_in, token_out, amount_in_raw, min_profit_raw, deadline)
+        params = (router_buy, router_sell, token_in, token_out, amount_in_raw, min_amount_out_leg1, min_profit_raw, deadline)
 
         arb = w3.eth.contract(address=contract_addr, abi=ARB_ABI)
         erc = w3.eth.contract(address=token_in, abi=ERC20_MIN_ABI)

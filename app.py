@@ -99,6 +99,7 @@ from database import (
     get_live_pnl_summary,
     delete_all_trades,
     record_treasury_withdrawal,
+    get_treasury_withdrawal_by_tx,
     get_total_withdrawn,
     get_treasury_withdrawals,
     get_withdrawable_profit,
@@ -903,13 +904,11 @@ def treasury_status_api():
 
         total_profit = get_total_profit(mode=mode)
         total_withdrawn = get_total_withdrawn(mode=mode)
+        withdrawable = get_withdrawable_profit(mode=mode)
 
         profit_source = "database"
         on_chain_bal = 0.0
-        if mode == "MOCK":
-            withdrawable = get_withdrawable_profit(mode="MOCK")
-            profit_source = "database"
-        else:
+        if mode != "MOCK":
             rpc_url = chain_info.get("rpc_url") or getattr(config, "RPC_URL", "")
             if contract_addr and rpc_url:
                 try:
@@ -923,18 +922,11 @@ def treasury_status_api():
                     token_addr = token_info.get("address", "")
                     decimals = int(token_info.get("decimals", 6 if quote_sym in ("USDC", "USDT") else 18))
                     if w3.is_connected() and token_addr:
-                        on_chain_bal = check_contract_balance(w3, contract_addr, token_addr, decimals)
-                        withdrawable = round(float(on_chain_bal), 4)
-                        profit_source = "contract_on_chain"
-                    else:
-                        withdrawable = get_withdrawable_profit(mode=mode)
-                        profit_source = "database"
+                        on_chain_bal = round(float(check_contract_balance(w3, contract_addr, token_addr, decimals)), 4)
+                        if on_chain_bal > 0:
+                            profit_source = "contract_on_chain"
                 except Exception:
-                    withdrawable = get_withdrawable_profit(mode=mode)
-                    profit_source = "database"
-            else:
-                withdrawable = get_withdrawable_profit(mode=mode)
-                profit_source = "database"
+                    pass
 
         withdrawals = get_treasury_withdrawals(limit=25, mode=mode)
         for w in withdrawals:
@@ -971,7 +963,7 @@ def treasury_status_api():
             "withdrawable_profit_source": profit_source,
             "profit_source": profit_source,
             "withdrawable_destination": withdrawable_destination,
-            "on_chain_balance": on_chain_bal if profit_source == "contract_on_chain" else 0.0,
+            "on_chain_balance": on_chain_bal,
             "buckets_label": "Accounting allocation (not on-chain balances)",
             "treasury_address": treasury_recipient,
             "trading_mode": mode,
@@ -1060,41 +1052,14 @@ def treasury_withdraw_api():
             }), 400
 
         # 4. Check available withdrawable profit
-        if mode == "MOCK" or is_simulation:
-            withdrawable = get_withdrawable_profit(mode="MOCK")
-            if amount > withdrawable:
-                return jsonify({
-                    "success": False,
-                    "status": "INSUFFICIENT_PROFIT",
-                    "message": f"Requested amount (${amount:.4f}) exceeds available withdrawable profit (${withdrawable:.4f})."
-                }), 400
-        else:
-            withdrawable = get_withdrawable_profit(mode="LIVE")
-            contract_check_addr = (
-                getattr(config, "TREASURY_CONTRACT_ADDRESS", "")
-                or getattr(config, "ARBITRAGE_CONTRACT_ADDRESS", "")
-            ).strip()
-            rpc_url = chain_info.get("rpc_url") or getattr(config, "RPC_URL", "")
-            if contract_check_addr and rpc_url:
-                try:
-                    from treasury_execution import check_contract_balance
-                    from web3 import Web3
-                    w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 5}))
-                    tokens_map = chain_info.get("tokens", {})
-                    token_info = tokens_map.get(token, {})
-                    token_addr = token_info.get("address", "")
-                    decimals = int(token_info.get("decimals", 6 if token in ("USDC", "USDT") else 18))
-                    if w3.is_connected() and token_addr:
-                        on_chain_bal = check_contract_balance(w3, contract_check_addr, token_addr, decimals)
-                        withdrawable = max(withdrawable, round(float(on_chain_bal), 4))
-                except Exception:
-                    pass
-            if amount > withdrawable:
-                return jsonify({
-                    "success": False,
-                    "status": "INSUFFICIENT_PROFIT",
-                    "message": f"Requested amount (${amount:.4f}) exceeds available withdrawable profit (${withdrawable:.4f})."
-                }), 400
+        target_mode = "MOCK" if (mode == "MOCK" or is_simulation) else "LIVE"
+        withdrawable = get_withdrawable_profit(mode=target_mode)
+        if amount > withdrawable:
+            return jsonify({
+                "success": False,
+                "status": "INSUFFICIENT_PROFIT",
+                "message": f"Requested amount (${amount:.4f}) exceeds available withdrawable profit (${withdrawable:.4f})."
+            }), 400
 
         # 5. Handle MOCK / Simulation Mode
         if mode == "MOCK" or is_simulation:
@@ -1138,6 +1103,21 @@ def treasury_withdraw_api():
                     "status": "INVALID_TX_HASH",
                     "message": "Invalid transaction hash. Must be a 66-character 0x-prefixed hex string."
                 }), 400
+
+            # Prevent duplicate accounting updates when the same transaction is processed more than once
+            existing_rec = get_treasury_withdrawal_by_tx(client_tx_hash)
+            if existing_rec and existing_rec.get("status") == "CONFIRMED":
+                return jsonify({
+                    "success": True,
+                    "status": "CONFIRMED",
+                    "message": f"Withdrawal transaction {client_tx_hash} is already confirmed.",
+                    "withdrawal": {
+                        **existing_rec,
+                        "explorer_tx_url": get_explorer_tx_url(existing_rec.get("chain_id", chain_id_val), client_tx_hash)
+                    },
+                    "total_withdrawn_usdt": get_total_withdrawn(mode="LIVE"),
+                    "withdrawable_profit_usdt": get_withdrawable_profit(mode="LIVE")
+                }), 200
             
             # Verify client-provided hash on-chain
             from dex_engine import rpc_call
@@ -1207,8 +1187,9 @@ def treasury_withdraw_api():
             or getattr(config, "ARBITRAGE_CONTRACT_ADDRESS", "")
         ).strip()
         private_key = (
-            getattr(config, "PRIVATE_KEY", "")
-            or os.environ.get("PRIVATE_KEY", "")
+            getattr(config, "PRIVATE_KEY", None)
+            if getattr(config, "PRIVATE_KEY", None) is not None
+            else os.environ.get("PRIVATE_KEY", "")
         ).strip()
 
         missing = []
@@ -1561,6 +1542,51 @@ def confirm_live_trade_api():
         gas_cost_usdt = round(gas_cost_eth * eth_price, 4)
         amount_in = float(req.get("amount_in", 1.0))
 
+        # Reject direct single-leg router swaps: only atomic contract transactions are valid arbitrage
+        receipt_to = str(receipt.get("to") or "").lower()
+        chain_routers = config.CHAIN_REGISTRY.get(target_chain_id, {}).get("routers", {})
+        known_routers = [r.lower() for r in chain_routers.values() if isinstance(r, str) and r]
+        if receipt_to and receipt_to in known_routers:
+            record_execution_event(
+                event_type="DIRECT_ROUTER_SWAP_REJECTED",
+                route=f"{req.get('buy_dex', 'Uniswap_V2')}->{req.get('sell_dex', 'SushiSwap_V2')}",
+                amount_in=amount_in,
+                net_profit=0.0,
+                status="REJECTED",
+                reason="Direct single-leg DEX router swap rejected: only atomic smart-contract arbitrage is allowed.",
+                tx_hash=tx_hash
+            )
+            return jsonify({
+                "success": False,
+                "status": "DIRECT_ROUTER_SWAP_REJECTED",
+                "message": (
+                    f"Transaction {tx_hash[:10]}... was sent directly to a DEX router ({receipt_to}). "
+                    "Direct single-leg swaps cannot be confirmed as arbitrage trades."
+                )
+            }), 400
+
+        # Validate recipient contract matches configured DexArbitrage address when configured
+        expected_contract = getattr(config, "ARBITRAGE_CONTRACT_ADDRESS", "").strip().lower()
+        if expected_contract and expected_contract != "0x0000000000000000000000000000000000000000":
+            if receipt_to != expected_contract:
+                record_execution_event(
+                    event_type="INVALID_RECIPIENT_CONTRACT",
+                    route=f"{req.get('buy_dex', 'Uniswap_V2')}->{req.get('sell_dex', 'SushiSwap_V2')}",
+                    amount_in=amount_in,
+                    net_profit=0.0,
+                    status="REJECTED",
+                    reason=f"Transaction recipient ({receipt_to}) does not match configured DexArbitrage contract ({expected_contract}).",
+                    tx_hash=tx_hash
+                )
+                return jsonify({
+                    "success": False,
+                    "status": "INVALID_RECIPIENT_CONTRACT",
+                    "message": (
+                        f"Transaction {tx_hash[:10]}... recipient ({receipt_to}) does not match "
+                        f"the configured DexArbitrage contract ({expected_contract})."
+                    )
+                }), 400
+
         # Accurately compute gross profit and verified net profit without double-deducting gas
         decoded_profit = None
         try:
@@ -1578,9 +1604,21 @@ def confirm_live_trade_api():
         except Exception:
             pass
 
+        # If an arbitrage contract is configured, enforce that receipt emitted ArbitrageExecuted
+        if getattr(config, "ARBITRAGE_CONTRACT_ADDRESS", "") and decoded_profit is None:
+            return jsonify({
+                "success": False,
+                "status": "UNVERIFIED_ARBITRAGE_RECEIPT",
+                "message": (
+                    f"Transaction {tx_hash[:10]}... confirmed on-chain, but no verified ArbitrageExecuted "
+                    "event was found from the configured DexArbitrage contract. Direct router swaps cannot "
+                    "be confirmed as arbitrage."
+                )
+            }), 400
+
         req_gross = req.get("gross_profit")
         req_expected_net = req.get("expected_profit", req.get("net_profit"))
-        
+
         if decoded_profit is not None:
             gross_profit = decoded_profit
         elif req_gross is not None and float(req_gross) > 0:

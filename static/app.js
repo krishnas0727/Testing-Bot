@@ -2841,6 +2841,12 @@ const CLIENT_ROUTER_V2_ABI = [
     "function getAmountsOut(uint amountIn, address[] calldata path) view returns (uint[] memory amounts)"
 ];
 
+const CLIENT_DEX_ARBITRAGE_ABI = [
+    "function executeArbitrage((address routerBuy, address routerSell, address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOutLeg1, uint256 minProfit, uint256 deadline) params) external returns (uint256 netProfit)",
+    "function simulateArbitrage((address routerBuy, address routerSell, address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOutLeg1, uint256 minProfit, uint256 deadline) params) external view returns (bool profitable, uint256 expectedProfit, uint256 leg1Output, uint256 leg2Output)",
+    "event ArbitrageExecuted(address indexed caller, address indexed routerBuy, address indexed routerSell, address tokenIn, address tokenOut, uint256 amountIn, uint256 finalBalance, uint256 netProfit, uint256 timestamp)"
+];
+
 async function preApproveTokens() {
     const provider = getMetaMaskProvider();
     if (!provider) {
@@ -4120,84 +4126,120 @@ async function executeMetaMaskOnChainTrade(options = {}) {
             }
         }
 
-        // Step 2: Check pair existence and query DEX Router for fresh on-chain quote
-        const factories = CLIENT_FACTORY_ADDRESSES[targetChainId] || {};
-        const factoryAddress = factories[routerName] || Object.values(factories)[0];
-        if (factoryAddress) {
+        // Step 2: Atomic DexArbitrage contract validation
+        if (!dexContractAddress || currentContractChainId !== targetChainId) {
             try {
-                const factoryContract = new ethers.Contract(factoryAddress, CLIENT_FACTORY_V2_ABI, activeSigner);
-                const pairAddr = await factoryContract.getPair(tokenInMeta.address, tokenOutMeta.address);
-                if (!pairAddr || pairAddr === "0x0000000000000000000000000000000000000000" || parseInt(pairAddr, 16) === 0) {
-                    const advice = (targetChainId === 11155111 && tokenSymbol !== "USDC") 
-                        ? ` On Sepolia testnet, the liquid DEX pool is WETH/USDC. Please switch trading pair to WETH/USDC.` 
-                        : "";
-                    renderExecutionResult({
-                        success: false,
-                        status: "PAIR_NOT_FOUND",
-                        message: `No liquidity pool found on ${routerName} for ${tokenSymbol}/WETH.${advice} Transaction was NOT sent to protect capital.`
-                    });
-                    showToast(`No pool for ${tokenSymbol}/WETH on ${routerName}.${advice}`, "error");
-                    return;
+                const cRes = await fetch("/api/contract");
+                const cData = await cRes.json();
+                if (cData && cData.contract_address) {
+                    dexContractAddress = cData.contract_address;
+                    dexContractABI = cData.abi;
+                    currentContractChainId = cData.chain_id;
                 }
-            } catch (factErr) {
-                console.warn("[MetaMask Trade] Factory pair check warning:", factErr);
+            } catch (cErr) {
+                console.warn("[MetaMask Trade] Contract query warning:", cErr);
             }
         }
 
-        const routerContract = new ethers.Contract(routerAddress, CLIENT_ROUTER_V2_ABI, activeSigner);
-        if (!routerContract.runner || typeof routerContract.runner.sendTransaction !== "function") {
-            throw new Error("Router contract runner does not support sending transactions. Wallet transaction aborted.");
-        }
-        const deadline = Math.floor(Date.now() / 1000) + 1200; // 20 min
-        const path = [tokenInMeta.address, tokenOutMeta.address];
+        const arbContractAddr = dexContractAddress || "";
+        const isArbContractConfigured = Boolean(
+            arbContractAddr &&
+            arbContractAddr.startsWith("0x") &&
+            arbContractAddr.length === 42 &&
+            !arbContractAddr.includes("...") &&
+            arbContractAddr.toLowerCase() !== "0x0000000000000000000000000000000000000000"
+        );
 
-        showExecModal("Querying Fresh Quote", `Fetching live on-chain quote from ${routerName}...`, 2);
-        let expectedOut = 0n;
-        try {
-            const amountsOut = await routerContract.getAmountsOut(parsedAmountIn, path);
-            if (!amountsOut || amountsOut.length < 2 || amountsOut[1] <= 0n) {
-                throw new Error("Zero output tokens returned by router for this input amount.");
-            }
-            expectedOut = amountsOut[1];
-        } catch (quoteErr) {
-            console.error("[MetaMask Trade] Quote query error:", quoteErr);
-            const rawMsg = quoteErr.reason || quoteErr.data?.message || quoteErr.shortMessage || quoteErr.message || "Execution reverted during quote query";
-            let friendlyMsg = rawMsg;
-            if (rawMsg.includes("INSUFFICIENT_LIQUIDITY") || rawMsg.includes("execution reverted") || rawMsg.includes("missing revert data")) {
-                friendlyMsg = `No active liquidity in pool for ${tokenSymbol}/WETH on ${routerName}.`;
-                if (targetChainId === 11155111 && tokenSymbol !== "USDC") {
-                    friendlyMsg += ` (On Sepolia testnet, please select WETH/USDC for active DEX liquidity).`;
-                }
-            }
+        if (!isArbContractConfigured) {
             renderExecutionResult({
                 success: false,
-                status: "QUOTE_FETCH_FAILED",
-                message: `Could not fetch fresh on-chain quote from ${routerName}: ${friendlyMsg} Transaction was NOT sent to protect capital.`
+                status: "REQUIRES_DEPLOYED_CONTRACT",
+                message: `Atomic DEX arbitrage requires a verified DexArbitrage smart contract deployed on ${targetChainInfo.name}. Direct single-leg router swaps are blocked to protect your capital and prevent unhedged exposure.`
             });
-            showToast(`Quote failed: ${friendlyMsg}`, "error");
+            showToast(`DexArbitrage contract not configured on ${targetChainInfo.name}.`, "warning");
             return;
         }
 
-        const slippageInput = parseFloat(document.getElementById("cfgSlippage")?.value || "0.5");
-        const slippageBps = BigInt(Math.max(1, Math.min(5000, Math.round(slippageInput * 100))));
-        const amountOutMin = (expectedOut * (10000n - slippageBps)) / 10000n;
+        const buyDexName = route.buy_dex || "Uniswap_V2";
+        const sellDexName = route.sell_dex || "SushiSwap_V2";
+        const routerBuyAddress = routers[buyDexName] || routerAddress;
+        const routerSellAddress = routers[sellDexName];
 
-        // Step 3: Verify and request ERC-20 token approval
-        showExecModal("Verifying Token Allowance", `Checking ${tokenSymbol} allowance for ${routerName}...`, 2);
+        if (!routerBuyAddress || !routerSellAddress || routerBuyAddress.toLowerCase() === routerSellAddress.toLowerCase()) {
+            renderExecutionResult({
+                success: false,
+                status: "ARBITRAGE_UNAVAILABLE",
+                message: "Arbitrage unavailable: fewer than two distinct valid DEX routers configured."
+            });
+            showToast("Arbitrage unavailable: invalid router configuration.", "warning");
+            return;
+        }
+
+        const contractAbi = (dexContractABI && Array.isArray(dexContractABI) && dexContractABI.length > 0) ? dexContractABI : CLIENT_DEX_ARBITRAGE_ABI;
+        const arbContract = new ethers.Contract(arbContractAddr, contractAbi, activeSigner);
+        if (!arbContract.runner || typeof arbContract.runner.sendTransaction !== "function") {
+            throw new Error("Contract runner does not support sending transactions. Wallet transaction aborted.");
+        }
+
+        const deadline = Math.floor(Date.now() / 1000) + 1200; // 20 min
+        const minProfitMargin = Number(verifyProfitData?.net_profit_usdt || 0.01);
+        const minProfitRaw = ethers.parseUnits(Math.max(0.0001, minProfitMargin).toFixed(tokenInMeta.decimals), tokenInMeta.decimals);
+
+        // Fetch fresh Leg 1 quote from router to calculate minAmountOutLeg1 with user's slippage tolerance
+        const routerBuyContract = new ethers.Contract(routerBuyAddress, CLIENT_ROUTER_V2_ABI, activeSigner);
+        const slippageVal = parseFloat(document.getElementById("cfgSlippage")?.value || "0.5");
+        const slippageBps = BigInt(Math.max(1, Math.min(5000, Math.round(slippageVal * 100)))); // default 50 bps (0.5%)
+
+        let expectedLeg1Out = 0n;
+        try {
+            const amountsOut = await routerBuyContract.getAmountsOut(parsedAmountIn, [tokenInMeta.address, tokenOutMeta.address]);
+            expectedLeg1Out = amountsOut[1];
+        } catch (quoteErr) {
+            console.warn("[MetaMask Trade] getAmountsOut quote failed, using route estimation:", quoteErr);
+            const estOutNum = (tradeAmt / (Number(route.buy_price) || 3000));
+            expectedLeg1Out = ethers.parseUnits(estOutNum.toFixed(tokenOutMeta.decimals), tokenOutMeta.decimals);
+        }
+
+        if (expectedLeg1Out <= 0n) {
+            renderExecutionResult({
+                success: false,
+                status: "ZERO_QUOTE",
+                message: "Failed to obtain valid DEX quote for Leg 1. Execution halted to protect capital."
+            });
+            showToast("Failed to fetch fresh DEX quote.", "error");
+            return;
+        }
+
+        // Apply slippage tolerance (e.g. 99.5% of expected output for 0.5% slippage)
+        const minAmountOutLeg1 = (expectedLeg1Out * (10000n - slippageBps)) / 10000n;
+
+        const arbParams = [
+            routerBuyAddress,
+            routerSellAddress,
+            tokenInMeta.address,
+            tokenOutMeta.address,
+            parsedAmountIn,
+            minAmountOutLeg1,
+            minProfitRaw,
+            deadline
+        ];
+
+        // Step 3: Verify and request ERC-20 token approval for DexArbitrage contract (NEVER direct to router)
+        showExecModal("Verifying Token Allowance", `Checking ${tokenSymbol} allowance for DexArbitrage contract...`, 2);
         const tokenContract = new ethers.Contract(tokenInMeta.address, CLIENT_ERC20_ABI, activeSigner);
-        const currentAllowance = await tokenContract.allowance(metamaskAccount, routerAddress);
+        const currentAllowance = await tokenContract.allowance(metamaskAccount, arbContractAddr);
 
         if (currentAllowance < parsedAmountIn) {
-            showExecModal("Approving Token Spending", `Please confirm Token Approval for ${routerName} in MetaMask...`, 2);
+            showExecModal("Approving Token Spending", `Please confirm Token Approval for DexArbitrage contract in MetaMask...`, 2);
             showToast(`Please approve ${tokenSymbol} spending in MetaMask...`, "info");
-            const approveTx = await tokenContract.approve(routerAddress, ethers.MaxUint256);
+            const approveTx = await tokenContract.approve(arbContractAddr, ethers.MaxUint256);
             showExecModal("Confirming Approval", `Approval submitted (${approveTx.hash.slice(0, 10)}...). Waiting for block confirmation...`, 2);
             const appReceipt = await approveTx.wait(1);
             if (!appReceipt || (appReceipt.status !== 1 && appReceipt.status !== "0x1")) {
                 renderExecutionResult({
                     success: false,
                     status: "APPROVAL_REVERTED",
-                    message: `Token approval transaction reverted on ${targetChainInfo.name}. Swap aborted.`
+                    message: `Token approval transaction reverted on ${targetChainInfo.name}. Arbitrage aborted.`
                 });
                 showToast("Token approval reverted on-chain.", "error");
                 return;
@@ -4206,45 +4248,35 @@ async function executeMetaMaskOnChainTrade(options = {}) {
             await fetchClientWalletBalances(metamaskAccount, targetChainId);
         }
 
-        // Step 4: Pre-flight Simulation & Gas Estimation
-        showExecModal("Simulating On-Chain Swap", `Simulating exact ${routerName} swap on ${targetChainInfo.name} before broadcast...`, 3);
-        let safeGasLimit = 350000n;
+        // Step 4: Pre-flight Simulation & Gas Estimation via DexArbitrage contract
+        showExecModal("Simulating Atomic Arbitrage", `Simulating atomic ${buyDexName} -> ${sellDexName} swap on ${targetChainInfo.name}...`, 3);
+        let safeGasLimit = 450000n;
         try {
-            const estimatedGas = await routerContract.swapExactTokensForTokens.estimateGas(
-                parsedAmountIn,
-                amountOutMin,
-                path,
-                metamaskAccount,
-                deadline
-            );
-            safeGasLimit = (estimatedGas * 125n) / 100n;
+            const estimatedGas = await arbContract.executeArbitrage.estimateGas(arbParams);
+            safeGasLimit = (estimatedGas * 130n) / 100n;
         } catch (simErr) {
-            console.error("[MetaMask Trade] Pre-flight simulation failed:", simErr);
-            const errMsg = simErr.reason || simErr.data?.message || simErr.shortMessage || simErr.message || "Transaction would revert on-chain";
+            console.error("[MetaMask Trade] Atomic simulation failed:", simErr);
+            const errMsg = simErr.reason || simErr.data?.message || simErr.shortMessage || simErr.message || "Atomic transaction would revert on-chain";
             renderExecutionResult({
                 success: false,
                 status: "SIMULATION_FAILED",
-                message: `Transaction pre-flight simulation failed: ${errMsg}. Capital was protected and no transaction was broadcasted.`
+                message: `Atomic arbitrage pre-flight simulation failed: ${errMsg}. Capital was protected and no transaction was broadcasted.`
             });
             showToast(`Simulation failed: ${errMsg}`, "error");
             return;
         }
 
-        // Step 5: Broadcast real transaction via MetaMask
-        showExecModal("Executing DEX Swap", `Submitting trade of $${tradeAmt.toFixed(4)} ${tokenSymbol} on ${routerName}... Confirm in MetaMask.`, 3);
-        showToast("Please confirm Swap transaction in MetaMask...", "info");
+        // Step 5: Broadcast atomic arbitrage transaction via MetaMask
+        showExecModal("Executing Atomic Arbitrage", `Submitting atomic trade of $${tradeAmt.toFixed(4)} ${tokenSymbol} (${buyDexName} -> ${sellDexName})... Confirm in MetaMask.`, 3);
+        showToast("Please confirm Atomic Arbitrage transaction in MetaMask...", "info");
 
-        const txResponse = await routerContract.swapExactTokensForTokens(
-            parsedAmountIn,
-            amountOutMin,
-            path,
-            metamaskAccount,
-            deadline,
+        const txResponse = await arbContract.executeArbitrage(
+            arbParams,
             { gasLimit: safeGasLimit }
         );
 
         // Step 6: Block Mining Receipt
-        showExecModal("Mining Transaction", `Swap broadcasted! Hash: ${txResponse.hash.slice(0, 10)}... Waiting for block receipt...`, 4);
+        showExecModal("Mining Transaction", `Arbitrage broadcasted! Hash: ${txResponse.hash.slice(0, 10)}... Waiting for block receipt...`, 4);
         showToast(`Transaction Broadcasted: ${txResponse.hash.slice(0, 10)}...`, "info");
         const receipt = await txResponse.wait(1);
 
@@ -4483,7 +4515,7 @@ async function refreshTreasuryStatus() {
                         return `
                             <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; border-bottom:1px solid rgba(255,255,255,0.05);">
                                 <div>
-                                    <span style="color:#34d399; font-weight:700;">-$${Number(w.amount).toFixed(4)} ${w.token || 'USDT'}</span>
+                                    <span style="color:var(--text-bright); font-weight:700;">$${Math.abs(Number(w.amount || 0)).toFixed(4)} ${w.token || 'USDT'}</span>
                                     <span style="color:var(--text-muted); font-size:10px; margin-left:6px;">➔ ${shortRecip}</span>
                                 </div>
                                 <div style="display:flex; align-items:center; gap:8px;">

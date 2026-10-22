@@ -181,6 +181,7 @@ DEX_ARBITRAGE_ABI = [
                     {"internalType": "address", "name": "tokenIn", "type": "address"},
                     {"internalType": "address", "name": "tokenOut", "type": "address"},
                     {"internalType": "uint256", "name": "amountIn", "type": "uint256"},
+                    {"internalType": "uint256", "name": "minAmountOutLeg1", "type": "uint256"},
                     {"internalType": "uint256", "name": "minProfit", "type": "uint256"},
                     {"internalType": "uint256", "name": "deadline", "type": "uint256"}
                 ],
@@ -203,6 +204,7 @@ DEX_ARBITRAGE_ABI = [
                     {"internalType": "address", "name": "tokenIn", "type": "address"},
                     {"internalType": "address", "name": "tokenOut", "type": "address"},
                     {"internalType": "uint256", "name": "amountIn", "type": "uint256"},
+                    {"internalType": "uint256", "name": "minAmountOutLeg1", "type": "uint256"},
                     {"internalType": "uint256", "name": "minProfit", "type": "uint256"},
                     {"internalType": "uint256", "name": "deadline", "type": "uint256"}
                 ],

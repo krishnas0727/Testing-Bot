@@ -347,7 +347,7 @@ class TestTruthfulTreasuryWithdrawal(unittest.TestCase):
         mock_submit.return_value = {
             "success": False,
             "status": "INSUFFICIENT_CONTRACT_BALANCE",
-            "message": "Contract token balance (5.0000 USDT) is less than requested withdrawal amount (40.0000 USDT)."
+            "message": "Contract token balance (0.0000 USDT) is less than requested withdrawal amount (40.0000 USDT)."
         }
 
         res = self.client.post(
@@ -367,6 +367,173 @@ class TestTruthfulTreasuryWithdrawal(unittest.TestCase):
         self.assertIn("Contract token balance", data["message"])
         # No withdrawal recorded, total withdrawn remains 0
         self.assertEqual(database.get_total_withdrawn(mode="LIVE"), 0.0)
+
+    def test_full_and_partial_simulated_withdrawal_accounting(self):
+        """Verify full & partial withdrawal accounting in MOCK mode (exact user-reported bug scenario)."""
+        # Seed exact user scenario: $0.0359 realized profit
+        database.save_trade({
+            "tx_hash": "0x" + "d" * 64,
+            "chain_id": 11155111,
+            "buy_dex": "Uniswap_V2",
+            "sell_dex": "SushiSwap_V2",
+            "token_pair": "WETH/USDT",
+            "amount_in": 10.0,
+            "amount_out": 10.0359,
+            "gross_profit": 0.0359,
+            "net_profit": 0.0359,
+            "status": "CONFIRMED",
+            "mode": "MOCK"
+        })
+
+        # Initial state before any withdrawal
+        self.assertEqual(database.get_total_profit(mode="MOCK"), 0.0359)
+        self.assertEqual(database.get_total_withdrawn(mode="MOCK"), 0.0)
+        self.assertEqual(database.get_withdrawable_profit(mode="MOCK"), 0.0359)
+
+        # 1. Partial withdrawal of $0.0100
+        res1 = self.client.post(
+            "/api/treasury/withdraw",
+            headers=self.headers,
+            json={
+                "amount": 0.0100,
+                "token": "USDT",
+                "recipient_address": self.SAMPLE_RECIPIENT,
+                "simulation": True
+            }
+        )
+        self.assertEqual(res1.status_code, 200)
+        data1 = res1.get_json()
+        self.assertTrue(data1["success"])
+        self.assertEqual(data1["status"], "SIMULATED")
+        self.assertEqual(data1["total_withdrawn_usdt"], 0.0100)
+        self.assertEqual(data1["withdrawable_profit_usdt"], 0.0259)
+
+        # Verify DB directly
+        self.assertEqual(database.get_total_withdrawn(mode="MOCK"), 0.0100)
+        self.assertEqual(database.get_withdrawable_profit(mode="MOCK"), 0.0259)
+
+        # 2. Second withdrawal of remaining $0.0259 (Full withdrawal)
+        res2 = self.client.post(
+            "/api/treasury/withdraw",
+            headers=self.headers,
+            json={
+                "amount": 0.0259,
+                "token": "USDT",
+                "recipient_address": self.SAMPLE_RECIPIENT,
+                "simulation": True
+            }
+        )
+        self.assertEqual(res2.status_code, 200)
+        data2 = res2.get_json()
+        self.assertEqual(data2["total_withdrawn_usdt"], 0.0359)
+        self.assertEqual(data2["withdrawable_profit_usdt"], 0.0)
+
+        # Direct DB check: exactly 0.0 remaining
+        self.assertEqual(database.get_total_withdrawn(mode="MOCK"), 0.0359)
+        self.assertEqual(database.get_withdrawable_profit(mode="MOCK"), 0.0)
+
+        # 3. Third withdrawal attempt when balance is 0.0 must be rejected
+        res3 = self.client.post(
+            "/api/treasury/withdraw",
+            headers=self.headers,
+            json={
+                "amount": 0.0050,
+                "token": "USDT",
+                "recipient_address": self.SAMPLE_RECIPIENT,
+                "simulation": True
+            }
+        )
+        self.assertEqual(res3.status_code, 400)
+        self.assertEqual(res3.get_json()["status"], "INSUFFICIENT_PROFIT")
+
+        # 4. Invariant: LIVE accounting must remain completely untouched (0.0)
+        self.assertEqual(database.get_total_withdrawn(mode="LIVE"), 0.0)
+        self.assertEqual(database.get_withdrawable_profit(mode="LIVE"), 0.0)
+
+    @patch("dex_engine.rpc_call")
+    def test_duplicate_confirmation_is_idempotent_and_never_double_deducts(self, mock_rpc):
+        """Requirement 7: Prevent duplicate accounting when the same tx confirmation is received more than once."""
+        self._seed_live_profit(50.0)
+        test_tx_hash = "0x" + "7" * 64
+        mock_rpc.return_value = {"status": "0x1", "blockNumber": "0x1234"}
+
+        payload = {
+            "amount": 15.0,
+            "token": "USDT",
+            "recipient_address": self.SAMPLE_RECIPIENT,
+            "tx_hash": test_tx_hash,
+            "chain_id": 11155111
+        }
+
+        # 1. First submission: succeeds and records withdrawal
+        res1 = self.client.post("/api/treasury/withdraw", headers=self.headers, json=payload)
+        self.assertEqual(res1.status_code, 200)
+        data1 = res1.get_json()
+        self.assertTrue(data1["success"])
+        self.assertEqual(data1["status"], "CONFIRMED")
+        self.assertEqual(data1["total_withdrawn_usdt"], 15.0)
+        self.assertEqual(data1["withdrawable_profit_usdt"], 35.0)
+
+        # 2. Second submission with the EXACT SAME tx_hash: must be idempotent
+        res2 = self.client.post("/api/treasury/withdraw", headers=self.headers, json=payload)
+        self.assertEqual(res2.status_code, 200)
+        data2 = res2.get_json()
+        self.assertTrue(data2["success"])
+        self.assertEqual(data2["status"], "CONFIRMED")
+        # Crucial: Total withdrawn must NOT be doubled to 30.0! Must remain 15.0!
+        self.assertEqual(data2["total_withdrawn_usdt"], 15.0)
+        self.assertEqual(data2["withdrawable_profit_usdt"], 35.0)
+
+        # Verify DB has exactly ONE record for this hash
+        conn = database.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM treasury_withdrawals WHERE tx_hash = ?", (test_tx_hash,))
+        count = cursor.fetchone()[0]
+        conn.close()
+        self.assertEqual(count, 1)
+
+    @patch("dex_engine.rpc_call")
+    def test_pending_transaction_does_not_deduct_withdrawable_profit(self, mock_rpc):
+        """Requirement 4: Pending transactions must return 202 and never deduct from withdrawable profit."""
+        self._seed_live_profit(50.0)
+        pending_tx_hash = "0x" + "8" * 64
+        mock_rpc.return_value = None  # None indicates pending (no receipt mined yet)
+
+        res = self.client.post(
+            "/api/treasury/withdraw",
+            headers=self.headers,
+            json={
+                "amount": 20.0,
+                "token": "USDT",
+                "recipient_address": self.SAMPLE_RECIPIENT,
+                "tx_hash": pending_tx_hash,
+                "chain_id": 11155111
+            }
+        )
+        self.assertEqual(res.status_code, 202)
+        data = res.get_json()
+        self.assertFalse(data["success"])
+        self.assertTrue(data.get("pending", False))
+        self.assertEqual(data["status"], "PENDING")
+
+        # Must NOT deduct from withdrawable profit
+        self.assertEqual(database.get_total_withdrawn(mode="LIVE"), 0.0)
+        self.assertEqual(database.get_withdrawable_profit(mode="LIVE"), 50.0)
+
+    def test_zero_on_chain_balance_reporting_and_separation(self):
+        """Requirement 8: Keep on-chain balance separate and accurately report 0.0 when contract has no tokens."""
+        self._seed_live_profit(25.0)
+
+        # Call treasury status in LIVE mode
+        res = self.client.get("/api/treasury/status?mode=LIVE")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["total_profit_usdt"], 25.0)
+        self.assertEqual(data["total_withdrawn_usdt"], 0.0)
+        self.assertEqual(data["withdrawable_profit_usdt"], 25.0)
+        # On-chain balance is 0.0
+        self.assertEqual(data["on_chain_balance"], 0.0)
 
 
 if __name__ == "__main__":

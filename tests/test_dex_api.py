@@ -364,6 +364,97 @@ class DEXApiTests(unittest.TestCase):
             self.assertEqual(data["trade"]["status"], "CONFIRMED")
             self.assertGreater(data["trade"]["gas_used"], 0)
 
+    def test_confirm_live_trade_rejects_direct_router_swap(self):
+        """Task 3: Direct single-leg DEX router swaps cannot be confirmed as arbitrage trades."""
+        from unittest.mock import patch
+        valid_hash = "0x" + "d" * 64
+        # 'to' points directly to Uniswap V2 router on Base (0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24)
+        mock_receipt = {
+            "status": "0x1",
+            "gasUsed": "0x249f0",
+            "effectiveGasPrice": "0x3b9aca00",
+            "to": "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24"
+        }
+        with patch("dex_engine.rpc_call", return_value=mock_receipt):
+            res = self.client.post("/api/trade/confirm-live", json={
+                "tx_hash": valid_hash,
+                "chain_id": 8453,
+                "buy_dex": "Uniswap_V2",
+                "sell_dex": "SushiSwap_V2",
+                "token_pair": "WETH/USDC",
+                "amount_in": 10.0,
+                "expected_profit": 0.50,
+                "gross_profit": 0.60
+            })
+            self.assertEqual(res.status_code, 400)
+            data = res.get_json()
+            self.assertFalse(data["success"])
+            self.assertEqual(data["status"], "DIRECT_ROUTER_SWAP_REJECTED")
+            self.assertIn("DEX router", data["message"])
+
+    def test_confirm_live_trade_requires_contract_event_when_contract_configured(self):
+        """Task 3: Enforce that receipt emitted ArbitrageExecuted when ARBITRAGE_CONTRACT_ADDRESS is configured."""
+        from unittest.mock import patch
+        valid_hash = "0x" + "e" * 64
+        mock_receipt = {
+            "status": "0x1",
+            "gasUsed": "0x249f0",
+            "effectiveGasPrice": "0x3b9aca00",
+            "to": "0x1234567890123456789012345678901234567890"
+        }
+        orig_addr = getattr(config, "ARBITRAGE_CONTRACT_ADDRESS", "")
+        try:
+            config.ARBITRAGE_CONTRACT_ADDRESS = "0x1234567890123456789012345678901234567890"
+            with patch("dex_engine.rpc_call", return_value=mock_receipt):
+                res = self.client.post("/api/trade/confirm-live", json={
+                    "tx_hash": valid_hash,
+                    "chain_id": 8453,
+                    "buy_dex": "Uniswap_V2",
+                    "sell_dex": "SushiSwap_V2",
+                    "token_pair": "WETH/USDC",
+                    "amount_in": 10.0,
+                    "expected_profit": 0.50,
+                    "gross_profit": 0.60
+                })
+                self.assertEqual(res.status_code, 400)
+                data = res.get_json()
+                self.assertFalse(data["success"])
+                self.assertEqual(data["status"], "UNVERIFIED_ARBITRAGE_RECEIPT")
+        finally:
+            config.ARBITRAGE_CONTRACT_ADDRESS = orig_addr
+
+    def test_confirm_live_trade_rejects_mismatched_recipient_contract(self):
+        """Enforce that receipt.to must match ARBITRAGE_CONTRACT_ADDRESS when configured."""
+        from unittest.mock import patch
+        valid_hash = "0x" + "f" * 64
+        mock_receipt = {
+            "status": "0x1",
+            "gasUsed": "0x249f0",
+            "effectiveGasPrice": "0x3b9aca00",
+            "to": "0x9999999999999999999999999999999999999999"
+        }
+        orig_addr = getattr(config, "ARBITRAGE_CONTRACT_ADDRESS", "")
+        try:
+            config.ARBITRAGE_CONTRACT_ADDRESS = "0x1234567890123456789012345678901234567890"
+            with patch("dex_engine.rpc_call", return_value=mock_receipt):
+                res = self.client.post("/api/trade/confirm-live", json={
+                    "tx_hash": valid_hash,
+                    "chain_id": 8453,
+                    "buy_dex": "Uniswap_V2",
+                    "sell_dex": "SushiSwap_V2",
+                    "token_pair": "WETH/USDC",
+                    "amount_in": 10.0,
+                    "expected_profit": 0.50,
+                    "gross_profit": 0.60
+                })
+                self.assertEqual(res.status_code, 400)
+                data = res.get_json()
+                self.assertFalse(data["success"])
+                self.assertEqual(data["status"], "INVALID_RECIPIENT_CONTRACT")
+                self.assertIn("does not match", data["message"])
+        finally:
+            config.ARBITRAGE_CONTRACT_ADDRESS = orig_addr
+
     def test_settings_private_key_handling(self):
         """Verify saving and clearing private_key in /api/settings."""
         test_pk = "0x" + "1" * 64

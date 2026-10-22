@@ -593,19 +593,51 @@ def record_treasury_withdrawal(data: Dict[str, Any]) -> int:
     Phase 5 Safety Requirement:
     - Never mark as CONFIRMED without a verified 66-character EVM transaction hash.
     - Explicitly rejects fake/invented hashes (such as 0xtreasury_...).
+    - Enforces positive withdrawal amount.
+    - Idempotent: prevents duplicate records and double accounting for the same tx_hash.
     """
     status = str(data.get("status", "CONFIRMED")).upper().strip()
     tx_hash = str(data.get("tx_hash", "")).strip()
+    mode = str(data.get("mode", "LIVE")).upper().strip()
+    raw_amount = data.get("amount", 0.0)
+    try:
+        amount = abs(float(raw_amount))
+    except (TypeError, ValueError):
+        raise ValueError(f"Invalid withdrawal amount: {raw_amount}")
+
+    if amount <= 0.0:
+        raise ValueError("Withdrawal amount must be greater than 0.")
 
     if status == "CONFIRMED":
-        if not tx_hash or tx_hash.startswith("0xtreasury_") or len(tx_hash) != 66 or not tx_hash.startswith("0x"):
-            raise ValueError(
-                f"Cannot record withdrawal as CONFIRMED without a verified 66-character EVM transaction hash (got: '{tx_hash}')"
-            )
+        if mode == "LIVE":
+            if not tx_hash or tx_hash.startswith("0xtreasury_") or len(tx_hash) != 66 or not tx_hash.startswith("0x"):
+                raise ValueError(
+                    f"Cannot record withdrawal as CONFIRMED without a verified 66-character EVM transaction hash (got: '{tx_hash}')"
+                )
 
     create_database()
     conn = get_connection()
     cursor = conn.cursor()
+
+    # Idempotency check: prevent duplicate records for the same transaction hash
+    if tx_hash:
+        cursor.execute("SELECT id, status, amount FROM treasury_withdrawals WHERE tx_hash = ?", (tx_hash,))
+        existing = cursor.fetchone()
+        if existing:
+            wid = existing["id"]
+            if existing["status"] == "CONFIRMED":
+                conn.close()
+                return wid
+            if status == "CONFIRMED":
+                cursor.execute("""
+                    UPDATE treasury_withdrawals
+                    SET status = 'CONFIRMED', notes = ?, amount = ?
+                    WHERE id = ?
+                """, (data.get("notes", ""), amount, wid))
+                conn.commit()
+                conn.close()
+                return wid
+
     cursor.execute("""
         INSERT INTO treasury_withdrawals (
             tx_hash, chain_id, token, amount, recipient_address, status, mode, notes, created_at
@@ -614,10 +646,10 @@ def record_treasury_withdrawal(data: Dict[str, Any]) -> int:
         tx_hash,
         int(data.get("chain_id", 11155111)),
         data.get("token", "USDT"),
-        float(data.get("amount", 0.0)),
+        amount,
         data.get("recipient_address", ""),
         status,
-        data.get("mode", "LIVE"),
+        mode,
         data.get("notes", ""),
         data.get("created_at") or datetime.now().astimezone().isoformat()
     ))
@@ -627,19 +659,44 @@ def record_treasury_withdrawal(data: Dict[str, Any]) -> int:
     return wid
 
 
-def get_total_withdrawn(mode: Optional[str] = None, token: Optional[str] = None) -> float:
-    """Calculate total profit withdrawn to date."""
+def get_treasury_withdrawal_by_tx(tx_hash: str) -> Optional[Dict[str, Any]]:
+    """Retrieve existing withdrawal record by transaction hash."""
+    if not tx_hash:
+        return None
     create_database()
     conn = get_connection()
     cursor = conn.cursor()
-    query = "SELECT COALESCE(SUM(amount), 0.0) FROM treasury_withdrawals WHERE status = 'CONFIRMED'"
+    cursor.execute("SELECT * FROM treasury_withdrawals WHERE tx_hash = ? ORDER BY id DESC LIMIT 1", (tx_hash,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_total_withdrawn(mode: Optional[str] = None, token: Optional[str] = None) -> float:
+    """Calculate total profit withdrawn to date.
+
+    - In MOCK mode: counts completed simulated withdrawals (SIMULATED or CONFIRMED).
+    - In LIVE mode: strictly counts real on-chain CONFIRMED withdrawals.
+    - Failed and pending withdrawals are NEVER included in total_withdrawn.
+    """
+    create_database()
+    conn = get_connection()
+    cursor = conn.cursor()
     params = []
-    if mode and mode != "ALL":
-        query += " AND mode = ?"
+    if mode == "MOCK":
+        query = "SELECT COALESCE(SUM(amount), 0.0) FROM treasury_withdrawals WHERE mode = 'MOCK' AND status IN ('CONFIRMED', 'SIMULATED')"
+    elif mode and mode != "ALL":
+        query = "SELECT COALESCE(SUM(amount), 0.0) FROM treasury_withdrawals WHERE mode = ? AND status = 'CONFIRMED'"
         params.append(mode)
+    elif mode == "ALL":
+        query = "SELECT COALESCE(SUM(amount), 0.0) FROM treasury_withdrawals WHERE status = 'CONFIRMED' OR (mode = 'MOCK' AND status = 'SIMULATED')"
+    else:
+        query = "SELECT COALESCE(SUM(amount), 0.0) FROM treasury_withdrawals WHERE mode = 'LIVE' AND status = 'CONFIRMED'"
+
     if token:
         query += " AND token = ?"
         params.append(token)
+
     cursor.execute(query, tuple(params))
     total = cursor.fetchone()[0]
     conn.close()

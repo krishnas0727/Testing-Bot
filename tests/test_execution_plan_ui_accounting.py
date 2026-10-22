@@ -33,6 +33,11 @@ class TestExecutionPlanUIAccounting(unittest.TestCase):
         config.TRADING_MODE = "MOCK"
         config.LIVE_TRADING_ARMED = False
         config.AUTO_TRADE_ENABLED = False
+        try:
+            from arbitrage import _MARKET_CACHE
+            _MARKET_CACHE.clear()
+        except Exception:
+            pass
 
     def tearDown(self):
         config.TRADING_MODE = self.orig_mode

@@ -103,6 +103,81 @@ class TestArbitrumNetworkConfiguration(unittest.TestCase):
             self.assertEqual(res["status"], "WALLET_MISMATCH")
             self.assertIn("WALLET_ADDRESS", res["message"])
 
+    def test_live_executor_empty_arbitrage_contract_address_blocks_execution(self):
+        """Verify execute_live blocks execution when ARBITRAGE_CONTRACT_ADDRESS is empty."""
+        config.set_active_chain(42161)
+        config.TRADING_MODE = "LIVE"
+        config.LIVE_TRADING_ARMED = True
+        config.EMERGENCY_STOP = False
+
+        plan = {
+            "chain_id": 42161,
+            "buy_dex": "Uniswap_V2",
+            "sell_dex": "SushiSwap_V2",
+            "amount_in": 5.0,
+            "token_pair": "WETH/USDT",
+        }
+
+        with patch("live_executor._cfg", side_effect=lambda k, d: "0x" + "1" * 64 if k == "PRIVATE_KEY" else ("" if k == "ARBITRAGE_CONTRACT_ADDRESS" else d)):
+            res = live_executor.execute_live(plan)
+            self.assertFalse(res["success"])
+            self.assertEqual(res["status"], "REQUIRES_DEPLOYED_CONTRACT")
+            self.assertIn("ARBITRAGE_CONTRACT_ADDRESS", res["message"])
+
+    def test_live_executor_empty_private_key_blocks_execution(self):
+        """Verify execute_live blocks execution when PRIVATE_KEY is empty."""
+        config.set_active_chain(42161)
+        config.TRADING_MODE = "LIVE"
+        config.LIVE_TRADING_ARMED = True
+        config.EMERGENCY_STOP = False
+
+        plan = {
+            "chain_id": 42161,
+            "buy_dex": "Uniswap_V2",
+            "sell_dex": "SushiSwap_V2",
+            "amount_in": 5.0,
+            "token_pair": "WETH/USDT",
+        }
+
+        with patch("live_executor._cfg", side_effect=lambda k, d: "" if k == "PRIVATE_KEY" else d):
+            res = live_executor.execute_live(plan)
+            self.assertFalse(res["success"])
+            self.assertEqual(res["status"], "LIVE_SIGNER_REQUIRED")
+            self.assertIn("PRIVATE_KEY", res["message"])
+
+    def test_real_market_spread_below_fee_threshold_blocks_profitability(self):
+        """Verify that when real on-chain spread is below 0.60% DEX fees (as on Arbitrum), profitability gate rejects trade."""
+        config.set_active_chain(42161)
+        config.TRADING_MODE = "LIVE"
+
+        # Realistic Arbitrum One reserves observed on-chain:
+        # Uni: 5.938 WETH / 14427.18 USDT (spot = 2429.67)
+        # Sushi: 7.327 WETH / 17790.59 USDT (spot = 2428.16)
+        buy_q = {
+            "chain_id": 42161,
+            "spot_price": 2429.67,
+            "base_reserve": 5.938,
+            "quote_reserve": 14427.18,
+        }
+        sell_q = {
+            "chain_id": 42161,
+            "spot_price": 2428.16,
+            "base_reserve": 7.327,
+            "quote_reserve": 17790.59,
+        }
+
+        # $5 test trade
+        result = arbitrage._calculate_net_profit(
+            trade_amt=5.0,
+            buy_q=buy_q,
+            sell_q=sell_q,
+            gas_price_gwei=0.02,
+            eth_price_usdt=2429.0,
+        )
+        self.assertFalse(result["is_profitable"])
+        self.assertLess(result["net_profit_usdt"], 0.0)
+        self.assertIn("INSUFFICIENT_PROFIT", result["skip_reason"])
+
 
 class TestTokenDecimalPrecision(unittest.TestCase):
     def test_to_raw_units_standard_decimals(self):

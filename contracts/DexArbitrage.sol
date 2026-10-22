@@ -55,6 +55,7 @@ contract DexArbitrage {
         address tokenIn;
         address tokenOut;
         uint256 amountIn;
+        uint256 minAmountOutLeg1;
         uint256 minProfit;
         uint256 deadline;
     }
@@ -81,8 +82,10 @@ contract DexArbitrage {
     error IdenticalRouters();
     error IdenticalTokens();
     error InsufficientAmountIn();
+    error InsufficientAmountOutLeg1();
     error UnprofitableArbitrage(uint256 finalAmount, uint256 requiredAmount);
     error TransferFailed();
+    error ZeroAddress();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert Unauthorized();
@@ -111,26 +114,32 @@ contract DexArbitrage {
 
     /**
      * @notice Execute atomic DEX-to-DEX arbitrage between two routers.
-     * @param params Struct with routers, tokens, amount, minProfit and deadline.
+     * @param params Struct with routers, tokens, amount, minAmountOutLeg1, minProfit and deadline.
      * @return netProfit Realized net profit in tokenIn.
      */
     function executeArbitrage(
         ArbitrageParams calldata params
     ) external onlyOwner whenNotPaused nonReentrant returns (uint256 netProfit) {
         if (block.timestamp > params.deadline) revert ExpiredDeadline();
+        if (params.routerBuy == address(0) || params.routerSell == address(0)) revert ZeroAddress();
         if (params.routerBuy == params.routerSell) revert IdenticalRouters();
+        if (params.tokenIn == address(0) || params.tokenOut == address(0)) revert ZeroAddress();
         if (params.tokenIn == params.tokenOut) revert IdenticalTokens();
         if (params.amountIn == 0) revert InsufficientAmountIn();
+        if (params.minAmountOutLeg1 == 0) revert InsufficientAmountOutLeg1();
 
         uint256 balanceBefore = _fundContract(params.tokenIn, params.amountIn);
 
-        // Leg 1: tokenIn -> tokenOut on routerBuy (real min-out check is the final profit check)
-        uint256 received = _swap(params.routerBuy, params.tokenIn, params.tokenOut, params.amountIn, params.deadline);
+        // Leg 1: tokenIn -> tokenOut on routerBuy with strict fresh-quote-based minimum output
+        uint256 received = _swap(params.routerBuy, params.tokenIn, params.tokenOut, params.amountIn, params.minAmountOutLeg1, params.deadline);
+
         // Leg 2: tokenOut -> tokenIn on routerSell
-        _swap(params.routerSell, params.tokenOut, params.tokenIn, received, params.deadline);
+        uint256 balanceCurrent = IERC20(params.tokenIn).balanceOf(address(this));
+        uint256 minRequired = balanceBefore + params.minProfit;
+        uint256 minLeg2Out = minRequired > balanceCurrent ? minRequired - balanceCurrent : 0;
+        _swap(params.routerSell, params.tokenOut, params.tokenIn, received, minLeg2Out, params.deadline);
 
         uint256 balanceAfter = IERC20(params.tokenIn).balanceOf(address(this));
-        uint256 minRequired = balanceBefore + params.minProfit;
 
         // Atomic safety check: revert everything if not profitable
         if (balanceAfter < minRequired) {
@@ -168,6 +177,7 @@ contract DexArbitrage {
         address tokenFrom,
         address tokenTo,
         uint256 amountIn,
+        uint256 amountOutMin,
         uint256 deadline
     ) internal returns (uint256 amountOut) {
         address[] memory path = new address[](2);
@@ -176,7 +186,7 @@ contract DexArbitrage {
         _safeApprove(IERC20(tokenFrom), router, amountIn);
         uint256[] memory amounts = IUniswapV2Router(router).swapExactTokensForTokens(
             amountIn,
-            0,
+            amountOutMin,
             path,
             address(this),
             deadline
@@ -196,12 +206,22 @@ contract DexArbitrage {
         uint256 leg1Output,
         uint256 leg2Output
     ) {
+        if (params.routerBuy == address(0) || params.routerSell == address(0)) revert ZeroAddress();
+        if (params.routerBuy == params.routerSell) revert IdenticalRouters();
+        if (params.tokenIn == address(0) || params.tokenOut == address(0)) revert ZeroAddress();
+        if (params.tokenIn == params.tokenOut) revert IdenticalTokens();
+        if (params.amountIn == 0) revert InsufficientAmountIn();
+
         address[] memory pathBuy = new address[](2);
         pathBuy[0] = params.tokenIn;
         pathBuy[1] = params.tokenOut;
 
         uint256[] memory outBuy = IUniswapV2Router(params.routerBuy).getAmountsOut(params.amountIn, pathBuy);
         leg1Output = outBuy[1];
+
+        if (params.minAmountOutLeg1 > 0 && leg1Output < params.minAmountOutLeg1) {
+            return (false, 0, leg1Output, 0);
+        }
 
         address[] memory pathSell = new address[](2);
         pathSell[0] = params.tokenOut;
