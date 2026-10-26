@@ -17,7 +17,9 @@ class DEXApiTests(unittest.TestCase):
         self.orig_min_profit = getattr(config, "MIN_PROFIT_USDT", 0.005)
         self.orig_slippage = getattr(config, "SLIPPAGE_PCT", 0.5)
         self.orig_mode = getattr(config, "TRADING_MODE", "MOCK")
+        self.orig_emergency = getattr(config, "EMERGENCY_STOP", False)
         config.TRADING_MODE = "MOCK"
+        config.EMERGENCY_STOP = False
         config.API_AUTH_TOKEN = self.test_token
         self.client.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {self.test_token}"
         config.WALLET_ADDRESS = ""
@@ -29,6 +31,7 @@ class DEXApiTests(unittest.TestCase):
         config.MIN_PROFIT_USDT = self.orig_min_profit
         config.SLIPPAGE_PCT = self.orig_slippage
         config.TRADING_MODE = self.orig_mode
+        config.EMERGENCY_STOP = self.orig_emergency
 
     def test_health_check(self):
         res = self.client.get("/api/health")
@@ -242,6 +245,12 @@ class DEXApiTests(unittest.TestCase):
         self.assertEqual(res_invalid.status_code, 400)
         self.assertFalse(res_invalid.get_json()["success"])
 
+        # Test non-integer chain rejection (returns 400 Bad Request, not 500)
+        res_non_int = self.client.post("/api/chain/switch", json={"chain_id": "not_an_int"})
+        self.assertEqual(res_non_int.status_code, 400)
+        self.assertFalse(res_non_int.get_json()["success"])
+        self.assertIn("integer", res_non_int.get_json()["message"].lower())
+
     def test_chains_api_endpoint(self):
         """Test GET /api/chains returns registry of supported chains."""
         res = self.client.get("/api/chains")
@@ -272,6 +281,11 @@ class DEXApiTests(unittest.TestCase):
         finally:
             config.SYMBOL = orig_symbol
 
+    def test_market_api_with_explicit_chain(self):
+        """Verify GET /api/market?chain_id=42161 handles explicit chain parameter."""
+        res = self.client.get("/api/market?chain_id=42161")
+        self.assertIn(res.status_code, (200, 503))
+
     def test_flashloan_calculate_endpoint(self):
         """Verify POST /api/flashloan/calculate returns Aave V3 simulation."""
         res = self.client.post("/api/flashloan/calculate", json={"amount": 10000.0})
@@ -282,6 +296,15 @@ class DEXApiTests(unittest.TestCase):
         self.assertIn("flashloan_fee_usd", data)
         self.assertIn("net_profit_usd", data)
         self.assertEqual(data["fee_pct"], 0.05)
+
+        # Test invalid amounts return 400 Bad Request
+        res_neg = self.client.post("/api/flashloan/calculate", json={"amount": -500.0})
+        self.assertEqual(res_neg.status_code, 400)
+        self.assertFalse(res_neg.get_json()["success"])
+
+        res_str = self.client.post("/api/flashloan/calculate", json={"amount": "invalid"})
+        self.assertEqual(res_str.status_code, 400)
+        self.assertFalse(res_str.get_json()["success"])
 
     def test_trades_export_csv_and_json(self):
         """Verify GET /api/trades/export exports both CSV and JSON formats."""

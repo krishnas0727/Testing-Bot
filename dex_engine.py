@@ -275,16 +275,29 @@ def get_pair_address(dex_name: str, token_a_sym: str, token_b_sym: str) -> Optio
     """Resolve pair contract address from known registry or Factory contract."""
     # Check precomputed cache for Ethereum mainnet only
     if getattr(config, "CHAIN_ID", 8453) == 1:
-        pair = KNOWN_PAIRS.get(dex_name, {}).get((token_a_sym, token_b_sym))
-        if not pair:
-            pair = KNOWN_PAIRS.get(dex_name, {}).get((token_b_sym, token_a_sym))
-        if pair:
-            return pair
+        target_dict = KNOWN_PAIRS.get(dex_name)
+        if not target_dict:
+            d_clean = dex_name.lower().replace("_", "").replace("v2", "").replace("v3", "")
+            for k, v in KNOWN_PAIRS.items():
+                k_clean = k.lower().replace("_", "").replace("v2", "").replace("v3", "")
+                if k.lower() == dex_name.lower() or k_clean == d_clean:
+                    target_dict = v
+                    break
+        if target_dict:
+            pair = target_dict.get((token_a_sym, token_b_sym)) or target_dict.get((token_b_sym, token_a_sym))
+            if pair:
+                return pair
 
     factory = config.DEX_FACTORIES.get(dex_name)
     if not factory:
+        d_clean = dex_name.lower().replace("_", "").replace("v2", "").replace("v3", "")
         for k, v in config.DEX_FACTORIES.items():
-            if k.lower() == dex_name.lower() or k.lower().replace("_", "") == dex_name.lower().replace("_", ""):
+            k_clean = k.lower().replace("_", "").replace("v2", "").replace("v3", "")
+            if (
+                k.lower() == dex_name.lower()
+                or k.lower().replace("_", "") == dex_name.lower().replace("_", "")
+                or k_clean == d_clean
+            ):
                 factory = v
                 break
     token_a = config.TOKEN_REGISTRY.get(token_a_sym, {}).get("address")

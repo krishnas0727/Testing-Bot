@@ -559,12 +559,15 @@ def market_api():
         # Synchronize client passed address and chain_id across all workers before analyzing market
         client_addr = (request.args.get("address") or "").strip()
         client_chain_id = request.args.get("chain_id")
+        target_cid = None
         if client_chain_id:
             try:
                 cid = int(client_chain_id)
-                if cid in config.CHAIN_REGISTRY and cid != config.CHAIN_ID:
-                    config.set_active_chain(cid)
-                    save_bot_setting("chain_id", cid)
+                if cid in config.CHAIN_REGISTRY:
+                    target_cid = cid
+                    if cid != config.CHAIN_ID:
+                        config.set_active_chain(cid)
+                        save_bot_setting("chain_id", cid)
             except (ValueError, TypeError):
                 pass
 
@@ -581,7 +584,7 @@ def market_api():
             except (ValueError, TypeError):
                 parsed_amount = None
 
-        market = analyze_market(custom_amount=parsed_amount)
+        market = analyze_market(custom_amount=parsed_amount, chain_id=target_cid)
         if not market:
             return jsonify({
                 "success": False,
@@ -597,7 +600,7 @@ def market_api():
         # Calculate live wallet equity
         prices = market.get("prices", {})
         avg_eth_price = sum(prices.values()) / len(prices) if prices else 3000.0
-        wallet = get_wallet_balances(avg_eth_price, wallet_address=client_addr or None)
+        wallet = get_wallet_balances(avg_eth_price, wallet_address=client_addr or None, chain_id=target_cid)
 
         # Gating rules:
         # If wallet is disconnected/zero balance or Emergency Stop is active, show 0 trades and 0 profit.
@@ -622,7 +625,7 @@ def market_api():
         latest_trade = get_latest_trade(mode=mode if mode == "LIVE" else None)
 
         # Truthfully evaluate engine status for selected chain & live market conditions
-        active_cid = getattr(config, "CHAIN_ID", 42161)
+        active_cid = target_cid or getattr(config, "CHAIN_ID", 42161)
         base_engine_status = get_engine_status(active_cid)
 
         if (
@@ -2055,7 +2058,14 @@ def switch_chain_api():
     """Switch active blockchain network on-the-fly (e.g. Base L2, Arbitrum, Polygon, Ethereum)."""
     try:
         req_data = request.get_json(silent=True) or {}
-        chain_id = int(req_data.get("chain_id", 11155111))
+        try:
+            chain_id = int(req_data.get("chain_id", 11155111))
+        except (ValueError, TypeError):
+            return jsonify({
+                "success": False,
+                "message": "Invalid chain ID. Must be an integer."
+            }), 400
+
         if chain_id not in config.CHAIN_REGISTRY:
             return jsonify({
                 "success": False,
@@ -2358,7 +2368,13 @@ def flashloan_calculate_api():
     """Calculate potential profits, protocol fee, gas, and price impact for Aave V3 flashloan on Base L2."""
     try:
         data = request.get_json(silent=True) or {}
-        amount = float(data.get("amount", 10000.0))
+        try:
+            amount = float(data.get("amount", 10000.0))
+            if amount <= 0:
+                raise ValueError
+        except (ValueError, TypeError):
+            return jsonify({"success": False, "message": "Invalid loan amount. Must be a positive number."}), 400
+
         pair = data.get("pair", getattr(config, "SYMBOL", "WETH/USDC"))
         provider = data.get("provider", "Aave V3 (Base L2)")
 
@@ -2376,6 +2392,9 @@ def flashloan_calculate_api():
             return jsonify({"success": False, "message": "Insufficient DEX liquidity quotes for calculation."}), 400
 
         prices = {k: v["spot_price"] for k, v in quotes.items() if v.get("spot_price", 0) > 0}
+        if len(prices) < 2:
+            return jsonify({"success": False, "message": "Insufficient DEX liquidity quotes for calculation."}), 400
+
         min_dex = min(prices, key=prices.get)
         max_dex = max(prices, key=prices.get)
         buy_p = prices[min_dex]
