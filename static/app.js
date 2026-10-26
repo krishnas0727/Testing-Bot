@@ -4400,6 +4400,11 @@ async function showTreasuryModal() {
     modal.style.display = "flex";
     modal.style.zIndex = "999999";
 
+    const amtInput = document.getElementById("treasuryAmountInput");
+    if (amtInput && (!amtInput.value || parseFloat(amtInput.value) <= 0)) {
+        amtInput.value = "";
+    }
+
     const recipientInput = document.getElementById("treasuryRecipientInput");
     if (recipientInput && !recipientInput.value && metamaskAccount) {
         recipientInput.value = metamaskAccount;
@@ -4440,13 +4445,24 @@ window.useConnectedWalletForTreasury = useOwnerWalletForTreasury;
 function setTreasuryPercent(pct) {
     const amtInput = document.getElementById("treasuryAmountInput");
     if (!amtInput) return;
-    const calcAmt = Math.max(0, Math.floor(treasuryWithdrawableAmount * pct * 10000) / 10000);
-    amtInput.value = calcAmt > 0 ? calcAmt : (treasuryWithdrawableAmount > 0 ? treasuryWithdrawableAmount : 0);
+    const available = Math.max(0, Number(treasuryWithdrawableAmount || 0));
+    if (available <= 0) {
+        amtInput.value = "0";
+        return;
+    }
+    const ratio = Math.max(0, Math.min(1.0, Number(pct || 0)));
+    let calcAmt = Math.floor(available * ratio * 10000) / 10000;
+    if (ratio >= 1.0) {
+        calcAmt = Math.min(calcAmt, available);
+    }
+    amtInput.value = calcAmt > 0 ? calcAmt.toFixed(4) : "0";
 }
 
 async function refreshTreasuryStatus() {
     try {
-        const res = await fetch("/api/treasury/status");
+        const currentMode = document.getElementById("headerTradingModeSelect")?.value || (latestMarketData?.trading_mode) || "";
+        const url = currentMode ? `/api/treasury/status?mode=${encodeURIComponent(currentMode)}` : "/api/treasury/status";
+        const res = await fetch(url);
         const json = await res.json();
         if (json.success) {
             treasuryWithdrawableAmount = Number(json.withdrawable_profit_usdt || 0);
@@ -4484,15 +4500,21 @@ async function refreshTreasuryStatus() {
                 setText("treasuryRevenue", `$${(totProf * 0.2).toFixed(4)}`);
             }
 
+            // Prevent previous withdrawal amount from being reused automatically
             const amtInput = document.getElementById("treasuryAmountInput");
-            if (amtInput && (!amtInput.value || parseFloat(amtInput.value) <= 0)) {
-                amtInput.value = treasuryWithdrawableAmount > 0 ? treasuryWithdrawableAmount : "";
+            if (amtInput && parseFloat(amtInput.value || "0") > treasuryWithdrawableAmount && treasuryWithdrawableAmount >= 0) {
+                if (treasuryWithdrawableAmount <= 0) {
+                    amtInput.value = "";
+                }
             }
 
             const recipientInput = document.getElementById("treasuryRecipientInput");
             if (recipientInput && !recipientInput.value) {
                 recipientInput.value = destAddr || metamaskAccount || "";
             }
+
+            const targetChainId = currentSelectedChainId || json.chain_id || 42161;
+            const chainInfo = (typeof SUPPORTED_CHAINS !== "undefined" && SUPPORTED_CHAINS[targetChainId]) ? SUPPORTED_CHAINS[targetChainId] : { explorer: "https://arbiscan.io" };
 
             const container = document.getElementById("treasuryHistoryContainer");
             if (container) {
@@ -4505,7 +4527,14 @@ async function refreshTreasuryStatus() {
                         const shortTx = w.tx_hash ? `${w.tx_hash.slice(0, 10)}...` : "--";
                         const explorerLink = w.explorer_tx_url || (w.tx_hash ? `${chainInfo.explorer}/tx/${w.tx_hash}` : "");
                         const isSim = (w.mode === "MOCK" || w.status === "SIMULATED");
-                        const badgeClass = isSim ? "badge-blue" : (w.status === "FAILED" ? "badge-red" : "badge-green");
+                        let badgeClass = "badge-green";
+                        if (isSim) {
+                            badgeClass = "badge-blue";
+                        } else if (w.status === "FAILED") {
+                            badgeClass = "badge-red";
+                        } else if (w.status === "PENDING") {
+                            badgeClass = "badge-yellow";
+                        }
                         const statusLabel = isSim ? "SIMULATED" : (w.status || "CONFIRMED");
                         const txLink = (w.tx_hash && !w.tx_hash.startsWith("0xtreasury_"))
                             ? `<a href="${explorerLink}" target="_blank" style="color:var(--accent-cyan); text-decoration:none;">${shortTx} 🔗</a>`
@@ -4577,6 +4606,7 @@ async function executeTreasuryWithdraw() {
     }
 
     try {
+        const currentMode = document.getElementById("headerTradingModeSelect")?.value || (latestMarketData?.trading_mode) || "MOCK";
         const res = await fetch("/api/treasury/withdraw", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -4584,11 +4614,16 @@ async function executeTreasuryWithdraw() {
                 amount: amount,
                 token: token,
                 recipient_address: recipient,
-                chain_id: currentSelectedChainId
+                chain_id: currentSelectedChainId,
+                mode: currentMode
             })
         });
         const json = await res.json();
         if (json.success) {
+            // Reset the withdrawal amount field ONLY AFTER confirmed success
+            if (amtInput) {
+                amtInput.value = "";
+            }
             showToast(`Profit withdrawal of $${amount.toFixed(4)} ${token} confirmed!`, "success");
             playTerminalSound("profitable");
             await refreshTreasuryStatus();

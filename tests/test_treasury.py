@@ -177,6 +177,118 @@ class TreasurySystemTests(unittest.TestCase):
         self.assertEqual(len(status_json["recent_withdrawals"]), 1)
         self.assertEqual(status_json["recent_withdrawals"][0]["amount"], 15.0)
 
+    @patch("dex_engine.rpc_call")
+    def test_subsequent_withdrawal_depletes_balance_and_prevents_reuse(self, mock_rpc):
+        """Verify remaining withdrawable balance updates correctly and prevents reused amounts exceeding balance."""
+        mock_rpc.return_value = {"status": "0x1"}
+        database.save_trade({
+            "tx_hash": "0x444",
+            "chain_id": 11155111,
+            "buy_dex": "Uniswap_V2",
+            "sell_dex": "SushiSwap_V2",
+            "token_pair": "WETH/USDC",
+            "amount_in": 100.0,
+            "amount_out": 120.0,
+            "gross_profit": 20.0,
+            "net_profit": 20.0,
+            "status": "CONFIRMED",
+            "mode": "LIVE"
+        })
+
+        recipient = "0x9cb6b2c1205a16ba947b783ed99569234decfcc0"
+        tx1 = "0x" + "1" * 64
+        # First withdrawal: $12.0
+        res1 = self.client.post("/api/treasury/withdraw", json={
+            "amount": 12.0,
+            "token": "USDC",
+            "recipient_address": recipient,
+            "chain_id": 11155111,
+            "tx_hash": tx1
+        })
+        self.assertEqual(res1.status_code, 200)
+        self.assertEqual(res1.get_json()["withdrawable_profit_usdt"], 8.0)
+        self.assertEqual(res1.get_json()["total_withdrawn_usdt"], 12.0)
+
+        # Attempting to reuse $12.0 must be rejected (exceeds $8.0 remaining)
+        tx2 = "0x" + "2" * 64
+        res2 = self.client.post("/api/treasury/withdraw", json={
+            "amount": 12.0,
+            "token": "USDC",
+            "recipient_address": recipient,
+            "chain_id": 11155111,
+            "tx_hash": tx2
+        })
+        self.assertEqual(res2.status_code, 400)
+        self.assertEqual(res2.get_json()["status"], "INSUFFICIENT_PROFIT")
+
+        # Second valid withdrawal: remaining $8.0
+        res3 = self.client.post("/api/treasury/withdraw", json={
+            "amount": 8.0,
+            "token": "USDC",
+            "recipient_address": recipient,
+            "chain_id": 11155111,
+            "tx_hash": tx2
+        })
+        self.assertEqual(res3.status_code, 200)
+        self.assertEqual(res3.get_json()["withdrawable_profit_usdt"], 0.0)
+        self.assertEqual(res3.get_json()["total_withdrawn_usdt"], 20.0)
+
+        # Third withdrawal: 0.0 remaining, all positive requests must fail
+        tx3 = "0x" + "3" * 64
+        res4 = self.client.post("/api/treasury/withdraw", json={
+            "amount": 1.0,
+            "token": "USDC",
+            "recipient_address": recipient,
+            "chain_id": 11155111,
+            "tx_hash": tx3
+        })
+        self.assertEqual(res4.status_code, 400)
+        self.assertEqual(res4.get_json()["status"], "INSUFFICIENT_PROFIT")
+
+    @patch("dex_engine.rpc_call")
+    def test_idempotent_duplicate_tx_hash_does_not_double_deduct(self, mock_rpc):
+        """A confirmed withdrawal must be deducted only once; re-submitting the same tx_hash is idempotent."""
+        mock_rpc.return_value = {"status": "0x1"}
+        database.save_trade({
+            "tx_hash": "0x555",
+            "chain_id": 11155111,
+            "buy_dex": "Uniswap_V2",
+            "sell_dex": "SushiSwap_V2",
+            "token_pair": "WETH/USDC",
+            "amount_in": 100.0,
+            "amount_out": 130.0,
+            "gross_profit": 30.0,
+            "net_profit": 30.0,
+            "status": "CONFIRMED",
+            "mode": "LIVE"
+        })
+
+        recipient = "0x9cb6b2c1205a16ba947b783ed99569234decfcc0"
+        shared_tx = "0x" + "e" * 64
+        # First confirmation
+        res1 = self.client.post("/api/treasury/withdraw", json={
+            "amount": 10.0,
+            "token": "USDC",
+            "recipient_address": recipient,
+            "chain_id": 11155111,
+            "tx_hash": shared_tx
+        })
+        self.assertEqual(res1.status_code, 200)
+        self.assertEqual(res1.get_json()["total_withdrawn_usdt"], 10.0)
+        self.assertEqual(res1.get_json()["withdrawable_profit_usdt"], 20.0)
+
+        # Re-submitting the identical confirmed transaction hash must not double-deduct
+        res2 = self.client.post("/api/treasury/withdraw", json={
+            "amount": 10.0,
+            "token": "USDC",
+            "recipient_address": recipient,
+            "chain_id": 11155111,
+            "tx_hash": shared_tx
+        })
+        self.assertEqual(res2.status_code, 200)
+        self.assertEqual(res2.get_json()["total_withdrawn_usdt"], 10.0)
+        self.assertEqual(res2.get_json()["withdrawable_profit_usdt"], 20.0)
+
 
 if __name__ == "__main__":
     unittest.main()
