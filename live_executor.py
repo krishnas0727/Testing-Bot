@@ -135,6 +135,9 @@ def _write_timing_log(entry: Dict[str, Any]) -> None:
 
 
 def _fail(status: str, message: str, timings: Optional[Dict[str, float]] = None, **extra) -> Dict[str, Any]:
+    pk = getattr(config, "PRIVATE_KEY", "").strip()
+    if pk and pk in message:
+        message = message.replace(pk, "[REDACTED_KEY]")
     out = {"success": False, "status": status, "message": message}
     if timings:
         out["timings_ms"] = {k: round(v, 1) for k, v in timings.items()}
@@ -217,21 +220,33 @@ def preflight(quote_sym: Optional[str] = None) -> Dict[str, Any]:
 
 def approve_quote_token(quote_sym: str, amount: Optional[float] = None) -> Dict[str, Any]:
     """One-time: let DexArbitrage pull `quote_sym` from the signer wallet (or just transfer tokens to the contract)."""
-    w3 = get_w3()
-    acct = Account.from_key(config.PRIVATE_KEY)
-    tok = config.TOKEN_REGISTRY[quote_sym]
-    spender = Web3.to_checksum_address(config.ARBITRAGE_CONTRACT_ADDRESS)
-    raw = int((amount if amount is not None else float(_cfg("MAX_TRADE_AMOUNT", 5.0)) * 2) * 10 ** tok["decimals"])
-    t = w3.eth.contract(address=Web3.to_checksum_address(tok["address"]), abi=ERC20_MIN_ABI)
-    tx = t.functions.approve(spender, raw).build_transaction({
-        "from": acct.address, "nonce": w3.eth.get_transaction_count(acct.address, "pending"),
-        "chainId": config.CHAIN_ID,
-        "maxFeePerGas": int(w3.eth.gas_price * 2), "maxPriorityFeePerGas": int(min(w3.eth.max_priority_fee, w3.eth.gas_price)),
-    })
-    signed = acct.sign_transaction(tx)
-    h = w3.eth.send_raw_transaction(signed.raw_transaction)
-    rc = w3.eth.wait_for_transaction_receipt(h, timeout=60, poll_latency=0.2)
-    return {"tx_hash": h.hex(), "status": rc["status"], "approved_raw": raw}
+    try:
+        pk = getattr(config, "PRIVATE_KEY", "").strip()
+        if not pk:
+            return {"success": False, "error": "No PRIVATE_KEY configured for token approval."}
+        contract_addr = getattr(config, "ARBITRAGE_CONTRACT_ADDRESS", "").strip()
+        if not contract_addr:
+            return {"success": False, "error": "ARBITRAGE_CONTRACT_ADDRESS is empty."}
+        tok = config.TOKEN_REGISTRY.get(quote_sym)
+        if not tok or not tok.get("address"):
+            return {"success": False, "error": f"Token {quote_sym} not registered on chain {getattr(config, 'CHAIN_ID', 'unknown')}."}
+
+        w3 = get_w3()
+        acct = Account.from_key(pk)
+        spender = Web3.to_checksum_address(contract_addr)
+        raw = int((amount if amount is not None else float(_cfg("MAX_TRADE_AMOUNT", 5.0)) * 2) * 10 ** tok["decimals"])
+        t = w3.eth.contract(address=Web3.to_checksum_address(tok["address"]), abi=ERC20_MIN_ABI)
+        tx = t.functions.approve(spender, raw).build_transaction({
+            "from": acct.address, "nonce": w3.eth.get_transaction_count(acct.address, "pending"),
+            "chainId": config.CHAIN_ID,
+            "maxFeePerGas": int(w3.eth.gas_price * 2), "maxPriorityFeePerGas": int(min(w3.eth.max_priority_fee, w3.eth.gas_price)),
+        })
+        signed = acct.sign_transaction(tx)
+        h = w3.eth.send_raw_transaction(signed.raw_transaction)
+        rc = w3.eth.wait_for_transaction_receipt(h, timeout=60, poll_latency=0.2)
+        return {"success": rc.get("status") == 1, "tx_hash": h.hex(), "status": rc.get("status", 0), "approved_raw": raw}
+    except Exception as exc:
+        return {"success": False, "error": f"{type(exc).__name__}: {str(exc)}"}
 
 
 # ----------------------------------------------------------------------------

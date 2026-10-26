@@ -2993,12 +2993,11 @@ async function fetchClientWalletBalances(account, chainIdNum) {
                         params: [{ to: info.address, data: balanceOfData }, "latest"]
                     });
                     if (hexRes && hexRes !== "0x") {
-                        const rawVal = BigInt(hexRes);
-                        const dec = info.decimals || 18;
-                        const divisor = BigInt(10 ** dec);
+                        const dec = (typeof info.decimals === "number" && info.decimals >= 0 && info.decimals <= 36) ? info.decimals : 18;
+                        const divisor = 10n ** BigInt(dec);
                         const whole = rawVal / divisor;
                         const rem = rawVal % divisor;
-                        const val = Number(whole) + Number(rem) / (10 ** dec);
+                        const val = Number(whole) + (Number(rem) / Number(divisor));
                         if (sym === "USDC") clientWalletBalances.usdc = val;
                         else if (sym === "USDbC") clientWalletBalances.usdbc = val;
                         else if (sym === "USDT") clientWalletBalances.usdt = val;

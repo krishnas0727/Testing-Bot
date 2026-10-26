@@ -997,7 +997,10 @@ def treasury_withdraw_api():
         token = (data.get("token") or "USDT").upper().strip()
         recipient = (data.get("recipient_address") or data.get("wallet_address") or "").strip()
         client_tx_hash = (data.get("tx_hash") or "").strip()
-        chain_id_val = int(data.get("chain_id") or getattr(config, "CHAIN_ID", 11155111))
+        try:
+            chain_id_val = int(data.get("chain_id") or getattr(config, "CHAIN_ID", 11155111))
+        except (ValueError, TypeError):
+            return jsonify({"success": False, "status": "INVALID_CHAIN_ID", "message": "Withdrawal chain_id must be a valid integer."}), 400
         chain_info = config.CHAIN_REGISTRY.get(chain_id_val, {})
         
         # Check trading mode / simulation flag
@@ -1887,159 +1890,163 @@ def current_settings() -> Dict[str, Any]:
 @app.route("/api/settings", methods=["GET", "POST"])
 @require_api_auth(methods=["POST"])
 def settings_api():
-    if request.method == "POST":
-        data = request.get_json(silent=True) or {}
-        # Security: never allow writing or modifying API tokens via settings
-        data.pop("api_auth_token", None)
-        data.pop("api_token", None)
-        data.pop("auth_token", None)
+    try:
+        if request.method == "POST":
+            data = request.get_json(silent=True) or {}
+            # Security: never allow writing or modifying API tokens via settings
+            data.pop("api_auth_token", None)
+            data.pop("api_token", None)
+            data.pop("auth_token", None)
 
-        if "auto_trade" in data:
-            val = bool(data["auto_trade"])
-            config.AUTO_TRADE_ENABLED = val
-            save_bot_setting("auto_trade", val)
+            if "auto_trade" in data:
+                val = bool(data["auto_trade"])
+                config.AUTO_TRADE_ENABLED = val
+                save_bot_setting("auto_trade", val)
 
-        if "trading_mode" in data and str(data["trading_mode"]).upper() in {"MOCK", "TESTNET", "LIVE"}:
-            val = str(data["trading_mode"]).upper()
-            prev_mode = getattr(config, "TRADING_MODE", "MOCK")
-            config.TRADING_MODE = val
-            save_bot_setting("trading_mode", val)
-            # Safety requirement: Changing or setting trading_mode must NEVER automatically arm live trading.
-            # If mode changes away from LIVE or is switched, ensure live_trading_armed remains disarmed.
-            if val != prev_mode or val != "LIVE":
-                config.LIVE_TRADING_ARMED = False
-                save_bot_setting("live_trading_armed", False)
+            if "trading_mode" in data and str(data["trading_mode"]).upper() in {"MOCK", "TESTNET", "LIVE"}:
+                val = str(data["trading_mode"]).upper()
+                prev_mode = getattr(config, "TRADING_MODE", "MOCK")
+                config.TRADING_MODE = val
+                save_bot_setting("trading_mode", val)
+                # Safety requirement: Changing or setting trading_mode must NEVER automatically arm live trading.
+                # If mode changes away from LIVE or is switched, ensure live_trading_armed remains disarmed.
+                if val != prev_mode or val != "LIVE":
+                    config.LIVE_TRADING_ARMED = False
+                    save_bot_setting("live_trading_armed", False)
 
-        # Disarming is permitted through settings, but arming requires explicit confirm_live=True
-        # or the dedicated /api/trade/arm endpoint.
-        if "live_trading_armed" in data:
-            val = bool(data["live_trading_armed"])
-            if not val:
-                config.LIVE_TRADING_ARMED = False
-                save_bot_setting("live_trading_armed", False)
-            elif val and (data.get("confirm_live") is True or data.get("confirm") is True):
-                if not emergency_stop_active():
-                    config.LIVE_TRADING_ARMED = True
-                    save_bot_setting("live_trading_armed", True)
+            # Disarming is permitted through settings, but arming requires explicit confirm_live=True
+            # or the dedicated /api/trade/arm endpoint.
+            if "live_trading_armed" in data:
+                val = bool(data["live_trading_armed"])
+                if not val:
+                    config.LIVE_TRADING_ARMED = False
+                    save_bot_setting("live_trading_armed", False)
+                elif val and (data.get("confirm_live") is True or data.get("confirm") is True):
+                    if not emergency_stop_active():
+                        config.LIVE_TRADING_ARMED = True
+                        save_bot_setting("live_trading_armed", True)
 
-        if "min_profit" in data:
-            try:
-                v = float(data["min_profit"])
-                if v >= 0:
-                    config.MIN_PROFIT_USDT = v
-                    save_bot_setting("min_profit", v)
-            except (TypeError, ValueError):
-                pass
+            if "min_profit" in data:
+                try:
+                    v = float(data["min_profit"])
+                    if v >= 0:
+                        config.MIN_PROFIT_USDT = v
+                        save_bot_setting("min_profit", v)
+                except (TypeError, ValueError):
+                    pass
 
-        if "min_profit_percent" in data:
-            try:
-                v = float(data["min_profit_percent"])
-                if v >= 0:
-                    config.MIN_PROFIT_PERCENT = v
-                    save_bot_setting("min_profit_percent", v)
-            except (TypeError, ValueError):
-                pass
+            if "min_profit_percent" in data:
+                try:
+                    v = float(data["min_profit_percent"])
+                    if v >= 0:
+                        config.MIN_PROFIT_PERCENT = v
+                        save_bot_setting("min_profit_percent", v)
+                except (TypeError, ValueError):
+                    pass
 
-        if "trade_amount" in data:
-            try:
-                v = float(data["trade_amount"])
-                if v > 0:
-                    config.DEFAULT_TRADE_AMOUNT = v
-                    save_bot_setting("trade_amount", v)
-            except (TypeError, ValueError):
-                pass
+            if "trade_amount" in data:
+                try:
+                    v = float(data["trade_amount"])
+                    if v > 0:
+                        config.DEFAULT_TRADE_AMOUNT = v
+                        save_bot_setting("trade_amount", v)
+                except (TypeError, ValueError):
+                    pass
 
-        if "slippage_pct" in data:
-            try:
-                v = float(data["slippage_pct"])
-                if v >= 0:
-                    config.SLIPPAGE_PCT = v
-                    save_bot_setting("slippage_pct", v)
-            except (TypeError, ValueError):
-                pass
+            if "slippage_pct" in data:
+                try:
+                    v = float(data["slippage_pct"])
+                    if v >= 0:
+                        config.SLIPPAGE_PCT = v
+                        save_bot_setting("slippage_pct", v)
+                except (TypeError, ValueError):
+                    pass
 
-        if "max_price_impact_pct" in data:
-            try:
-                v = float(data["max_price_impact_pct"])
-                if v > 0:
-                    config.MAX_PRICE_IMPACT_PCT = v
-                    save_bot_setting("max_price_impact_pct", v)
-            except (TypeError, ValueError):
-                pass
+            if "max_price_impact_pct" in data:
+                try:
+                    v = float(data["max_price_impact_pct"])
+                    if v > 0:
+                        config.MAX_PRICE_IMPACT_PCT = v
+                        save_bot_setting("max_price_impact_pct", v)
+                except (TypeError, ValueError):
+                    pass
 
-        if "rpc_url" in data and data["rpc_url"]:
-            config.RPC_URL = str(data["rpc_url"]).strip()
-            save_bot_setting("rpc_url", config.RPC_URL)
+            if "rpc_url" in data and data["rpc_url"]:
+                config.RPC_URL = str(data["rpc_url"]).strip()
+                save_bot_setting("rpc_url", config.RPC_URL)
 
-        if "wallet_address" in data:
-            config.WALLET_ADDRESS = str(data["wallet_address"]).strip()
-            save_bot_setting("wallet_address", config.WALLET_ADDRESS)
+            if "wallet_address" in data:
+                config.WALLET_ADDRESS = str(data["wallet_address"]).strip()
+                save_bot_setting("wallet_address", config.WALLET_ADDRESS)
 
-        if "private_key" in data:
-            pk = str(data.pop("private_key")).strip()
-            if pk:
-                if not pk.startswith("0x") and len(pk) == 64:
-                    pk = "0x" + pk
-                if len(pk) == 66:
-                    try:
-                        from eth_account import Account
-                        acct = Account.from_key(pk)
-                        # In-memory session key only — NEVER persisted to SQLite database
-                        config.PRIVATE_KEY = pk
-                        config.WALLET_ADDRESS = acct.address
-                        save_bot_setting("wallet_address", acct.address)
-                    except Exception:
+            if "private_key" in data:
+                pk = str(data.pop("private_key")).strip()
+                if pk:
+                    if not pk.startswith("0x") and len(pk) == 64:
+                        pk = "0x" + pk
+                    if len(pk) == 66:
+                        try:
+                            from eth_account import Account
+                            acct = Account.from_key(pk)
+                            # In-memory session key only — NEVER persisted to SQLite database
+                            config.PRIVATE_KEY = pk
+                            config.WALLET_ADDRESS = acct.address
+                            save_bot_setting("wallet_address", acct.address)
+                        except Exception:
+                            return jsonify({
+                                "success": False,
+                                "message": "Invalid private key format. Key must be a valid 64-character hex string."
+                            }), 400
+                    else:
                         return jsonify({
                             "success": False,
                             "message": "Invalid private key format. Key must be a valid 64-character hex string."
                         }), 400
-                else:
-                    return jsonify({
-                        "success": False,
-                        "message": "Invalid private key format. Key must be a valid 64-character hex string."
-                    }), 400
-            elif pk == "":
-                config.PRIVATE_KEY = ""
+                elif pk == "":
+                    config.PRIVATE_KEY = ""
+                    try:
+                        from database import scrub_legacy_private_keys
+                        scrub_legacy_private_keys()
+                    except Exception:
+                        pass
+
+            if "contract_address" in data:
+                config.ARBITRAGE_CONTRACT_ADDRESS = str(data["contract_address"]).strip()
+                save_bot_setting("contract_address", config.ARBITRAGE_CONTRACT_ADDRESS)
+
+            if "chain_id" in data:
                 try:
-                    from database import scrub_legacy_private_keys
-                    scrub_legacy_private_keys()
-                except Exception:
+                    cid = int(data["chain_id"])
+                    if cid in config.CHAIN_REGISTRY:
+                        config.set_active_chain(cid)
+                        save_bot_setting("chain_id", cid)
+                except (TypeError, ValueError):
                     pass
 
-        if "contract_address" in data:
-            config.ARBITRAGE_CONTRACT_ADDRESS = str(data["contract_address"]).strip()
-            save_bot_setting("contract_address", config.ARBITRAGE_CONTRACT_ADDRESS)
+            if "symbol" in data and data["symbol"]:
+                config.SYMBOL = str(data["symbol"]).strip()
 
-        if "chain_id" in data:
-            try:
-                cid = int(data["chain_id"])
-                if cid in config.CHAIN_REGISTRY:
-                    config.set_active_chain(cid)
-                    save_bot_setting("chain_id", cid)
-            except (TypeError, ValueError):
-                pass
+            last_execution_status = get_engine_status(config.CHAIN_ID)
 
-        if "symbol" in data and data["symbol"]:
-            config.SYMBOL = str(data["symbol"]).strip()
+            return jsonify({
+                "success": True,
+                "message": "DEX settings updated successfully.",
+                "settings": current_settings(),
+            })
 
-        last_execution_status = get_engine_status(config.CHAIN_ID)
+        settings = current_settings()
+        if not is_request_authenticated():
+            if settings.get("wallet_address"):
+                settings["wallet_address"] = mask_sensitive_address(settings["wallet_address"])
+            if settings.get("contract_address"):
+                settings["contract_address"] = mask_sensitive_address(settings["contract_address"])
+            if settings.get("rpc_url"):
+                settings["rpc_url"] = "[REDACTED]"
 
-        return jsonify({
-            "success": True,
-            "message": "DEX settings updated successfully.",
-            "settings": current_settings(),
-        })
-
-    settings = current_settings()
-    if not is_request_authenticated():
-        if settings.get("wallet_address"):
-            settings["wallet_address"] = mask_sensitive_address(settings["wallet_address"])
-        if settings.get("contract_address"):
-            settings["contract_address"] = mask_sensitive_address(settings["contract_address"])
-        if settings.get("rpc_url"):
-            settings["rpc_url"] = "[REDACTED]"
-
-    return jsonify({"success": True, "settings": settings})
+        return jsonify({"success": True, "settings": settings})
+    except Exception as exc:
+        print(f"[DEX App] Error in /api/settings: {exc}", flush=True)
+        return jsonify({"success": False, "message": "Failed to process settings request."}), 500
 
 
 @app.route("/api/chain/switch", methods=["POST"])

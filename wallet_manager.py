@@ -200,6 +200,15 @@ def get_wallet_balances(
     usdc_info = chain_tokens.get("USDC")
     usdbc_info = chain_tokens.get("USDbC")
 
+    def _safe_future_result(fut, default: float = 0.0) -> float:
+        if fut is None:
+            return default
+        try:
+            val = fut.result()
+            return float(val) if val is not None else default
+        except Exception:
+            return default
+
     # Fetch live on-chain balances in parallel across 5 threads (reduces latency by ~80%)
     with ThreadPoolExecutor(max_workers=5) as ex:
         f_eth = ex.submit(fetch_native_eth_balance, user_addr, rpc_url=chain_rpc)
@@ -208,11 +217,11 @@ def get_wallet_balances(
         f_usdc = ex.submit(fetch_token_balance_onchain, user_addr, usdc_info["address"], usdc_info["decimals"], rpc_url=chain_rpc) if usdc_info and usdc_info.get("address") else None
         f_usdbc = ex.submit(fetch_token_balance_onchain, user_addr, usdbc_info["address"], usdbc_info["decimals"], rpc_url=chain_rpc) if usdbc_info and usdbc_info.get("address") else None
 
-        eth_bal = f_eth.result() if f_eth else 0.0
-        weth_bal = f_weth.result() if f_weth else 0.0
-        usdt_bal = f_usdt.result() if f_usdt else 0.0
-        usdc_bal = f_usdc.result() if f_usdc else 0.0
-        usdbc_bal = f_usdbc.result() if f_usdbc else 0.0
+        eth_bal = _safe_future_result(f_eth, 0.0)
+        weth_bal = _safe_future_result(f_weth, 0.0)
+        usdt_bal = _safe_future_result(f_usdt, 0.0)
+        usdc_bal = _safe_future_result(f_usdc, 0.0)
+        usdbc_bal = _safe_future_result(f_usdbc, 0.0)
 
     effective_usdc = usdc_bal if usdc_bal > 0 else usdbc_bal
     stable_equity = usdt_bal + usdc_bal + usdbc_bal

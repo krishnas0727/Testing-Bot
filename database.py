@@ -216,6 +216,7 @@ def save_bot_setting(key: str, value: Any):
     k_lower = str(key).lower()
     if k_lower in ("private_key", "priv_key", "secret_key", "pk", "api_auth_token", "api_token", "auth_token"):
         return
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -227,18 +228,23 @@ def save_bot_setting(key: str, value: Any):
                 updated_at = CURRENT_TIMESTAMP
         """, (str(key), json.dumps(value)))
         conn.commit()
-        conn.close()
     except Exception as e:
         print(f"⚠️ Error saving setting: {e}", flush=True)
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def load_all_bot_settings() -> Dict[str, Any]:
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT key, value FROM bot_settings")
         rows = cursor.fetchall()
-        conn.close()
         settings = {}
         for row in rows:
             k = row["key"]
@@ -252,6 +258,12 @@ def load_all_bot_settings() -> Dict[str, Any]:
     except Exception as e:
         print(f"⚠️ Error loading bot settings: {e}", flush=True)
         return {}
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 # ============================================================
@@ -523,23 +535,30 @@ def get_live_pnl_summary(mode: Optional[str] = None) -> Dict[str, Any]:
 # ============================================================
 
 def sync_trades_to_json_backup():
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM trades ORDER BY id ASC")
         rows = cursor.fetchall()
-        conn.close()
 
         trades_list = [dict(row) for row in rows]
         with open(BACKUP_JSON_PATH, "w", encoding="utf-8") as f:
             json.dump(trades_list, f, indent=2)
     except Exception as e:
         print(f"⚠️ JSON backup sync error: {e}", flush=True)
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def restore_trades_from_json_backup():
     if not os.path.exists(BACKUP_JSON_PATH):
         return
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -578,9 +597,14 @@ def restore_trades_from_json_backup():
                         t.get("created_at") or datetime.now().astimezone().isoformat()
                     ))
                 conn.commit()
-        conn.close()
     except Exception as e:
         print(f"⚠️ Restore trades backup error: {e}", flush=True)
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 # ============================================================

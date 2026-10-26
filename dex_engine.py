@@ -10,9 +10,10 @@ import math
 import os
 import time
 import urllib.request
+import urllib.error
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN, InvalidOperation
 from typing import Dict, Any, List, Optional, Tuple, Union
 
 try:
@@ -69,20 +70,26 @@ def to_raw_units(amount: Union[float, int, str, Decimal], decimals: int) -> int:
     """
     if amount is None or amount == "":
         return 0
-    d_amount = Decimal(str(amount))
-    if d_amount <= 0:
+    try:
+        d_amount = Decimal(str(amount))
+        if d_amount <= 0:
+            return 0
+        factor = Decimal(10) ** decimals
+        return int((d_amount * factor).to_integral_value(rounding=ROUND_DOWN))
+    except (InvalidOperation, TypeError, ValueError, OverflowError):
         return 0
-    factor = Decimal(10) ** decimals
-    return int((d_amount * factor).to_integral_value(rounding=ROUND_DOWN))
 
 
 def from_raw_units(raw_amount: Union[int, str, Decimal], decimals: int) -> Decimal:
     """Safely convert raw integer on-chain units to human-readable Decimal without floating point loss."""
     if raw_amount is None or raw_amount == "":
         return Decimal("0")
-    d_raw = Decimal(str(raw_amount))
-    factor = Decimal(10) ** decimals
-    return d_raw / factor
+    try:
+        d_raw = Decimal(str(raw_amount))
+        factor = Decimal(10) ** decimals
+        return d_raw / factor
+    except (InvalidOperation, TypeError, ValueError, OverflowError):
+        return Decimal("0")
 
 
 def get_token_decimals(token_addr: str, fallback_decimals: int = 18) -> int:
@@ -123,6 +130,26 @@ def _next_rpc_id() -> int:
 # JSON-RPC CALLER WITH MULTI-ENDPOINT FALLBACK
 # ============================================================
 
+def _mask_url_credentials(url: str) -> str:
+    """Sanitize URL to avoid leaking API keys or credentials in error messages."""
+    if not url:
+        return ""
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        path_parts = parsed.path.strip("/").split("/")
+        masked_parts = []
+        for part in path_parts:
+            if len(part) >= 16 and (part.isalnum() or "-" in part):
+                masked_parts.append("[REDACTED_KEY]")
+            else:
+                masked_parts.append(part)
+        masked_path = "/" + "/".join(masked_parts) if masked_parts else ""
+        return f"{parsed.scheme}://{parsed.netloc}{masked_path}"
+    except Exception:
+        return "[REDACTED_URL]"
+
+
 def rpc_call(method: str, params: list, timeout_sec: float = 4.0) -> Any:
     """Execute a raw JSON-RPC call against primary or fallback RPC endpoints with HTTP keepalive."""
     endpoints = [config.RPC_URL]
@@ -147,12 +174,16 @@ def rpc_call(method: str, params: list, timeout_sec: float = 4.0) -> Any:
             try:
                 resp = _rpc_session.post(url, json=payload_dict, headers=headers, timeout=timeout_sec)
                 data = resp.json()
-                if "error" in data:
+                if isinstance(data, dict) and "error" in data:
                     last_error = data["error"]
                     continue
-                return data.get("result")
+                if isinstance(data, dict):
+                    return data.get("result")
+            except (requests.RequestException, json.JSONDecodeError, ValueError, KeyError) as exc:
+                last_error = f"{type(exc).__name__}: {str(exc)}"
+                continue
             except Exception as exc:
-                last_error = exc
+                last_error = f"UnexpectedRequestError: {type(exc).__name__}"
                 continue
 
         # Fallback: urllib standard library
@@ -164,15 +195,19 @@ def rpc_call(method: str, params: list, timeout_sec: float = 4.0) -> Any:
             )
             with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                if "error" in data:
+                if isinstance(data, dict) and "error" in data:
                     last_error = data["error"]
                     continue
-                return data.get("result")
+                if isinstance(data, dict):
+                    return data.get("result")
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError, ValueError, KeyError) as exc:
+            last_error = f"{type(exc).__name__}: {str(exc)}"
+            continue
         except Exception as exc:
-            last_error = exc
+            last_error = f"UnexpectedUrllibError: {type(exc).__name__}"
             continue
 
-    raise RuntimeError(f"RPC call failed across all endpoints for {method}: {last_error}")
+    raise RuntimeError(f"RPC call failed across all endpoints for {method}: {_mask_url_credentials(str(last_error))}")
 
 
 def get_block_number() -> int:
@@ -338,7 +373,10 @@ def get_dex_reserves(dex_name: str, base_sym: str = "WETH", quote_sym: str = "US
             f"(pair={pair_addr}). Refusing to use simulated pools outside MOCK mode."
         )
 
-    min_quote_reserve = float(os.getenv("MIN_POOL_LIQUIDITY_USD", "500.0"))
+    try:
+        min_quote_reserve = float(os.getenv("MIN_POOL_LIQUIDITY_USD", "500.0"))
+    except (ValueError, TypeError):
+        min_quote_reserve = 500.0
     if onchain_success and (base_reserve <= 0 or quote_reserve <= 0 or quote_reserve < min_quote_reserve):
         if not _is_mock_mode():
             raise RuntimeError(f"{dex_name} {base_sym}/{quote_sym} pool has negligible liquidity "
@@ -497,7 +535,10 @@ def estimate_arbitrage_gas_cost_usd(
     cid = int(chain_id if chain_id is not None else getattr(config, "CHAIN_ID", 42161))
     l1_fee_usd = 0.0
     if cid in (42161, 8453, 84532):
-        l1_fee_usd = float(getattr(config, "LIVE_L1_FEE_USD", 0.015))
+        try:
+            l1_fee_usd = float(getattr(config, "LIVE_L1_FEE_USD", 0.015))
+        except (ValueError, TypeError):
+            l1_fee_usd = 0.015
 
     total_gas_cost_usd = l2_gas_cost_usd + (l1_fee_usd if include_l1 else 0.0)
     total_gas_cost_eth = total_gas_cost_usd / eth_price_usd if eth_price_usd > 0 else l2_gas_cost_eth
