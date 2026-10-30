@@ -97,20 +97,51 @@ function setApiAuthToken(token) {
             url = resource;
         } else if (resource && resource.url) {
             url = resource.url;
+        } else if (resource && resource.href) {
+            url = resource.href;
         }
 
         if (url && (url.startsWith("/api/") || url.includes("/api/"))) {
             const token = getApiAuthToken();
             if (token) {
+                // If resource is Request instance, update its headers directly if mutable
+                if (typeof Request !== "undefined" && resource instanceof Request) {
+                    try {
+                        if (!resource.headers.has("Authorization")) {
+                            resource.headers.set("Authorization", "Bearer " + token);
+                        }
+                        if (!resource.headers.has("X-API-Token")) {
+                            resource.headers.set("X-API-Token", token);
+                        }
+                    } catch (_) {}
+                }
+
                 if (!init.headers) {
                     init.headers = {};
                 }
-                if (init.headers instanceof Headers) {
+                if (typeof Headers !== "undefined" && init.headers instanceof Headers) {
                     if (!init.headers.has("Authorization")) {
                         init.headers.set("Authorization", "Bearer " + token);
                     }
-                } else if (!init.headers["Authorization"] && !init.headers["authorization"]) {
-                    init.headers["Authorization"] = "Bearer " + token;
+                    if (!init.headers.has("X-API-Token")) {
+                        init.headers.set("X-API-Token", token);
+                    }
+                } else if (Array.isArray(init.headers)) {
+                    const hasAuth = init.headers.some(h => (h[0] || "").toLowerCase() === "authorization");
+                    if (!hasAuth) {
+                        init.headers.push(["Authorization", "Bearer " + token]);
+                    }
+                    const hasXToken = init.headers.some(h => (h[0] || "").toLowerCase() === "x-api-token");
+                    if (!hasXToken) {
+                        init.headers.push(["X-API-Token", token]);
+                    }
+                } else if (typeof init.headers === "object") {
+                    if (!init.headers["Authorization"] && !init.headers["authorization"]) {
+                        init.headers["Authorization"] = "Bearer " + token;
+                    }
+                    if (!init.headers["X-API-Token"] && !init.headers["x-api-token"]) {
+                        init.headers["X-API-Token"] = token;
+                    }
                 }
             }
         }
@@ -2325,7 +2356,13 @@ async function saveApiTokenFromSettings() {
 }
 
 async function testApiTokenFromSettings() {
-    const token = getApiAuthToken();
+    let token = getApiAuthToken();
+    const input = document.getElementById("cfgApiAuthToken");
+    if (!token && input && input.value && input.value.trim()) {
+        token = input.value.trim();
+        setApiAuthToken(token);
+        updateApiTokenUI();
+    }
     const statusEl = document.getElementById("cfgApiTokenStatus");
     if (!token) {
         if (statusEl) {

@@ -113,6 +113,110 @@ class TestApiSecurity(unittest.TestCase):
             config.API_AUTH_TOKEN = self.TEST_TOKEN
             os.environ["API_AUTH_TOKEN"] = self.TEST_TOKEN
 
+    def test_get_auth_verify_valid_token_returns_200(self):
+        """GET /api/auth/verify with valid Bearer token returns 200."""
+        res = self.client.get("/api/auth/verify", headers=self.valid_headers)
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data["success"])
+        self.assertIn("valid", data["message"].lower())
+        self.assertNotIn(self.TEST_TOKEN, res.get_data(as_text=True))
+
+    def test_get_auth_verify_missing_token_returns_401(self):
+        """GET /api/auth/verify without token returns 401."""
+        res = self.client.get("/api/auth/verify")
+        self.assertEqual(res.status_code, 401)
+        data = res.get_json()
+        self.assertFalse(data["success"])
+        self.assertIn("Unauthorized", data["message"])
+        self.assertNotIn(self.TEST_TOKEN, data["message"])
+
+    def test_get_auth_verify_invalid_token_returns_403(self):
+        """GET /api/auth/verify with invalid token returns 403."""
+        res = self.client.get("/api/auth/verify", headers=self.invalid_headers)
+        self.assertEqual(res.status_code, 403)
+        data = res.get_json()
+        self.assertFalse(data["success"])
+        self.assertIn("Forbidden", data["message"])
+        self.assertNotIn(self.TEST_TOKEN, data["message"])
+
+    def test_browser_style_bearer_variations(self):
+        """Browser requests with casing variations, extra spaces, and quotes pass authentication."""
+        variations = [
+            f"Bearer {self.TEST_TOKEN}",
+            f"bearer {self.TEST_TOKEN}",
+            f"BEARER {self.TEST_TOKEN}",
+            f"Bearer   {self.TEST_TOKEN}",  # multiple spaces
+            f"Bearer\t{self.TEST_TOKEN}",     # tab separator
+            f'Bearer "{self.TEST_TOKEN}"',   # double quoted
+            f"Bearer '{self.TEST_TOKEN}'",   # single quoted
+        ]
+        for header_val in variations:
+            res_get = self.client.get("/api/auth/verify", headers={"Authorization": header_val})
+            self.assertEqual(res_get.status_code, 200, f"Failed GET for Authorization: {header_val}")
+            self.assertTrue(res_get.get_json()["success"])
+
+            res_post = self.client.post("/api/auth/verify", headers={"Authorization": header_val})
+            self.assertEqual(res_post.status_code, 200, f"Failed POST for Authorization: {header_val}")
+            self.assertTrue(res_post.get_json()["success"])
+
+    def test_reverse_proxy_fallback_headers(self):
+        """Reverse proxy fallback headers (X-API-Token, X-API-Key, X-Auth-Token) succeed if Authorization stripped."""
+        fallback_headers = [
+            {"X-API-Token": self.TEST_TOKEN},
+            {"X-API-Key": self.TEST_TOKEN},
+            {"X-Auth-Token": self.TEST_TOKEN},
+            {"X-API-Token": f'"{self.TEST_TOKEN}"'},  # quoted
+        ]
+        for headers in fallback_headers:
+            res_get = self.client.get("/api/auth/verify", headers=headers)
+            self.assertEqual(res_get.status_code, 200, f"Failed GET for fallback headers: {headers}")
+
+            res_post = self.client.post("/api/auth/verify", headers=headers)
+            self.assertEqual(res_post.status_code, 200, f"Failed POST for fallback headers: {headers}")
+
+    def test_cors_preflight_and_response_headers(self):
+        """CORS preflight OPTIONS on protected endpoints allows configured origins and rejects unauthorized origins."""
+        with patch.dict(os.environ, {"CORS_ALLOWED_ORIGINS": "http://staging.dexbot.local,http://localhost:5000"}):
+            # Allowed origin preflight
+            res_opt = self.client.options("/api/auth/verify", headers={
+                "Origin": "http://staging.dexbot.local",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "authorization, content-type, x-api-token"
+            })
+            self.assertEqual(res_opt.status_code, 200)
+            self.assertEqual(res_opt.headers.get("Access-Control-Allow-Origin"), "http://staging.dexbot.local")
+            self.assertEqual(res_opt.headers.get("Access-Control-Allow-Credentials"), "true")
+            self.assertIn("Authorization", res_opt.headers.get("Access-Control-Allow-Headers", ""))
+            self.assertIn("X-API-Token", res_opt.headers.get("Access-Control-Allow-Headers", ""))
+            self.assertNotEqual(res_opt.headers.get("Access-Control-Allow-Origin"), "*")
+
+            # Allowed origin GET response
+            res_get = self.client.get("/api/auth/verify", headers={
+                "Origin": "http://staging.dexbot.local",
+                "Authorization": f"Bearer {self.TEST_TOKEN}"
+            })
+            self.assertEqual(res_get.status_code, 200)
+            self.assertEqual(res_get.headers.get("Access-Control-Allow-Origin"), "http://staging.dexbot.local")
+            self.assertEqual(res_get.headers.get("Access-Control-Allow-Credentials"), "true")
+            self.assertNotEqual(res_get.headers.get("Access-Control-Allow-Origin"), "*")
+
+            # Unauthorized origin preflight must be rejected
+            res_evil_opt = self.client.options("/api/auth/verify", headers={
+                "Origin": "http://malicious-attacker.com",
+                "Access-Control-Request-Method": "POST",
+            })
+            self.assertEqual(res_evil_opt.status_code, 403)
+            self.assertIsNone(res_evil_opt.headers.get("Access-Control-Allow-Origin"))
+
+            # Unauthorized origin GET must not reflect origin
+            res_evil_get = self.client.get("/api/auth/verify", headers={
+                "Origin": "http://malicious-attacker.com",
+                "Authorization": f"Bearer {self.TEST_TOKEN}"
+            })
+            self.assertEqual(res_evil_get.status_code, 200)
+            self.assertIsNone(res_evil_get.headers.get("Access-Control-Allow-Origin"))
+
     # ─────────────────────────────────────────────────────────────────────────
     # 3. SENSITIVE ENDPOINTS PROTECTION
     # ─────────────────────────────────────────────────────────────────────────

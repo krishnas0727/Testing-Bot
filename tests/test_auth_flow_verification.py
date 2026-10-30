@@ -60,6 +60,7 @@ def test_server_without_api_auth_token_returns_401():
         ("POST", "/api/settings", {"trade_amount": 10.0}),
         ("POST", "/api/trades/clear", {}),
         ("POST", "/api/auth/verify", {}),
+        ("GET", "/api/auth/verify", {}),
     ]
 
     for method, path, payload in protected_endpoints:
@@ -87,10 +88,15 @@ def test_server_with_token_rejects_unauthenticated_requests():
     assert res.status_code == 401
     assert "Missing Authorization header" in res.get_json()["message"]
 
-    # /api/auth/verify
+    # /api/auth/verify POST
     res = client.post("/api/auth/verify", json={})
     assert res.status_code == 401
     assert "Missing Authorization header" in res.get_json()["message"]
+
+    # /api/auth/verify GET
+    res_get = client.get("/api/auth/verify")
+    assert res_get.status_code == 401
+    assert "Missing Authorization header" in res_get.get_json()["message"]
 
     # /api/treasury/withdraw
     res = client.post("/api/treasury/withdraw", json={"token": "USDT", "amount": 5})
@@ -115,9 +121,13 @@ def test_server_with_token_rejects_invalid_token():
     assert res.status_code == 403
     assert "Invalid API authentication token" in res.get_json()["message"]
 
-    # /api/auth/verify with bad token
+    # /api/auth/verify POST with bad token
     res = client.post("/api/auth/verify", json={}, headers=headers)
     assert res.status_code == 403
+
+    # /api/auth/verify GET with bad token
+    res_get = client.get("/api/auth/verify", headers=headers)
+    assert res_get.status_code == 403
 
 
 def test_server_accepts_valid_bearer_token():
@@ -132,10 +142,14 @@ def test_server_accepts_valid_bearer_token():
         "Content-Type": "application/json"
     }
 
-    # 1. /api/auth/verify
-    res = client.post("/api/auth/verify", json={}, headers=headers)
-    assert res.status_code == 200
-    assert res.get_json()["success"] is True
+    # 1. /api/auth/verify POST & GET
+    res_post = client.post("/api/auth/verify", json={}, headers=headers)
+    assert res_post.status_code == 200
+    assert res_post.get_json()["success"] is True
+
+    res_get = client.get("/api/auth/verify", headers=headers)
+    assert res_get.status_code == 200
+    assert res_get.get_json()["success"] is True
 
     # 2. /api/trade (in MOCK mode - no real blockchain transaction executed)
     config.set_active_chain(8453)
@@ -145,8 +159,8 @@ def test_server_accepts_valid_bearer_token():
     # Crucially: it must NOT be rejected with 401 or 403
     assert res.status_code not in (401, 403), f"Expected auth to pass, got {res.status_code}"
     trade_data = res.get_json()
-    # Confirms request reached the trading engine (either executed MOCK or gated by profit/liquidity check)
-    assert trade_data.get("status") in ("TRADE SKIPPED", "EXECUTED", "MOCK", "NO ROUTE", "INSUFFICIENT BALANCE") or "trade" in str(trade_data).lower()
+    # Confirms request reached the trading engine (either executed MOCK or gated by profit/liquidity check or emergency stop)
+    assert trade_data.get("status") in ("TRADE SKIPPED", "EXECUTED", "MOCK", "NO ROUTE", "INSUFFICIENT BALANCE", "BLOCKED_EMERGENCY_STOP") or "trade" in str(trade_data).lower() or "emergency" in str(trade_data).lower()
 
     # 3. /api/settings POST
     res = client.post("/api/settings", json={"trade_amount": 2.5}, headers=headers)

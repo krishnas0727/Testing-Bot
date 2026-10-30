@@ -7,9 +7,11 @@ and credentials. Supports MOCK, TESTNET, and LIVE trading modes.
 import functools
 import hmac
 import os
+import re
 import sys
 import threading
 import time
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, Optional, List
 
@@ -109,6 +111,98 @@ from database import (
 
 app = Flask(__name__)
 SERVER_STARTED_AT = time.time()
+
+def get_cors_allowed_origins() -> set:
+    """Return configured set of allowed CORS origins.
+
+    Configured via CORS_ALLOWED_ORIGINS environment variable (comma-separated).
+    Defaults to local development and current host origins.
+    Never allows wildcard origins with credentials.
+    """
+    allowed = set()
+    env_origins = os.environ.get("CORS_ALLOWED_ORIGINS", "").strip()
+    if env_origins:
+        for orig in env_origins.split(","):
+            orig_clean = orig.strip().rstrip("/")
+            if orig_clean:
+                allowed.add(orig_clean)
+
+    # Local development origins
+    allowed.update({
+        "http://localhost:5000",
+        "http://127.0.0.1:5000",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    })
+
+    # Host-matching origin for current server
+    try:
+        host = request.host
+        if host:
+            allowed.add(f"http://{host}")
+            allowed.add(f"https://{host}")
+    except Exception:
+        pass
+
+    return allowed
+
+
+def is_cors_origin_allowed(origin: str) -> bool:
+    """Check if request origin is in explicitly allowed origins."""
+    if not origin:
+        return False
+    clean_origin = origin.strip().rstrip("/")
+    allowed = get_cors_allowed_origins()
+    return clean_origin in allowed
+
+
+@app.before_request
+def handle_cors_preflight():
+    """Handle CORS preflight OPTIONS requests before routing."""
+    if request.method == "OPTIONS" and request.path.startswith("/api/"):
+        origin = request.headers.get("Origin")
+        if origin:
+            if not is_cors_origin_allowed(origin):
+                return jsonify({
+                    "success": False,
+                    "message": "Forbidden: CORS origin not allowed."
+                }), 403
+            clean_origin = origin.strip().rstrip("/")
+            resp = jsonify({"success": True})
+            resp.headers["Access-Control-Allow-Origin"] = clean_origin
+            resp.headers["Access-Control-Allow-Credentials"] = "true"
+            resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+            resp.headers["Access-Control-Allow-Headers"] = (
+                "Authorization, Content-Type, X-API-Token, X-API-Key, X-Auth-Token, "
+                "X-Requested-With, Accept, Origin"
+            )
+            resp.headers["Access-Control-Max-Age"] = "86400"
+            resp.headers["Vary"] = "Origin"
+            return resp, 200
+        return jsonify({"success": True}), 200
+
+
+@app.after_request
+def add_cors_and_security_headers(response):
+    """Add defensive CORS and security headers for /api/ endpoints."""
+    if request.path.startswith("/api/"):
+        origin = request.headers.get("Origin")
+        if origin and is_cors_origin_allowed(origin):
+            clean_origin = origin.strip().rstrip("/")
+            response.headers["Access-Control-Allow-Origin"] = clean_origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = (
+                "Authorization, Content-Type, X-API-Token, X-API-Key, X-Auth-Token, "
+                "X-Requested-With, Accept, Origin"
+            )
+            response.headers["Access-Control-Max-Age"] = "86400"
+            response.headers["Vary"] = "Origin"
+        elif origin:
+            # Explicit Origin sent but not allowed: do not set Access-Control-Allow-Origin
+            response.headers["Vary"] = "Origin"
+
+    return response
 
 # Ensure database tables exist
 create_database()
@@ -453,6 +547,69 @@ start_background_auto_trader()
 # API AUTHENTICATION & SECURITY GUARDS
 # =====================================================
 
+def extract_token_from_request() -> str:
+    """Extract and sanitize token from Authorization or fallback headers.
+
+    Supports:
+    - Authorization: Bearer <token> (case-insensitive scheme, handles multiple spaces/tabs)
+    - Enclosing quotes stripping (e.g. "token" or 'token')
+    - Fallback headers: X-API-Token, X-API-Key, X-Auth-Token
+    Never logs or exposes the extracted token value.
+    """
+    raw_header = request.headers.get("Authorization", "").strip()
+    token = ""
+    if raw_header:
+        if len(raw_header) > 4096:
+            return ""
+        bearer_match = re.match(r"^[Bb][Ee][Aa][Rr][Ee][Rr]\s+(.+)$", raw_header)
+        if bearer_match:
+            token = bearer_match.group(1).strip()
+        elif raw_header.lower() in ("bearer", "bearer "):
+            token = ""
+        else:
+            token = raw_header
+
+    if not token:
+        raw_fallback = (
+            request.headers.get("X-API-Token")
+            or request.headers.get("X-API-Key")
+            or request.headers.get("X-Auth-Token")
+            or ""
+        ).strip()
+        if len(raw_fallback) <= 4096:
+            token = raw_fallback
+
+    # Strip enclosing quotes if present (e.g. from env files or copy-paste)
+    if (token.startswith('"') and token.endswith('"') and len(token) >= 2) or \
+       (token.startswith("'") and token.endswith("'") and len(token) >= 2):
+        token = token[1:-1].strip()
+
+    return token
+
+
+def is_valid_token(token: str, expected_token: str) -> bool:
+    """Safely validate token against expected_token in constant time."""
+    if not token or not expected_token:
+        return False
+    if len(token) > 4096 or len(expected_token) > 4096:
+        return False
+
+    # Primary constant-time comparison
+    if hmac.compare_digest(token, expected_token):
+        return True
+
+    # Safely handle percent-encoded tokens without denial-of-service risk
+    if "%" in token and len(token) <= 1024:
+        try:
+            unquoted = urllib.parse.unquote(token)
+            if hmac.compare_digest(unquoted, expected_token):
+                return True
+        except Exception:
+            pass
+
+    return False
+
+
 def require_api_auth(f=None, *, methods=None):
     """Secure API Authentication Decorator.
 
@@ -466,6 +623,16 @@ def require_api_auth(f=None, *, methods=None):
 
     @functools.wraps(f)
     def decorated_function(*args, **kwargs):
+        # Allow CORS preflight OPTIONS requests without credentials from allowed origins
+        if request.method == "OPTIONS":
+            origin = request.headers.get("Origin")
+            if origin and not is_cors_origin_allowed(origin):
+                return jsonify({
+                    "success": False,
+                    "message": "Forbidden: CORS origin not allowed."
+                }), 403
+            return jsonify({"success": True}), 200
+
         if methods and request.method not in methods:
             return f(*args, **kwargs)
 
@@ -479,16 +646,7 @@ def require_api_auth(f=None, *, methods=None):
                 "message": "Unauthorized: API_AUTH_TOKEN is not configured on the server."
             }), 401
 
-        auth_header = request.headers.get("Authorization", "").strip()
-        token = ""
-        if auth_header.startswith("Bearer "):
-            token = auth_header[7:].strip()
-        elif auth_header.startswith("bearer "):
-            token = auth_header[7:].strip()
-        elif auth_header:
-            token = auth_header
-        else:
-            token = (request.headers.get("X-API-Token") or request.headers.get("X-API-Key") or "").strip()
+        token = extract_token_from_request()
 
         if not token:
             return jsonify({
@@ -496,7 +654,7 @@ def require_api_auth(f=None, *, methods=None):
                 "message": "Unauthorized: Missing Authorization header (expected 'Authorization: Bearer <API_AUTH_TOKEN>')."
             }), 401
 
-        if not hmac.compare_digest(token, expected_token):
+        if not is_valid_token(token, expected_token):
             return jsonify({
                 "success": False,
                 "message": "Forbidden: Invalid API authentication token."
@@ -514,17 +672,8 @@ def is_request_authenticated() -> bool:
     ).strip()
     if not expected_token:
         return False
-    auth_header = request.headers.get("Authorization", "").strip()
-    token = ""
-    if auth_header.lower().startswith("bearer "):
-        token = auth_header[7:].strip()
-    elif auth_header:
-        token = auth_header
-    else:
-        token = (request.headers.get("X-API-Token") or request.headers.get("X-API-Key") or "").strip()
-    if not token:
-        return False
-    return hmac.compare_digest(token, expected_token)
+    token = extract_token_from_request()
+    return is_valid_token(token, expected_token)
 
 
 def mask_sensitive_address(addr: str) -> str:
@@ -2519,7 +2668,7 @@ def health_check():
     })
 
 
-@app.route("/api/auth/verify", methods=["POST"])
+@app.route("/api/auth/verify", methods=["GET", "POST"])
 @require_api_auth
 def verify_auth_api():
     """Verify that the provided API authentication token is valid."""
